@@ -157,5 +157,22 @@ const all = await ts.personSummary(env, "p1", "all");
 ok(all.from === "2026-10-05" && all.totals.visits >= sm.totals.visits, "all time starts at the first visit");
 ok((await ts.personSummary(env, "p2", "all")).sites.some(x => x.missed === 1), "missed sign-out flagged per site");
 ok((await ts.personSummary(env, "nobody", "all")).sites.length === 0, "summary: nobody else's visits");
+
+// ── Timesheet tab: any dates, chosen people ──
+const rp = ts.rangePeriod;
+ok(rp("2026-10-05","2026-10-11").label === "5 Oct – 11 Oct 2026" && rp("2026-10-05","2026-10-11").kind === "range", "range: label + kind");
+ok(rp("2026-10-11","2026-10-05").from === "2026-10-05", "range: back-to-front dates are swapped");
+ok(rp("2026-10-05","2026-10-05").file === "SiteLog-2026-10-05.pdf", "range: one day reads as a day");
+ok(rp("2025-12-29","2026-01-04").label.includes("2025") && rp("2026-01-01","2026-12-31").to === "2026-04-04", "range: across a year shows both years; capped at 93 days");
+ok(rp("bad","2026-10-05") === null, "range: bad date ignored");
+at("2026-10-14T12:00:00Z");
+const allP = await ts.loadPeriod(env, "2026-10-05", "2026-10-11");
+ok(allP.every(p => p.id), "every person carries their id");
+const one = await ts.pickPeople(env, allP, ["p1"]);
+ok(one.length === 1 && one[0].id === "p1", "pick: only the chosen person");
+const withEmpty = await ts.pickPeople(env, allP, ["p1", "p3"]);
+ok(withEmpty.length === 2 && withEmpty.find(p => p.id === "p3") && withEmpty.find(p => p.id === "p3").visits.length === 0, "pick: chosen person with no visits still listed");
+const pdf = await ts.buildPdf(env, "daily", "2026-10-14", { period: rp("2026-10-05","2026-10-11"), people: ["p1"] });
+ok(pdf.people.length === 1 && pdf.bytes.length > 1000 && pdf.per.kind === "range", "pdf: chosen people + range");
 globalThis.Date = realDate;
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

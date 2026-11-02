@@ -116,6 +116,44 @@
     .kpi b{ display:block; font-size:24px; color:var(--ml-blue); } .kpi span{ font-size:12.5px; color:var(--muted); }
     .kpi.bad b{ color:#b91c1c; } .kpi.good b{ color:#16a34a; }
     @media(min-width:900px){ .shell{ max-width:980px; } .ev{ grid-template-columns:220px 1fr auto; } .ev .pair{ grid-column:auto; } .ev .st{ grid-column:2/-1; } }
+    /* ── Timesheet tab — laid out like the emailed PDF ── */
+    body.wide .shell{ max-width:1080px; }
+    .tspick{ border:1px solid var(--border); border-radius:12px; max-height:240px; overflow:auto; padding:4px 10px; margin:6px 0 10px; }
+    .tspick label{ display:flex; gap:10px; align-items:center; padding:7px 0; border-bottom:1px solid #f1f3f6; font-size:14px; cursor:pointer; }
+    .tspick label:last-child{ border-bottom:none; }
+    .tspick input{ width:18px; height:18px; flex:none; }
+    .tspick .co{ color:var(--muted); font-size:12.5px; margin-left:auto; text-align:right; }
+    .tssel{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .tssel input[type=search]{ flex:1; min-width:160px; font:inherit; border:1px solid var(--border); border-radius:10px; padding:9px 11px; }
+    .sheet{ background:#fff; border:1px solid #dde2ea; border-radius:6px; margin-bottom:16px; overflow:hidden; box-shadow:0 6px 18px rgba(0,0,0,.08); }
+    .sheet-h{ background:#003366; color:#fff; display:flex; align-items:center; gap:14px; padding:12px 16px; flex-wrap:wrap; }
+    .sheet-h img{ height:34px; background:#fff; border-radius:3px; padding:2px 4px; }
+    .sheet-h .tt{ font-size:17px; font-weight:800; }
+    .sheet-h .st{ font-size:12.5px; color:#d6e2ff; }
+    .sheet-h .pr{ margin-left:auto; font-weight:700; font-size:14px; text-align:right; }
+    .sheet-b{ padding:14px 16px 10px; overflow-x:auto; }
+    .stab{ width:100%; border-collapse:collapse; font-size:13px; min-width:640px; }
+    .stab th{ background:#ebeff7; text-align:left; font-size:12px; padding:6px 8px; white-space:nowrap; }
+    .stab td{ padding:6px 8px; border-top:1px solid #eef1f5; vertical-align:middle; }
+    .stab .r{ text-align:right; }
+    .stab tr.z td{ background:#f8f9fb; }
+    .stab tr.red td{ background:#feefef; }
+    .stab tr.amb td{ background:#fff7e5; }
+    .stab tr.pur td{ background:#f3efff; }
+    .stab tr.tot td{ border-top:2px solid #cbd2dc; font-weight:800; background:#fff; }
+    .stab .nm{ font-weight:700; } .stab .gr{ color:var(--muted); }
+    .stab .c-red{ color:#dc2626; font-weight:700; } .stab .c-amb{ color:#d97706; font-weight:700; } .stab .c-pur{ color:#7c3aed; font-weight:700; }
+    .stab tr.newday td{ border-top:1px solid #cdd3dc; }
+    .tm{ display:inline-flex; gap:6px; align-items:center; white-space:nowrap; font-weight:700; }
+    .dot{ display:inline-flex; width:15px; height:15px; border-radius:50%; color:#fff; font-size:10px; font-weight:900; align-items:center; justify-content:center; }
+    .dot.y{ background:#16a34a; } .dot.n{ background:#dc2626; }
+    .tm a{ text-decoration:none; font-size:12px; }
+    .schips{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+    .schip{ background:#f2f4f8; border-radius:6px; padding:7px 12px; min-width:110px; }
+    .schip span{ display:block; font-size:11px; color:var(--muted); } .schip b{ font-size:16px; }
+    .slegend{ display:flex; flex-wrap:wrap; gap:6px 16px; font-size:11.5px; color:var(--muted); margin-top:10px; align-items:center; }
+    .slegend i{ display:inline-block; width:12px; height:10px; border-radius:2px; vertical-align:middle; margin-right:4px; }
+    .snote{ font-size:11.5px; color:var(--muted); margin:8px 0 0; }
   </style>
 </head>
 <body>
@@ -135,6 +173,7 @@
     <div class="tabs" id="tabs" style="margin:12px 0 0">
       <button data-tab="now" class="on">🟢 Now</button>
       <button data-tab="logs">📋 Logs</button>
+      <button data-tab="ts">🧾 Timesheet</button>
       <button data-tab="people">👷 People <span class="cnt" id="trCount" style="display:none"></span></button>
       <button data-tab="settings">⚙ Settings</button>
     </div>
@@ -175,6 +214,34 @@
       <p class="muted" style="margin:10px 0 0;font-size:12px"><span class="ok-tick">✓</span> = the phone was inside the site boundary when it signed in or out.
         <span class="no-tick">✗</span> = not checked (automatic sign-out, office edit, or before location checks began). 📍 Map shows exactly where the phone was.</p>
     </div>
+  </div>
+
+  <div id="pane-ts" style="display:none;">
+    <div class="card">
+      <h2>🧾 Timesheet</h2>
+      <p class="muted" style="margin:0 0 8px;">Pick the people and the dates. The sheet below is the same as the emailed PDF, and you can download it.</p>
+      <div class="chips" id="tsChips">
+        <button data-r="today">Today</button><button data-r="yesterday">Yesterday</button>
+        <button data-r="week" class="on">This week</button><button data-r="lastweek">Last week</button>
+        <button data-r="month">This month</button><button data-r="lastmonth">Last month</button>
+      </div>
+      <div class="lgbar">
+        <input type="date" id="tsFrom" aria-label="From"><span class="muted">to</span><input type="date" id="tsToD" aria-label="To">
+      </div>
+      <div class="tssel" style="margin-top:10px">
+        <input type="search" id="tsFind" placeholder="Find a person">
+        <button class="tsbtn" id="tsAll">Select all</button>
+        <button class="tsbtn" id="tsNone">Clear</button>
+      </div>
+      <div class="tspick" id="tsPick"><div class="muted" style="padding:8px 0">Loading people…</div></div>
+      <div class="tsbtns" style="margin-top:0">
+        <button class="tsbtn primary" id="tsView">Show timesheet</button>
+        <button class="tsbtn" id="tsDl">⬇ Download PDF</button>
+        <span class="muted" id="tsPickCount" style="align-self:center"></span>
+      </div>
+      <div class="msg" id="tsViewMsg"></div>
+    </div>
+    <div id="tsSheet"></div>
   </div>
 
   <div id="pane-people" style="display:none;">
@@ -398,6 +465,8 @@ function showTab(t){
   if (t === "now") { loadOnSite(); loadToday(); }
   if (t === "logs" && !loaded.logs) { loaded.logs = true; initLogs(); }
   if (t === "people") loadPeople();
+  document.body.classList.toggle("wide", t === "ts");
+  if (t === "ts" && !loaded.ts) { loaded.ts = true; initTs(); }
   if (t === "settings" && !loaded.settings) { loaded.settings = true; loadTimesheetCfg(); }
   try { history.replaceState(null, "", "#" + t); } catch(e){}
 }
@@ -439,6 +508,7 @@ function setRange(r){
 function openLogs(r){ if (!loaded.logs) { loaded.logs = true; initLogs(r); } else { setRange(r); loadLogs(); } showTabOnly("logs"); }
 function showTabOnly(t){ document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   document.querySelectorAll("[id^=pane-]").forEach(p => p.style.display = p.id === "pane-" + t ? "block" : "none");
+  document.body.classList.toggle("wide", t === "ts");
   try { history.replaceState(null, "", "#" + t); } catch(e){} }
 async function initLogs(r){
   setRange(r || "today");
@@ -727,6 +797,115 @@ async function loadTransfers(){
   }catch(e){ /* not an admin, or SiteLog unreachable — the Overview shows the error */ }
 }
 
+
+// ── Timesheet tab — the PDF on screen, for chosen people and dates ──────────
+const TS = { from:"", to:"", people:[], chosen:new Set(), seq:0 };
+function tsSetRange(r){
+  [TS.from, TS.to] = rangeFor(r); $("tsFrom").value = TS.from; $("tsToD").value = TS.to;
+  document.querySelectorAll("#tsChips button").forEach(b => b.classList.toggle("on", b.dataset.r === r));
+}
+function tsDrawPick(){
+  const q = ($("tsFind").value || "").trim().toLowerCase();
+  const list = TS.people.filter(p => !q || (p.name + " " + p.company).toLowerCase().includes(q));
+  $("tsPick").innerHTML = list.length ? list.map(p => `<label><input type="checkbox" data-pid="${esc(p.id)}"${TS.chosen.has(p.id) ? " checked" : ""}>
+    <b>${esc(p.name)}</b><span class="co">${esc(p.company)}</span></label>`).join("")
+    : `<div class="muted" style="padding:8px 0">Nobody matches.</div>`;
+  $("tsPick").querySelectorAll("input").forEach(i => i.onchange = () => { i.checked ? TS.chosen.add(i.dataset.pid) : TS.chosen.delete(i.dataset.pid); tsCount(); });
+  tsCount();
+}
+function tsCount(){ const n = TS.chosen.size; $("tsPickCount").textContent = n ? `${n} ${n === 1 ? "person" : "people"} chosen` : "Nobody chosen — everyone who was on site will show"; }
+function tsVisible(){ const q = ($("tsFind").value || "").trim().toLowerCase(); return TS.people.filter(p => !q || (p.name + " " + p.company).toLowerCase().includes(q)); }
+async function initTs(){
+  tsSetRange("week");
+  document.querySelectorAll("#tsChips button").forEach(b => b.onclick = () => { tsSetRange(b.dataset.r); tsLoad(); });
+  const onDate = () => { if ($("tsFrom").value && $("tsToD").value) { TS.from = $("tsFrom").value; TS.to = $("tsToD").value;
+    document.querySelectorAll("#tsChips button").forEach(b => b.classList.remove("on")); tsLoad(); } };
+  $("tsFrom").onchange = onDate; $("tsToD").onchange = onDate;
+  $("tsFind").oninput = tsDrawPick;
+  $("tsAll").onclick = () => { tsVisible().forEach(p => TS.chosen.add(p.id)); tsDrawPick(); };
+  $("tsNone").onclick = () => { TS.chosen.clear(); tsDrawPick(); };
+  $("tsView").onclick = tsLoad;
+  $("tsDl").onclick = tsDownload;
+  try { const d = await tsGet("/pickers"); TS.people = d.people.filter(p => !p.archived); tsDrawPick(); }
+  catch(e){ $("tsPick").innerHTML = `<div class="msg err">Couldn't load people: ${esc(e.message)}</div>`; }
+  tsLoad();
+}
+function tsQuery(){ return `from=${TS.from}&to=${TS.to}` + (TS.chosen.size ? `&people=${encodeURIComponent([...TS.chosen].join(","))}` : ""); }
+async function tsLoad(){
+  const seq = ++TS.seq;
+  $("tsViewMsg").className = "msg"; $("tsViewMsg").textContent = "";
+  $("tsSheet").innerHTML = `<div class="card muted">Loading timesheet…</div>`;
+  try {
+    const d = await tsGet(`/data?${tsQuery()}`);
+    if (seq !== TS.seq) return;
+    $("tsSheet").innerHTML = tsRender(d);
+  } catch(e){ if (seq === TS.seq) $("tsSheet").innerHTML = `<div class="card"><div class="msg err">Couldn't load: ${esc(e.message)}</div></div>`; }
+}
+function tsDot(ok){ return `<span class="dot ${ok ? "y" : "n"}">${ok ? "✓" : "✗"}</span>`; }
+function tsHead(title, sub, period){
+  return `<div class="sheet-h"><img src="/mostlane-logo.jpg" alt="" onerror="this.remove()"><div><div class="tt">${esc(title)}</div><div class="st">${esc(sub)}</div></div><div class="pr">${esc(period)}</div></div>`;
+}
+const TS_LEGEND = `<div class="slegend"><span>${tsDot(true)} GPS verified at the site</span><span>${tsDot(false)} Not verified</span>
+  <span><i style="background:#feefef;border:1px solid #f2b3b3"></i>Missed sign-out</span><span><i style="background:#fff7e5;border:1px solid #f2d199"></i>Still signed in</span>
+  <span><i style="background:#f3efff;border:1px solid #ccb8fa"></i>Scanned but not confirmed</span></div>`;
+function tsRender(d){
+  const per = d.period || {}, people = d.people || [];
+  const title = per.kind === "range" ? "SiteLog timesheet" : per.kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet";
+  const tot = { mins:0, missed:0, open:0, unver:0, visits:0 };
+  const rows = people.map((p, i) => {
+    const t = p.totals; tot.mins += t.mins; tot.missed += t.missed; tot.open += t.open; tot.unver += t.unver; tot.visits += t.visits;
+    const cls = t.missed ? "red" : t.scanned ? "pur" : (t.unver ? "red" : (i % 2 ? "z" : ""));
+    return `<tr class="${cls}"><td class="nm">${esc(p.name)}</td><td class="gr">${esc(p.company)}</td><td class="r">${t.visits}</td>
+      <td class="r nm">${hm(t.mins)}</td><td class="r ${t.missed ? "c-red" : ""}">${t.missed}</td><td class="r ${t.open ? "c-amb" : ""}">${t.open}</td>
+      <td class="r ${t.unver ? "c-red" : ""}">${t.unver}</td></tr>`;
+  }).join("");
+  let html = `<div class="sheet">${tsHead(title, "Summary — " + (TS.chosen.size ? "chosen people" : "everyone"), per.label || "")}<div class="sheet-b">
+    <table class="stab"><thead><tr><th>Person</th><th>Company</th><th class="r">Visits</th><th class="r">Hours on site</th><th class="r">Missed sign-outs</th><th class="r">Still in</th><th class="r">Not verified</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7" class="gr">Nobody signed in to a site in this period.</td></tr>`}
+    <tr class="tot"><td>Total</td><td></td><td class="r">${tot.visits}</td><td class="r">${hm(tot.mins)}</td><td class="r ${tot.missed ? "c-red" : ""}">${tot.missed}</td><td class="r">${tot.open}</td><td class="r ${tot.unver ? "c-red" : ""}">${tot.unver}</td></tr></tbody></table>
+    <p class="snote">Hours on site include visits the system closed automatically (missed sign-outs) — those times are an assumption, not a scan.</p>
+    <p class="snote">Purple rows: scanned the QR code but never pressed Sign in / Sign out — the scan time is used because nothing else was recorded.</p>${TS_LEGEND}</div></div>`;
+  for (const p of people) {
+    const t = p.totals;
+    const chip = (l, v, c) => `<div class="schip"><span>${l}</span><b class="${c || ""}">${v}</b></div>`;
+    let chips = chip("Hours on site", hm(t.mins)) + chip("Visits", t.visits) + chip("Missed sign-outs", t.missed, t.missed ? "c-red" : "") + chip("Not verified", t.unver, t.unver ? "c-red" : "");
+    if (t.scanned) chips += chip("Scanned, not confirmed", t.scanned, "c-pur");
+    if (t.open) chips += chip("Still signed in", t.open, "c-amb");
+    let last = "";
+    const vrows = p.visits.map((v, i) => {
+      const cls = v.state === "scanned" ? "pur" : v.state === "auto" ? "red" : v.state === "open" ? "amb" : (i % 2 ? "z" : "");
+      const nd = v.date !== last; const dateCell = nd ? esc(v.date) : ""; last = v.date;
+      const map = u => u ? ` <a href="${esc(u)}" target="_blank" rel="noopener" title="Where the phone was">📍</a>` : "";
+      const inCell = `<span class="tm"><span class="${v.scannedIn ? "c-pur" : ""}">${esc(v.inTime || "")}</span>${tsDot(!!v.inOk)}${map(v.mapIn)}</span>`;
+      const noOut = v.state === "open" || (v.state === "scanned" && !v.outTime);
+      const outCell = noOut ? `<span class="${v.state === "open" ? "c-amb" : "c-pur"}">—</span>`
+        : `<span class="tm"><span class="${v.state === "auto" ? "c-red" : v.state === "scanned" && v.scannedOut ? "c-pur" : ""}">${esc(v.outTime || "")}</span>${tsDot(!!v.outOk)}${map(v.mapOut)}</span>`;
+      const hrs = v.state === "open" || (v.state === "scanned" && !v.scannedOut) ? "—" : hm(v.mins);
+      const ncls = v.state === "scanned" ? "c-pur" : v.state === "auto" ? "c-red" : v.state === "open" ? "c-amb" : "gr";
+      return `<tr class="${cls}${nd && i ? " newday" : ""}"><td class="nm">${dateCell}</td><td>${esc(v.site)}</td><td>${inCell}</td><td>${outCell}</td><td class="r">${hrs}</td><td class="${ncls}" style="font-size:12px">${esc(v.note || "")}</td></tr>`;
+    }).join("");
+    html += `<div class="sheet">${tsHead(title, p.name + (p.company ? " — " + p.company : ""), per.label || "")}<div class="sheet-b">
+      <div class="schips">${chips}</div>
+      <table class="stab"><thead><tr><th>Date</th><th>Site</th><th>Signed in</th><th>Signed out</th><th class="r">Hours</th><th>Notes</th></tr></thead>
+      <tbody>${vrows || `<tr><td colspan="6" class="gr">No visits.</td></tr>`}</tbody></table>${TS_LEGEND}</div></div>`;
+  }
+  return html;
+}
+async function tsDownload(){
+  const btn = $("tsDl"); btn.disabled = true; const was = btn.textContent; btn.textContent = "Building the PDF…";
+  $("tsViewMsg").className = "msg"; $("tsViewMsg").textContent = "";
+  try {
+    const r = await authFetch(`${API}/sitelog-ts/pdf`, { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ from: TS.from, to: TS.to, people: [...TS.chosen] }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Couldn't build the PDF");
+    const name = ((r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || (TS.from === TS.to ? `SiteLog-${TS.from}.pdf` : `SiteLog-${TS.from}-to-${TS.to}.pdf`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch(e){ $("tsViewMsg").className = "msg err"; $("tsViewMsg").textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+
 // ── Start-up (admins) — last, once everything above is defined ──
 if (IS_ADMIN) {
   $("tabs").style.display = "flex";
@@ -735,7 +914,7 @@ if (IS_ADMIN) {
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
   loadTransfers();
   const h = (location.hash || "").slice(1);
-  showTab(["now","logs","people","settings"].includes(h) ? h : "now");
+  showTab(["now","logs","ts","people","settings"].includes(h) ? h : "now");
   setInterval(() => { if (document.visibilityState === "visible" && $("pane-now").style.display === "block") loadOnSite(); }, 60000);
 }
 

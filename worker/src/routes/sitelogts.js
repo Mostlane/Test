@@ -153,7 +153,7 @@ export async function loadPeriod(env, from, to, opts = {}) {
   const byPerson = new Map();
   const ensure = (key, first, last, company) => {
     const name = [first, last].filter(Boolean).join(" ").trim() || "Unknown person";
-    if (!byPerson.has(key)) byPerson.set(key, { name, company: company || "", visits: [] });
+    if (!byPerson.has(key)) byPerson.set(key, { id: key, name, company: company || "", visits: [] });
     return byPerson.get(key);
   };
   const dayLabel = day => niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
@@ -554,13 +554,44 @@ export async function logPickers(env) {
   return { ok: true, people, sites };
 }
 
-export async function buildPdf(env, kind, dateKey) {
-  const per = periodFor(kind, dateKey);
-  const people = await loadPeriod(env, per.from, per.to);
+// A hand-picked period (the portal's Timesheet tab): any from–to, capped.
+export function rangePeriod(from, to) {
+  const ok = k => /^\d{4}-\d{2}-\d{2}$/.test(k || "");
+  if (!ok(from) || !ok(to)) return null;
+  if (to < from) [from, to] = [to, from];
+  if (addDays(from, MAX_RANGE_DAYS) < to) to = addDays(from, MAX_RANGE_DAYS);
+  if (from === to) return Object.assign(periodFor("daily", from), { kind: "range" });
+  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  const label = `${niceDate(from, sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" })} – ${niceDate(to, { day: "numeric", month: "short", year: "numeric" })}`;
+  return { kind: "range", from, to, label, file: `SiteLog-${from}-to-${to}.pdf` };
+}
+// Keep only the chosen people, in name order — and include a chosen person with
+// no visits in the period as an empty entry, so the sheet says "No visits"
+// rather than leaving them off.
+export async function pickPeople(env, people, ids) {
+  const want = [...new Set((ids || []).map(String).filter(Boolean))];
+  if (!want.length) return people;
+  const set = new Set(want);
+  const out = people.filter(p => set.has(p.id));
+  const have = new Set(out.map(p => p.id));
+  const missing = want.filter(id => !have.has(id));
+  if (missing.length) {
+    const rows = ((await env.SITELOG_DB.prepare(`SELECT id, first_name, last_name, company FROM people WHERE id IN (${missing.map(() => "?").join(",")})`)
+      .bind(...missing).all()).results || []);
+    for (const r of rows) out.push({ id: r.id, name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || "Unknown person", company: r.company || "", visits: [] });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+const idList = v => (Array.isArray(v) ? v : String(v || "").split(",")).map(s => String(s).trim()).filter(Boolean).slice(0, 300);
+
+export async function buildPdf(env, kind, dateKey, opts = {}) {
+  const per = opts.period || periodFor(kind, dateKey);
+  let people = await loadPeriod(env, per.from, per.to);
+  if (opts.people && opts.people.length) people = await pickPeople(env, people, opts.people);
   let logo = null; try { logo = logoBytes(); } catch (e) {}
   const now = london();
   const bytes = buildSiteLogTimesheetPdf({
-    title: kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
+    title: per.kind === "range" ? "SiteLog timesheet" : kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
     periodLabel: per.label,
     generatedAt: `${niceDate(now.key, { day: "numeric", month: "short", year: "numeric" })} ${now.hhmm}`,
     people, logo,
@@ -829,9 +860,10 @@ export async function handle(request, env, ctx, url, sess) {
     const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
     const qd = url.searchParams.get("date") || "";
     const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london().key;
-    const per = periodFor(k, d);
+    const per = rangePeriod(url.searchParams.get("from"), url.searchParams.get("to")) || periodFor(k, d);
+    const pick = idList(url.searchParams.get("people"));
     let people;
-    try { people = await loadPeriod(env, per.from, per.to); }
+    try { people = await loadPeriod(env, per.from, per.to); if (pick.length) people = await pickPeople(env, people, pick); }
     catch (e) { return error(e.message || "SiteLog unavailable", 503, env, request); }
     await addMapLinks(env, apiOrigin(env, url), people, MAP_TTL_VIEW);
     return json({ ok: true, period: per, today: london().key,
@@ -876,7 +908,11 @@ export async function handle(request, env, ctx, url, sess) {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date
     : (kind === "weekly" ? addDays(london().key, -7) : london().key);
   if (path === "/pdf" && request.method === "POST") {
-    const { per, bytes } = await buildPdf(env, kind, date);
+    const custom = rangePeriod(body.from, body.to);
+    let built;
+    try { built = await buildPdf(env, kind, date, { period: custom, people: idList(body.people) }); }
+    catch (e) { return error(e.message || "SiteLog unavailable", 503, env, request); }
+    const { per, bytes } = built;
     return new Response(bytes, { headers: Object.assign({
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="${per.file}"`,
