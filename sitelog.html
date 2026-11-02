@@ -8,7 +8,8 @@
   <script src="auth.js"></script>
   <style>
     :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --green:#0e7a3b; }
-    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; }
+    html{ background:#e6e8eb; } body{ background:transparent; }
     .shell{ max-width:640px; margin:20px auto 40px; padding:0 12px; }
     .card{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
@@ -357,7 +358,7 @@ async function loadToday(){
   try{
     const t = londonToday(), d = await tsGet(`/logs?from=${t}&to=${t}`), s = d.summary;
     const k = (n, label, cls, filter) => `<div class="kpi ${cls||""}" data-f="${filter||""}"><b>${n}</b><span>${label}</span></div>`;
-    $("todayKpis").innerHTML = k(s.people, "people signed in", "", "") + k(hm(s.mins), "hours so far", "", "") +
+    $("todayKpis").innerHTML = k(s.people, "people signed in", "", "") + k(hm(s.mins + (s.soFar || 0)), "hours so far", "", "") +
       k(s.open, "still on site", "", "") +
       k(s.missed, "missed sign-outs", s.missed ? "bad" : "good", "issues") +
       k(s.refused, "failed scans", s.refused ? "bad" : "good", "issues") +
@@ -428,7 +429,7 @@ function renderLogs(){
   const d = LG.data; if (!d) return;
   const s = d.summary;
   const pill = (n, txt, cls) => n ? `<span class="pill ${cls}">${n} ${txt}</span>` : "";
-  $("lgSum").innerHTML = `<span class="pill ok">${s.people} ${s.people === 1 ? "person" : "people"} · ${hm(s.mins)}</span>` +
+  $("lgSum").innerHTML = `<span class="pill ok">${s.people} ${s.people === 1 ? "person" : "people"} · ${hm(s.mins)}${s.soFar ? ` + ${hm(s.soFar)} so far` : ""}</span>` +
     pill(s.missed, s.missed === 1 ? "missed sign-out" : "missed sign-outs", "bad") + pill(s.refused, s.refused === 1 ? "failed scan" : "failed scans", "bad") +
     pill(s.scanned, "scanned, not confirmed", "scn") + pill(s.open, "still on site", "amb") +
     (s.missed + s.refused + s.scanned + s.open ? `<label class="pill" style="cursor:pointer;background:#f1f5f9"><input type="checkbox" id="lgOnly" ${LG.onlyIssues ? "checked" : ""} style="vertical-align:-2px"> only show problems</label>` : "");
@@ -450,7 +451,7 @@ function renderLogs(){
     let last = "", body = "";
     items.forEach(it => { if (multiDay && it.day !== last) { body += `<div class="dayh">${esc(it.date)}</div>`; last = it.day; } body += it.html; });
     return `<details class="lp ${cls}"${autoOpen ? " open" : ""}><summary><span class="nm">${esc(p.name)}</span><span class="co">${esc(p.company || "")}</span>
-      <span class="hrs">${hm(t.mins)}</span><span class="badges">${badges}<span class="muted" style="font-size:12px">${t.visits} visit${t.visits === 1 ? "" : "s"}</span></span></summary>${body}</details>`;
+      <span class="hrs">${t.soFar && !t.mins ? `${hm(t.soFar)}<small class="muted" style="display:block;font-size:11px;font-weight:600">so far</small>` : hm(t.mins) + (t.soFar ? `<small class="muted" style="display:block;font-size:11px;font-weight:600">+ ${hm(t.soFar)} so far</small>` : "")}</span><span class="badges">${badges}<span class="muted" style="font-size:12px">${t.visits} visit${t.visits === 1 ? "" : "s"}</span></span></summary>${body}</details>`;
   }).join("");
 }
 function visitRow(v){
@@ -465,7 +466,7 @@ function visitRow(v){
   return `<div class="ev ${v.state === "ok" || v.state === "moved" || v.state === "manual" ? "" : v.state}">
     <span class="site">${esc(v.site)}</span>
     <span class="pair">${inPart}${outPart}</span>
-    <span class="dur">${noHours ? "–" : hm(v.mins)}</span>
+    <span class="dur">${v.state === "open" && v.soFar ? `<span title="Still signed in — counted when they sign out">${hm(v.soFar)} so far</span>` : noHours ? "–" : hm(v.mins)}</span>
     <span class="st"><span class="pill ${st[1]}">${esc(st[0])}</span> ${v.state === "ok" ? "" : `<span class="muted">${esc(v.note || "")}</span>`}</span></div>`;
 }
 function refusedRow(r){
