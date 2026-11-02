@@ -6562,6 +6562,9 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `scannedOut`), purple in the portal Day/Week view, the PDF (row + legend + chip) and the email
   line; `personTotals().scanned`. Real-data cases it was built against: a sign-in scan at another
   site while still signed in (ignored), a re-scan before a later confirmed sign-out (ignored).
+  **A "sign out?" offer within 60 min of the sign-in is NEVER used as the out time** (`EARLY_OUT_MS`, also the Now list):
+  it's the app re-checking (before 2 Nov rechecks were logged as scans) — Oleh 28 Oct got 0h 16m from an 08:17 offer
+  15 min after signing in; now that day reads as a missed sign-out to 16:00.
   A sign-in scan within 30 min AFTER a real sign-out is also ignored (someone walking off — Zane's
   daily 16:08 'North Road' scan as he leaves Jubilee Street).
   **📍 Location map per event (21 Oct 2026).** Every sign-in / sign-out with a stored fix (visits

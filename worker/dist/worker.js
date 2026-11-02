@@ -10259,7 +10259,7 @@ async function loadPeriod(env, from, to, opts = {}) {
       const limit = outD ? outD.getTime() : Infinity;
       for (const s of scansBy.get(r.person_id) || []) {
         const t = s._d.getTime();
-        if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
+        if (s.outcome !== "confirm_sign_out" || t < inD.getTime() + EARLY_OUT_MS || t > limit) continue;
         if (london(s._d).key !== day || !plausible(s._d)) continue;
         scannedOut = s._d;
         scannedOutAt = s;
@@ -10646,7 +10646,7 @@ async function liveNow(env, origin) {
     if (kind === "offered_out") {
       const ov = mine.find((v) => v.site === r.site && v.tout == null && v.tin <= t);
       if (!ov) continue;
-      if (t - ov.tin < 20 * 6e4) continue;
+      if (t - ov.tin < EARLY_OUT_MS) continue;
       visitId = ov.id;
     }
     const key = (r.person_id || "dev:" + (r.device_token || "?")) + "|" + (r.site || "") + "|" + kind;
@@ -11145,7 +11145,7 @@ async function handle5(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, softReady, REFUSAL_TEXT, MAX_RANGE_DAYS, idList, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
+var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, EARLY_OUT_MS, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, softReady, REFUSAL_TEXT, MAX_RANGE_DAYS, idList, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
 var init_sitelogts = __esm({
   "src/routes/sitelogts.js"() {
     init_http();
@@ -11162,6 +11162,7 @@ var init_sitelogts = __esm({
     dow = (key) => (/* @__PURE__ */ new Date(key + "T12:00:00Z")).getUTCDay();
     mondayOf2 = (key) => addDays(key, -((dow(key) + 6) % 7));
     num = (v) => v === null || v === void 0 || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+    EARLY_OUT_MS = 60 * 6e4;
     SCAN_EARLY = 5 * 60;
     SCAN_LATE = 21 * 60;
     PRE_CONFIRM_MS = 20 * 6e4;
