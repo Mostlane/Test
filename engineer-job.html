@@ -65,6 +65,10 @@
     .au-refs{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0 2px}
     .au-lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
     .au-ref,.au-done{width:60px;height:60px;border-radius:10px;object-fit:cover;border:1px solid var(--line);cursor:pointer;background:#eef2f6}
+    .au-note{margin-top:10px}
+    .au-note .au-lbl{display:block;margin-bottom:4px}
+    .au-note-opt{font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)}
+    .au-note-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;color:#0f2438;background:#fff;resize:vertical;min-height:40px}
     .au-done{border-color:#58b784}
     .au-foot{display:flex;align-items:center;gap:10px;margin-top:10px}
     .au-add{background:var(--accent);color:#fff;border:none}
@@ -614,7 +618,7 @@
     // just needs its pack (reason + what's needed) like a normal job, so the
     // engineer can park a part-finished works job for office approval.
     if(jobIsAudit()){
-      if(chosen==="Complete"){ var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; }
+      if(chosen==="Complete"){ if(isFullAccess()) return []; var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; }
       if(chosen==="On Hold"){ var hm2=[]; if(!ntrim("holdReason"))hm2.push("the reason"); if(!ntrim("holdNeeds"))hm2.push("what's needed to resume"); return hm2; }
       return null;
     }
@@ -1084,6 +1088,9 @@
   function auditPendingIds(){ var s={}; (pendingPhotos||[]).forEach(function(p){ if(p.kind==="audit" && (p.stage||"done")!=="extra") s[p.itemId]=true; }); return s; }
   function renderAuditList(){
     var host=$("auditList"); if(!host) return;
+    // Don't blow away a note the engineer is mid-way through typing on a
+    // background re-render (the note value is already kept on job.auditItems).
+    if(host.querySelector(".au-note-in:focus")) return;
     var items=(job&&job.auditItems)||[]; var pend=auditPendingIds();
     var tasks=items.filter(function(it){return it&&!it.header;});
     var doneCount=tasks.filter(function(it){return it.done&&it.donePhoto;}).length;
@@ -1109,12 +1116,21 @@
         (refs?'<div class="au-refs"><span class="au-lbl">Reference</span>'+refs+'</div>':'')+
         (extra?'<div class="au-refs"><span class="au-lbl">Added on site</span>'+extra+'</div>':'')+
         '<div class="au-foot">'+doneImg+action+addExtra+'</div>'+
+        '<div class="au-note"><label class="au-lbl">Notes <span class="au-note-opt">(optional)</span></label>'+
+          '<textarea class="au-note-in" rows="2" data-note="'+esc(it.id)+'" placeholder="Add a note (optional)">'+esc(it.note||"")+'</textarea></div>'+
       '</div>';
     }).join("") || '<div class="hint">No items on this audit.</div>';
     [].forEach.call(host.querySelectorAll("[data-add]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-add")); }; });
     [].forEach.call(host.querySelectorAll("[data-redo]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-redo")); }; });
     [].forEach.call(host.querySelectorAll("[data-extra]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-extra"),"extra"); }; });
     [].forEach.call(host.querySelectorAll(".au-ref,.au-done"),function(im){ im.onclick=function(){ var f=im.getAttribute("data-full"); if(f) openAuditImg(f); }; });
+    [].forEach.call(host.querySelectorAll(".au-note-in"),function(t){
+      var id=t.getAttribute("data-note"), tmr=null;
+      function save(){ var it=(job.auditItems||[]).find(function(x){return x.id===id;}); if(it) it.note=t.value;
+        jfetch("/jobs/"+encodeURIComponent(jobId)+"/audit-item",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({itemId:id,note:t.value})}).catch(function(){}); }
+      t.addEventListener("input",function(){ var it=(job.auditItems||[]).find(function(x){return x.id===id;}); if(it) it.note=t.value; clearTimeout(tmr); tmr=setTimeout(save,900); });
+      t.addEventListener("blur",function(){ clearTimeout(tmr); save(); });
+    });
   }
   // Camera-or-gallery chooser (shared with remedials/cert/pump forms). Photo areas
   // that AREN'T "live only" call this: it asks the engineer, then opens the given
