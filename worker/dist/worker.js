@@ -13450,6 +13450,27 @@ async function handleInner(request, env, ctx) {
     const guard = requireAdmin2();
     if (guard) return guard;
     const site = url.searchParams.get("site") || "";
+    if (!site) {
+      const all = await env.SITELOG_DB.prepare(`
+          SELECT v.id as visit_id, v.person_id, v.site_code, v.check_in_at, p.first_name, p.last_name, p.company
+          FROM visits v
+          JOIN people p ON v.person_id = p.id
+          WHERE v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0
+          ORDER BY v.site_code, v.check_in_at
+        `).all();
+      const people2 = (all.results || []).map((r) => {
+        const t = r.check_in_at ? String(r.check_in_at) : "";
+        return {
+          visit_id: r.visit_id,
+          person_id: r.person_id || "",
+          name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+          company: r.company || "",
+          site: r.site_code || "",
+          check_in_at: t && !/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t.replace(" ", "T") + "Z" : t
+        };
+      });
+      return json4({ people: people2 });
+    }
     const rows = await env.SITELOG_DB.prepare(`
         SELECT v.id as visit_id, v.person_id, p.first_name, p.last_name, p.company
         FROM visits v
