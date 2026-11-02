@@ -161,6 +161,13 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   per-page `body{background:… url(Mostlane_Embossed.png) …}` copies were
   stripped so nothing doubles. Standalone sub-apps under /fsm and /vehicles
   keep their own copy (they don't load portal-config.js).
+  **A page must NOT paint both `html` and `body` (2 Nov 2026).** With html left
+  transparent the browser moves body's colour onto the canvas, BEHIND the
+  watermark — fine. But `html,body{background:X}` paints body as a box OVER the
+  `z-index:-1` layer and hides it. Put the page colour on `html` and make
+  `body{background:transparent}`. Fixed on 15 pages (site-arrival, sitelog,
+  cpd, cpd-admin, customers, daily-logs, day-sessions, health, job-durations,
+  my-day, oncall-history, oncall_current, settings, stats, job-view).
 - View As (owner only, OWNER="Jamie Line"), Story Mode "⚡ My Day" button.
   The purple "Viewing as…" return bar (fixed bottom:0) now **lifts the field
   app's `.tabbar` above itself** (addBar measures its height, sets the tabbar's
