@@ -1122,12 +1122,16 @@ function renderAuditView(){
   if(auditViewTimer){ clearInterval(auditViewTimer); auditViewTimer = null; }
   if(!items.length){ card.style.display = "none"; return; }
   card.style.display = "";
-  const doneN = items.filter(it => it.done && it.donePhoto).length;
-  const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + items.length + " done";
+  const tasks = items.filter(it => it && !it.header);
+  const doneN = tasks.filter(it => it.done && it.donePhoto).length;
+  const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + tasks.length + " done";
   const cell = (p, cls, label) => p && (p.url || p.thumb)
     ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt="" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}"><figcaption>'+label+'</figcaption></figure>'
     : '<figure class="au-cell au-empty"><div class="au-ph">—</div><figcaption>'+label+'</figcaption></figure>';
+  let n = 0;
   const rowsHtml = items.map((it, i) => {
+    if(it && it.header){ return '<div class="au-row-sec" style="font-weight:800;color:#003468;margin:14px 0 6px;padding-bottom:4px;border-bottom:2px solid #e2e8f0">'+esc(it.text||"")+'</div>'; }
+    n++;
     const refs = (it.refPhotoUrls || []);
     const extras = (it.extraPhotoUrls || []);
     const refHtml = refs.length ? refs.map(p => cell(p, "au-img", "Reference")).join("") : cell(null, "", "Reference");
@@ -1135,13 +1139,13 @@ function renderAuditView(){
     const extraHtml = extras.map((p,k) => cell(p, "au-img", "Added " + (k+1))).join("");
     const when = (it.done && it.doneAt) ? ('<span class="sub">✓ ' + esc(it.doneBy || "") + (it.doneAt ? ' · ' + fmtWhen(it.doneAt) : '') + '</span>') : '<span class="sub" style="color:#b45309;">Outstanding</span>';
     return '<div class="au-row'+((it.done&&it.donePhoto)?' done':'')+'">'+
-      '<div class="au-row-h"><span class="au-num">'+(i+1)+'</span><div class="au-txt">'+esc(it.text||"")+'</div>'+when+'</div>'+
+      '<div class="au-row-h"><span class="au-num">'+n+'</span><div class="au-txt">'+esc(it.text||"")+'</div>'+when+'</div>'+
       '<div class="au-imgs">'+refHtml+doneHtml+extraHtml+'</div></div>';
   }).join("");
   // Collapsible: the summary is always visible; expand to see every item + photos.
   const wasOpen = (()=>{ const d = $("auditBody").querySelector("details"); return d ? d.open : true; })();
   $("auditBody").innerHTML =
-    '<details '+(wasOpen?'open':'')+'><summary style="cursor:pointer;font-weight:700;color:#003468;margin:2px 0 8px;user-select:none">Each item &amp; photos ('+doneN+' / '+items.length+' complete)</summary>'
+    '<details '+(wasOpen?'open':'')+'><summary style="cursor:pointer;font-weight:700;color:#003468;margin:2px 0 8px;user-select:none">Each item &amp; photos ('+doneN+' / '+tasks.length+' complete)</summary>'
     + rowsHtml + '</details>';
   // Open any thumbnail full-size in the existing photo modal.
   [].forEach.call($("auditBody").querySelectorAll("img[data-full]"), im => {

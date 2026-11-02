@@ -25501,9 +25501,10 @@ function isAuditJob(job) {
 }
 function auditMissing(job) {
   const items = job && job.auditItems || [];
-  const outstanding = items.filter((it) => !(it && it.done && it.donePhoto));
+  const tasks = items.filter((it) => it && !it.header);
+  const outstanding = tasks.filter((it) => !(it.done && it.donePhoto));
   if (!outstanding.length) return [];
-  return [`a completion photo on ${outstanding.length} of ${items.length} audit item${items.length === 1 ? "" : "s"}`];
+  return [`a completion photo on ${outstanding.length} of ${tasks.length} audit item${tasks.length === 1 ? "" : "s"}`];
 }
 function normAuditItems(input, existing) {
   if (!Array.isArray(input)) return existing?.auditItems;
@@ -25512,6 +25513,12 @@ function normAuditItems(input, existing) {
   const out = [];
   for (const raw of input) {
     if (!raw) continue;
+    if (raw.header) {
+      const ht = String(raw.text || raw.title || "").trim();
+      if (ht) out.push({ id: String(raw.id || "") || crypto.randomUUID(), text: ht.slice(0, 2e3), header: true });
+      if (out.length >= 200) break;
+      continue;
+    }
     const text = String(raw.text || raw.title || "").trim();
     if (!text && !(raw.id && prev[raw.id])) continue;
     const id = String(raw.id || "") || crypto.randomUUID();

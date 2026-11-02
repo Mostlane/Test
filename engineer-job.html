@@ -54,6 +54,8 @@
     @keyframes uppulse{0%,100%{opacity:.55}50%{opacity:1}}
     .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
     /* Site-audit checklist */
+    .au-sec{font-weight:800;color:var(--accent,#003468);font-size:15px;margin:16px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}
+    .au-sec:first-child{margin-top:2px}
     .au-item{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--card)}
     .au-item.au-ok{border-color:#58b784;background:color-mix(in srgb,#58b784 8%,var(--card))}
     .au-h{display:flex;align-items:flex-start;gap:9px}
@@ -326,7 +328,7 @@
   function jobIsProject(){ return /^p\d/i.test(String((job&&job.siteCode)||"")) || /project/i.test(String((job&&(job.storeType||job.client))||"")); }
   // Site-audit job: a checklist of items, each needing ONE completion photo.
   function jobIsAudit(){ return !!(job && Array.isArray(job.auditItems) && job.auditItems.length); }
-  function auditOutstanding(){ return (job&&job.auditItems||[]).filter(function(it){ return !(it && it.done && it.donePhoto); }).length; }
+  function auditOutstanding(){ return (job&&job.auditItems||[]).filter(function(it){ return it && !it.header && !(it.done && it.donePhoto); }).length; }
   function raRequired(){ return (job&&job.requiresRA!==undefined)? !!job.requiresRA : !jobIsProject(); }
   function sigRequired(){ return (job&&job.requiresSignature!==undefined)? !!job.requiresSignature : !jobIsProject(); }
   function photoRequired(){ return (job&&job.requiresPhoto!==undefined)? !!job.requiresPhoto : !jobIsProject(); }
@@ -1083,9 +1085,13 @@
   function renderAuditList(){
     var host=$("auditList"); if(!host) return;
     var items=(job&&job.auditItems)||[]; var pend=auditPendingIds();
-    var doneCount=items.filter(function(it){return it.done&&it.donePhoto;}).length;
-    var cc=$("auditCount"); if(cc) cc.textContent=items.length? (doneCount+" / "+items.length+" done") : "";
+    var tasks=items.filter(function(it){return it&&!it.header;});
+    var doneCount=tasks.filter(function(it){return it.done&&it.donePhoto;}).length;
+    var cc=$("auditCount"); if(cc) cc.textContent=tasks.length? (doneCount+" / "+tasks.length+" done") : "";
+    var n=0;
     host.innerHTML=items.map(function(it,i){
+      if(it&&it.header){ return '<div class="au-sec">'+esc(it.text||"")+'</div>'; }
+      n++;
       // Reference photos copied from a certificate / added by the office have no
       // ".thumb" copy — fall back to the full photo rather than a broken tile.
       var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}">'; };
@@ -1099,7 +1105,7 @@
                    : '<button class="btn au-add" data-add="'+esc(it.id)+'">📷 Add completion photo</button>');
       var addExtra='<button class="btn line au-add2" data-extra="'+esc(it.id)+'">＋ Add photo</button>';
       return '<div class="au-item'+((it.done&&it.donePhoto)?' au-ok':'')+'">'+
-        '<div class="au-h"><span class="au-n">'+(i+1)+'</span><div class="au-tx">'+esc(it.text||"")+'</div>'+((it.done&&it.donePhoto)?'<span class="au-badge">Done</span>':'')+'</div>'+
+        '<div class="au-h"><span class="au-n">'+n+'</span><div class="au-tx">'+esc(it.text||"")+'</div>'+((it.done&&it.donePhoto)?'<span class="au-badge">Done</span>':'')+'</div>'+
         (refs?'<div class="au-refs"><span class="au-lbl">Reference</span>'+refs+'</div>':'')+
         (extra?'<div class="au-refs"><span class="au-lbl">Added on site</span>'+extra+'</div>':'')+
         '<div class="au-foot">'+doneImg+action+addExtra+'</div>'+
