@@ -10094,6 +10094,8 @@ __export(sitelogts_exports, {
   personDayEvents: () => personDayEvents,
   personSummary: () => personSummary,
   personWeek: () => personWeek,
+  pickPeople: () => pickPeople,
+  rangePeriod: () => rangePeriod,
   softScanAction: () => softScanAction,
   summaryRange: () => summaryRange,
   sweepSitelogTimesheets: () => sweepSitelogTimesheets
@@ -10236,7 +10238,7 @@ async function loadPeriod(env, from, to, opts = {}) {
   const byPerson = /* @__PURE__ */ new Map();
   const ensure7 = (key, first, last, company) => {
     const name = [first, last].filter(Boolean).join(" ").trim() || "Unknown person";
-    if (!byPerson.has(key)) byPerson.set(key, { name, company: company || "", visits: [] });
+    if (!byPerson.has(key)) byPerson.set(key, { id: key, name, company: company || "", visits: [] });
     return byPerson.get(key);
   };
   const dayLabel = (day) => niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
@@ -10731,9 +10733,33 @@ async function logPickers(env) {
   const sites = ((await db.prepare("SELECT site_name FROM sites WHERE COALESCE(archived,0) = 0 ORDER BY site_name").all()).results || []).map((s) => s.site_name);
   return { ok: true, people, sites };
 }
-async function buildPdf(env, kind, dateKey) {
-  const per = periodFor(kind, dateKey);
-  const people = await loadPeriod(env, per.from, per.to);
+function rangePeriod(from, to) {
+  const ok = (k) => /^\d{4}-\d{2}-\d{2}$/.test(k || "");
+  if (!ok(from) || !ok(to)) return null;
+  if (to < from) [from, to] = [to, from];
+  if (addDays(from, MAX_RANGE_DAYS) < to) to = addDays(from, MAX_RANGE_DAYS);
+  if (from === to) return Object.assign(periodFor("daily", from), { kind: "range" });
+  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  const label2 = `${niceDate(from, sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" })} \u2013 ${niceDate(to, { day: "numeric", month: "short", year: "numeric" })}`;
+  return { kind: "range", from, to, label: label2, file: `SiteLog-${from}-to-${to}.pdf` };
+}
+async function pickPeople(env, people, ids) {
+  const want = [...new Set((ids || []).map(String).filter(Boolean))];
+  if (!want.length) return people;
+  const set = new Set(want);
+  const out = people.filter((p) => set.has(p.id));
+  const have = new Set(out.map((p) => p.id));
+  const missing = want.filter((id) => !have.has(id));
+  if (missing.length) {
+    const rows = (await env.SITELOG_DB.prepare(`SELECT id, first_name, last_name, company FROM people WHERE id IN (${missing.map(() => "?").join(",")})`).bind(...missing).all()).results || [];
+    for (const r of rows) out.push({ id: r.id, name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || "Unknown person", company: r.company || "", visits: [] });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+async function buildPdf(env, kind, dateKey, opts = {}) {
+  const per = opts.period || periodFor(kind, dateKey);
+  let people = await loadPeriod(env, per.from, per.to);
+  if (opts.people && opts.people.length) people = await pickPeople(env, people, opts.people);
   let logo = null;
   try {
     logo = logoBytes();
@@ -10741,7 +10767,7 @@ async function buildPdf(env, kind, dateKey) {
   }
   const now2 = london();
   const bytes = buildSiteLogTimesheetPdf({
-    title: kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
+    title: per.kind === "range" ? "SiteLog timesheet" : kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
     periodLabel: per.label,
     generatedAt: `${niceDate(now2.key, { day: "numeric", month: "short", year: "numeric" })} ${now2.hhmm}`,
     people,
@@ -11026,10 +11052,12 @@ async function handle5(request, env, ctx, url, sess) {
     const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
     const qd = url.searchParams.get("date") || "";
     const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london().key;
-    const per = periodFor(k, d);
+    const per = rangePeriod(url.searchParams.get("from"), url.searchParams.get("to")) || periodFor(k, d);
+    const pick = idList(url.searchParams.get("people"));
     let people;
     try {
       people = await loadPeriod(env, per.from, per.to);
+      if (pick.length) people = await pickPeople(env, people, pick);
     } catch (e) {
       return error(e.message || "SiteLog unavailable", 503, env, request);
     }
@@ -11094,7 +11122,14 @@ async function handle5(request, env, ctx, url, sess) {
   const kind = body.kind === "weekly" ? "weekly" : "daily";
   const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : kind === "weekly" ? addDays(london().key, -7) : london().key;
   if (path === "/pdf" && request.method === "POST") {
-    const { per, bytes } = await buildPdf(env, kind, date);
+    const custom = rangePeriod(body.from, body.to);
+    let built;
+    try {
+      built = await buildPdf(env, kind, date, { period: custom, people: idList(body.people) });
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+    const { per, bytes } = built;
     return new Response(bytes, { headers: Object.assign({
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="${per.file}"`,
@@ -11110,7 +11145,7 @@ async function handle5(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, softReady, REFUSAL_TEXT, MAX_RANGE_DAYS, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
+var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, softReady, REFUSAL_TEXT, MAX_RANGE_DAYS, idList, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
 var init_sitelogts = __esm({
   "src/routes/sitelogts.js"() {
     init_http();
@@ -11150,6 +11185,7 @@ var init_sitelogts = __esm({
       phone_no_fix: "Your phone had no location when you registered"
     };
     MAX_RANGE_DAYS = 93;
+    idList = (v) => (Array.isArray(v) ? v : String(v || "").split(",")).map((s) => String(s).trim()).filter(Boolean).slice(0, 300);
     esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
     MAP_PATH = "/sitelog-map";
     MAP_TTL_EMAIL = 90 * 86400;
