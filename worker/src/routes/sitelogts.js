@@ -242,7 +242,7 @@ export async function loadPeriod(env, from, to, opts = {}) {
 
   for (const p of byPerson.values()) {
     p.visits.sort((a, b) => a._t - b._t);
-    for (const v of p.visits) delete v._t;
+    for (const v of p.visits) { v.inMs = v._t; delete v._t; }
   }
   return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -381,20 +381,24 @@ export async function adminLogs(env, origin, { from, to, personId, site }) {
       time: london(d).hhmm, site: where, why: REFUSAL_TEXT[r.outcome] || r.reason || "The scan didn't go through",
       distance: r.distance_m != null ? Math.round(Number(r.distance_m)) : null, mapUrl, hasLocation: num(r.lat) != null });
   }
+  const nowMs = Date.now();
   const out = people.filter(p => p.visits.length || (p.refused && p.refused.length)).map(p => {
     const t = personTotals(p);
+    // Live view: time so far for anyone still signed in (not counted in hours until they sign out).
+    const soFarOf = v => v.state === "open" && v.inMs ? Math.max(0, Math.round((nowMs - v.inMs) / 60000)) : 0;
+    const soFar = p.visits.reduce((n, v) => n + soFarOf(v), 0);
     const refusedN = (p.refused || []).length;
     return { pid: p.pid, name: p.name, company: p.company, refused: p.refused || [],
       visits: p.visits.map(v => ({ day: v.day, date: v.date, site: v.site, inTime: v.inTime, outTime: v.outTime,
         mins: Math.round(v.mins || 0), state: v.state, note: v.note, inOk: v.inOk, outOk: v.outOk,
         inDist: v.inDist != null ? Math.round(Number(v.inDist)) : null, outDist: v.outDist != null ? Math.round(Number(v.outDist)) : null,
-        mapIn: v.mapIn || null, mapOut: v.mapOut || null, scannedIn: !!v.scannedIn, scannedOut: !!v.scannedOut })),
-      totals: { ...t, mins: Math.round(t.mins), refused: refusedN,
+        mapIn: v.mapIn || null, mapOut: v.mapOut || null, scannedIn: !!v.scannedIn, scannedOut: !!v.scannedOut, soFar: soFarOf(v) })),
+      totals: { ...t, mins: Math.round(t.mins), soFar, refused: refusedN,
         issues: t.missed + t.open + t.scanned + refusedN } };
   }).sort((a, b) => a.name.localeCompare(b.name));
-  const sum = out.reduce((a, p) => { a.mins += p.totals.mins; a.visits += p.totals.visits; a.missed += p.totals.missed;
+  const sum = out.reduce((a, p) => { a.mins += p.totals.mins; a.soFar += p.totals.soFar; a.visits += p.totals.visits; a.missed += p.totals.missed;
     a.open += p.totals.open; a.scanned += p.totals.scanned; a.refused += p.totals.refused; a.unver += p.totals.unver; return a; },
-    { people: out.length, mins: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 });
+    { people: out.length, mins: 0, soFar: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 });
   return { ok: true, from, to, today, maps: canSign, people: out, summary: sum };
 }
 // People + sites for the Logs pickers.

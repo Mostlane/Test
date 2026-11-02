@@ -9790,8 +9790,10 @@ function personTotals(p) {
       autoMins += v.mins || 0;
     }
     if (v.state === "open") open++;
-    if (!v.inOk) unver++;
-    if (v.state !== "open" && !v.outOk) unver++;
+    if (v.state !== "scanned") {
+      if (!v.inOk) unver++;
+      if (v.state !== "open" && !v.outOk) unver++;
+    }
   }
   return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
 }
@@ -10218,7 +10220,10 @@ async function loadPeriod(env, from, to, opts = {}) {
   }
   for (const p of byPerson.values()) {
     p.visits.sort((a, b) => a._t - b._t);
-    for (const v of p.visits) delete v._t;
+    for (const v of p.visits) {
+      v.inMs = v._t;
+      delete v._t;
+    }
   }
   return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -10379,8 +10384,11 @@ async function adminLogs(env, origin, { from, to, personId, site }) {
       hasLocation: num(r.lat) != null
     });
   }
+  const nowMs = Date.now();
   const out = people.filter((p) => p.visits.length || p.refused && p.refused.length).map((p) => {
     const t = personTotals(p);
+    const soFarOf = (v) => v.state === "open" && v.inMs ? Math.max(0, Math.round((nowMs - v.inMs) / 6e4)) : 0;
+    const soFar = p.visits.reduce((n, v) => n + soFarOf(v), 0);
     const refusedN = (p.refused || []).length;
     return {
       pid: p.pid,
@@ -10403,11 +10411,13 @@ async function adminLogs(env, origin, { from, to, personId, site }) {
         mapIn: v.mapIn || null,
         mapOut: v.mapOut || null,
         scannedIn: !!v.scannedIn,
-        scannedOut: !!v.scannedOut
+        scannedOut: !!v.scannedOut,
+        soFar: soFarOf(v)
       })),
       totals: {
         ...t,
         mins: Math.round(t.mins),
+        soFar,
         refused: refusedN,
         issues: t.missed + t.open + t.scanned + refusedN
       }
@@ -10416,6 +10426,7 @@ async function adminLogs(env, origin, { from, to, personId, site }) {
   const sum = out.reduce(
     (a, p) => {
       a.mins += p.totals.mins;
+      a.soFar += p.totals.soFar;
       a.visits += p.totals.visits;
       a.missed += p.totals.missed;
       a.open += p.totals.open;
@@ -10424,7 +10435,7 @@ async function adminLogs(env, origin, { from, to, personId, site }) {
       a.unver += p.totals.unver;
       return a;
     },
-    { people: out.length, mins: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 }
+    { people: out.length, mins: 0, soFar: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 }
   );
   return { ok: true, from, to, today, maps: canSign, people: out, summary: sum };
 }

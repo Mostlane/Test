@@ -57,4 +57,12 @@ r = await ts.adminLogs({ ...env, FILE_SIGNING_SECRET: undefined, PORTAL_BRIDGE_S
 ok(r.maps === false && !r.people.some(p => p.visits.some(v => v.mapIn)), "no signing secret = no map links");
 const pk = await ts.logPickers(env);
 ok(pk.people.length === 3 && !pk.people.some(p => p.id === "tmp") && pk.sites.length === 2, "pickers exclude phone-transfer temp records");
+// Still on site: counts time so far (not in the hours total).
+const nowL = new Date(Date.now() - 90 * 60000).toISOString().slice(0, 19).replace("T", " ");
+const todayIso = new Date().toISOString().slice(0, 10);
+sl.exec(`INSERT INTO visits (id,person_id,site_code,check_in_at,sign_in_verified,sign_in_distance_m,lat,lng) VALUES ('vo','p3','Site A','${nowL}',1,12,50.8,-1.1)`);
+r = await ts.adminLogs(env, O, { from: todayIso, to: todayIso, personId: "p3" });
+const op = r.people[0];
+ok(op && op.visits[0].state === "open" && op.visits[0].soFar >= 88 && op.visits[0].soFar <= 92 && op.totals.mins === 0 && op.totals.soFar >= 88, "open visit shows ~90 min so far, not in hours");
+ok(r.summary.soFar >= 88 && op.totals.unver === 0, "summary carries time so far; verified sign-in isn't 'not checked'");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
