@@ -291,6 +291,16 @@ async function createIntakeTask(env, ctx, fetchSelf, { externalId, title, detail
   let out = {}; try { out = await resp.json(); } catch {}
   return out;
 }
+/* Is a store's note URGENT / an escalation worth an office alert? (Jamie, Nov 2026:
+   "updating the job is enough unless it's a specifically relevant note then an alert
+   can stay but no task needed".) A plain note (a photo / a routine update) just lands
+   on the job card silently; only a note whose words signal urgency / chasing / a
+   complaint / a safety issue sends ONE push to the office — never a task. Kept as a
+   simple keyword rule so Jamie can see + tweak exactly what triggers it. */
+const URGENT_NOTE_RE = /\b(urgent|asap|as soon as possible|emergenc\w*|escalat\w*|complaint|complain\w*|chas\w*|overdue|outstanding|unhappy|not attended|did ?n'?t attend|failed to attend|re-?attend|no[- ]?show|still (?:not|no|hasn'?t|haven'?t|waiting|outstanding)|when will|how (?:long|much longer)|unsafe|dangerous|health and safety|h&s|trip hazard|flood\w*|leak\w*|no (?:hot )?water|no power|sewage)\b/i;
+function isUrgentNote(text, action) {
+  return URGENT_NOTE_RE.test(String(text || "") + " " + String(action || ""));
+}
 /* The client cancelled a job / withdrew a quote request → POST /sla/inbound
    {action:"cancel"} in-process. Outcomes: cancelled (a job marked Cancelled, or
    the cancellation NOTED on an already-finished job), review (no job on the board
@@ -378,28 +388,33 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     if (r.kind === "notice") return { ...out, outcome: "dropped", reason: r.reason || "Not a job" };
     if (r.kind === "note") {
       // A store's note/chase/photo on an EXISTING job (not a new dispatch). Never
-      // creates a job — but it must not vanish: it's appended to the matching
-      // job's CARD (the notes/timeline the office reads) AND raised as a task so
-      // someone actions it and ticks it off (My Tasks). No live job → task only.
+      // creates a job. It's appended QUIETLY to the matching job's CARD (the
+      // notes/timeline the office reads) — updating the job is enough. NO task is
+      // raised and NO notification fires for a routine note (Jamie, Nov 2026).
+      // ONLY a note whose words signal urgency / escalation / a complaint / a
+      // safety issue (isUrgentNote) sends ONE push to the office — still no task.
       const n = r.note || {}, inc = r.incident || n.incident || "";
       const who = n.client === "chapplins" ? "Chapplins" : "Concerto";
       const what = inc || n.property || "";
-      if (opts.dryRun) return { ...out, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "’s card + raise a task to action it" };
+      const urgent = isUrgentNote(n.text, who === "Concerto" ? n.action : "");
+      if (opts.dryRun) return { ...out, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "’s card quietly" + (urgent ? " + alert the office (reads as urgent) — no task" : " — no task, no notification") };
       let noted = null;
       try { noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt, by: n.by, property: n.property, client: n.client }); } catch {}
-      try {
-        await createIntakeTask(env, ctx, fetchSelf, {
-          externalId: "note:" + (msg.messageId || inc || (subject + ":" + Date.now())),
-          title: "📝 " + who + " note — " + (noted && noted.reference ? "job " + noted.reference : (inc ? "incident " + inc : (n.property || "a job"))),
-          detail: ((n.action && who === "Concerto" ? n.action + " — " : "") + (n.text || "")).slice(0, 400),
-          link: (noted && noted.jobId) ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
-          category: who + " notes",
-        });
-      } catch {}
+      // Urgent/escalation note → one office alert (no task). A routine note is silent.
+      if (urgent) {
+        try {
+          await sendToPermission(env, Number(tid) || 1, ["FullAccess", "SLAAdmin"], {
+            title: "⚠️ " + who + " note — " + (noted && noted.reference ? noted.reference : (inc || n.property || "a job")),
+            body: String(n.text || "").replace(/\s+/g, " ").trim().slice(0, 140) || "A note was added.",
+            url: (noted && noted.jobId) ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
+            tag: "note-urgent:" + (noted && noted.jobId ? noted.jobId : (inc || msg.messageId || Date.now()))
+          }, null, true);
+        } catch {}
+      }
       return { ...out, outcome: "note", reference: (noted && noted.reference) || inc, jobId: (noted && noted.jobId) || "",
         reason: (noted && noted.jobId)
-          ? who + " note added to job " + (noted.reference || inc) + "’s card + a task raised to action it"
-          : who + " note on " + (what || "?") + " — no matching live job on the board, so a task was raised to action it" };
+          ? who + " note added to job " + (noted.reference || inc) + "’s card" + (urgent ? " + the office was alerted (reads as urgent)" : " (quietly — no task, no notification)")
+          : who + " note on " + (what || "?") + " — no matching live job on the board" + (urgent ? ", so the office was alerted (reads as urgent)" : " (logged only — no task)") };
     }
     if (r.kind === "cancel") {
       const c = { ...(r.cancel || {}), action: "cancel", isJob: false };
