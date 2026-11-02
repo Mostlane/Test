@@ -79,4 +79,29 @@ ok(nw.offered.length === 2, "two soft scans: p2 (twice, merged) + new phone; p3'
 const p2o = nw.offered.find(x => x.pid === "p2");
 ok(p2o && p2o.attempts === 2 && p2o.inside === true && p2o.distance <= 20 && p2o.mapUrl && p2o.kind === "offered", "soft scan: who/where/inside boundary/map, repeat scans merged");
 ok(nw.offered.some(x => x.kind === "new_phone" && x.name === "Unregistered phone" && !x.mapUrl), "new phone shown, no map");
+// Office actions on soft scans.
+sl.exec(`ALTER TABLE visits ADD COLUMN sign_in_confirmed INTEGER DEFAULT 0; ALTER TABLE visits ADD COLUMN hs_ack INTEGER DEFAULT 0;
+ ALTER TABLE visits ADD COLUMN sign_out_confirmed INTEGER DEFAULT 0; ALTER TABLE visits ADD COLUMN served_by TEXT;`);
+let sa = await ts.softScanAction(env, "Boss", { action: "signin", ids: p2o.ids });
+let nv = sl.prepare("SELECT * FROM visits WHERE id = ?").get(sa.body.visitId);
+ok(sa.status === 200 && nv && nv.person_id === "p2" && nv.site_code === "Site A" && nv.sign_in_verified === 1 && nv.check_out_at === null
+  && /confirmed by Boss/.test(nv.office_from_scan), "soft scan → sign-in: open visit, location verified (scan was inside), noted who");
+ok(nv.check_in_at === new Date(Date.parse(isoAgo(30))).toISOString().replace("T"," ").slice(0,19).slice(0,16) + nv.check_in_at.slice(16), "sign-in uses the FIRST scan's time");
+let nw2 = await ts.liveNow(env, O);
+ok(!nw2.offered.some(x => x.pid === "p2") && nw2.onSite.some(x => x.pid === "p2" && x.verified && /Boss/.test(x.officeNote)), "moves from soft scans to on site");
+const np = nw2.offered.find(x => x.kind === "new_phone");
+sa = await ts.softScanAction(env, "Boss", { action: "signin", ids: np.ids });
+ok(sa.status === 400, "unregistered phone can't be signed in");
+sa = await ts.softScanAction(env, "Boss", { action: "dismiss", ids: np.ids });
+ok(sa.status === 200 && !(await ts.liveNow(env, O)).offered.some(x => x.kind === "new_phone"), "dismiss hides it");
+ok(sl.prepare("SELECT COUNT(*) n FROM scan_log WHERE dismissed_as = 'dismissed'").get().n === 1, "dismissed scan kept as a record");
+sa = await ts.softScanAction(env, "Boss", { action: "dismiss", ids: np.ids });
+ok(sa.status === 409, "can't action twice");
+sl.exec(`INSERT INTO scan_log (at,kind,outcome,refused,person_id,site,lat,lng,accuracy,device_token) VALUES ('${isoAgo(5)}','scan','confirm_sign_out',0,'p3','Site A',50.8,-1.1,6,'d3')`);
+const outo = (await ts.liveNow(env, O)).offered.find(x => x.kind === "offered_out");
+ok(outo && outo.pid === "p3" && outo.visitId === "vo", "sign-out offered but not tapped is listed against the open visit");
+sa = await ts.softScanAction(env, "Boss", { action: "signout", ids: outo.ids });
+const vo = sl.prepare("SELECT * FROM visits WHERE id = 'vo'").get();
+ok(sa.status === 200 && vo.check_out_at && vo.sign_out_verified === 1, "soft scan → sign-out closes the visit, verified");
+ok(!(await ts.liveNow(env, O)).onSite.some(x => x.pid === "p3"), "no longer on site");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
