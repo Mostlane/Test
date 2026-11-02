@@ -80,8 +80,10 @@ export function personTotals(p) {
     if (v.state !== "open") mins += v.mins || 0;
     if (v.state === "auto") { missed++; autoMins += v.mins || 0; }
     if (v.state === "open") open++;
-    if (!v.inOk) unver++;
-    if (v.state !== "open" && !v.outOk) unver++;
+    if (v.state !== "scanned") {   // scan-only rows are counted as "not confirmed", not as unchecked locations
+      if (!v.inOk) unver++;
+      if (v.state !== "open" && !v.outOk) unver++;
+    }
   }
   return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
 }

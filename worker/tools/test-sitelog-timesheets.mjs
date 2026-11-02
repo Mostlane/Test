@@ -142,4 +142,20 @@ const office = (await ts.loadPeriod(env, "2026-10-12", "2026-10-18")).find(p => 
 ok(Math.round(mine.totals.mins) === Math.round(office.visits.reduce((n, v) => n + (v.state === "open" ? 0 : v.mins), 0)), "same hours as the office timesheet");
 ok((await ts.personWeek(env, "p2", "2026-10-12")).totals.missed === 1, "missed sign-out counted for the worker too");
 ok((await ts.personWeek(env, "nobody", "2026-10-12")).days.every(d => !d.visits.length), "someone else's visits never leak");
+
+// A worker's totals by site (the app's "Summary") — same numbers as My Hours
+const r = ts.summaryRange;
+ok(r("this_week","2026-10-14").from === "2026-10-12", "summary: this week starts Monday");
+ok(r("last_month","2026-01-10").from === "2025-12-01" && r("last_month","2026-01-10").to === "2025-12-31", "summary: last month across a year end");
+ok(r("this_month","2026-10-14").from === "2026-10-01" && r("last_14","2026-10-14").from === "2026-10-01", "summary: this month / last 14 days");
+at("2026-10-14T12:00:00Z");
+const sm = await ts.personSummary(env, "p1", "this_week");
+const wk1 = await ts.personWeek(env, "p1", "2026-10-14");
+ok(sm.totals.mins === Math.round(wk1.totals.mins), "summary hours = My Hours for the same week");
+ok(sm.sites.reduce((n, x) => n + x.mins, 0) >= sm.totals.mins - sm.sites.length && sm.sites[0].mins >= sm.sites[sm.sites.length - 1].mins, "summary split by site, biggest first");
+const all = await ts.personSummary(env, "p1", "all");
+ok(all.from === "2026-10-05" && all.totals.visits >= sm.totals.visits, "all time starts at the first visit");
+ok((await ts.personSummary(env, "p2", "all")).sites.some(x => x.missed === 1), "missed sign-out flagged per site");
+ok((await ts.personSummary(env, "nobody", "all")).sites.length === 0, "summary: nobody else's visits");
+globalThis.Date = realDate;
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
