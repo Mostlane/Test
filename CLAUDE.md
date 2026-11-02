@@ -3040,6 +3040,58 @@ gives the call 30s, shows "Loading everyone's week…", and on failure says WHIC
 (`health_events` kind='slow') is the place to look when a page "won't load" —
 it records every >2.5s response by endpoint.
 
+## Timesheet / invoice reminders + weekly invoice email to accounts (2 Nov 2026)
+Jamie: "schedule the self-employed invoice to be emailed to accounts@mostlane.com
+at a set day/time each week as a PDF attachment; and if timesheets/invoices aren't
+done in the portal, send alerts — per user (employed or self-employed) that I set:
+some complete hours only, some send an invoice — with van-check-style pop-ups that
+take them to the correct week." Built ON the existing `engts:cfg:<tid>` config +
+`/ts/outstanding` + the existing main.html attention note (no new table beyond an
+`eng_invoices.emailed_at` column).
+- **Per-user reminder MODE** (set on timesheets-admin → ⚙️ Settings, new "Reminder"
+  column): `engts:cfg.byUser[<user>].reminder` = **off | timesheet | invoice**.
+  `reminderModeFor()` defaults UNSET → **off** (opt-in — "user by user that I set";
+  it no longer auto-chases every EngTimesheet holder). `timesheet` = must complete
+  last week's hours; `invoice` = must have SUBMITTED last week's invoice (self-employed).
+  `timesheetDoneFor` = office-approved OR invoiced OR (no job-gaps AND the week has
+  content); `invoice` done = an `eng_invoices` row exists for the week. All gated by
+  the master **`defaults.remindersOn`** switch.
+- **`reminderStateFor(env,tid,cfg,user,monday)`** is the ONE source → `{mode, due,
+  overdue, week, dueAt, dueLabel}`. **GET /ts/outstanding** (reworked, mode-aware)
+  returns `{mode, kind, week, weekLabel, due, overdue, dueAt, dueLabel, count, missing}`
+  for the caller's LAST completed week (prevMon). It drives THREE surfaces:
+  (a) **main.html attention note** — snoozeable up to 2h before the deadline, per-kind
+  wording (⏱ timesheet / 🧾 invoice), keyed on `due` (was `count>0`);
+  (b) **timesheet-gate.js** (NEW, mirrors van-check-gate.js; loaded after portal-config
+  on main/route/engineer-jobs/inbox/you — NOT engineer-timesheet.html, the escape) —
+  a FULL-SCREEN BLOCK when `due && overdue`, button → `engineer-timesheet.html?week=<week>`
+  (which already honours `?week=`). Fails OPEN (no token / bad reply → no block);
+  View-As = dismissible preview;
+  (c) **push** — `sweepTimesheetReminders` reworked: daily ~08:00 London from the
+  Monday the week ends through the deadline day, to anyone `due` (per mode), deduped
+  per `(prevMon, londonDate)` in app_config `ts:reminded:<tid>`.
+- **Weekly invoice email** — **`sweepTimesheetInvoiceEmails`** (cron, in the hourly
+  `minute<5` block): self-gates to `defaults.emailDow`/`emailTime` (London; **default
+  Wednesday 13:00**), forwards EVERY submitted invoice from the last ~5 weeks with
+  `emailed_at IS NULL` to `defaults.invoiceEmail` (**accounts@mostlane.com**) — ONE
+  email per invoice, the stored R2 PDF (`invoices/<tid>/<user>/…`) attached (base64 via
+  `sendEmail`/Resend) — then stamps `emailed_at` so it's sent ONCE; a late invoice is
+  caught on the next run. Independent of the reminder mode (all invoices are forwarded,
+  not just `invoice`-mode users). Master switch `defaults.emailInvoices`.
+- **Settings UI (timesheets-admin.html ⚙️):** the deadline day/time (relabelled
+  "timesheet / invoice"), a master reminders switch, the invoice-email switch +
+  day/time + accounts address, and a per-row **Reminder** dropdown (Default / Off /
+  Timesheet / Invoice; the GET returns `effReminder` for the "Default (…)" label).
+- **Live config set (2 Nov):** `remindersOn:true` (was false), deadline **Tue 16:00**
+  (`dueDow:2`), email **Wed 13:00** (`emailDow:3`), `invoiceEmail:accounts@mostlane.com`,
+  and **Lionel Ponsonby → reminder:"invoice"** (the named self-employed example).
+  Everyone else defaults off — Jamie turns people on in Settings. DEFAULTS in
+  timesheets.js carry emailInvoices/emailDow(3)/emailTime("13:00")/invoiceEmail so a
+  fresh tenant works out of the box.
+- `_headers` no-cache on timesheet-gate.js. No new table (self-migrating
+  `eng_invoices.emailed_at`). **GO-LIVE:** needs `RESEND_API_KEY` (present) + the
+  invoice PDFs already live in R2; nothing else to deploy.
+
 ## XSS audit of every page (10 Sep 2026)
 Jamie: "How secure is this portal?" → "Do the 143 HTML." Every page + shared script
 (187 files) was read for places API/user text is written into HTML unescaped.

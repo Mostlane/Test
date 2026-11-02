@@ -2468,6 +2468,10 @@ async function ensureTables(env) {
     hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
     r2_key TEXT, at TEXT,
     UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE eng_invoices ADD COLUMN emailed_at TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS site_miles (
     tenant_id INTEGER NOT NULL DEFAULT 1, key TEXT NOT NULL,
     name TEXT, postcode TEXT, miles REAL, updated_at TEXT,
@@ -3806,6 +3810,48 @@ function tsDeadlineFor(monday, cfg) {
   const ms = naive - londonOffsetMinutes(naive) * 6e4;
   return { ms, iso: new Date(ms).toISOString(), dow: dow2, hh, mm, label: DOW_NAME[dow2] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
 }
+async function reminderModeFor(env, tid, cfg, username) {
+  const mine = cfg.byUser && cfg.byUser[username] || {};
+  if (REMINDER_MODES.has(mine.reminder)) return mine.reminder;
+  return "off";
+}
+function weekHasContent(days) {
+  for (const d of Object.values(days || {})) {
+    if (!d) continue;
+    if (toMin(d.start) != null && toMin(d.finish) != null) return true;
+    if (d.jobHours && Object.values(d.jobHours).some((h) => parseFloat(h) > 0)) return true;
+    if (parseFloat(d.hours) > 0) return true;
+  }
+  return false;
+}
+async function timesheetDoneFor(env, tid, username, monday, cfg) {
+  const { days, approval } = await loadWeek(env, tid, username, monday);
+  if (approval) return true;
+  if (await invoiceFor(env, tid, username, monday)) return true;
+  const gaps = await timesheetGaps(env, tid, username, monday, cfg);
+  if (gaps.count > 0) return false;
+  return weekHasContent(days);
+}
+async function reminderStateFor(env, tid, cfg, username, monday) {
+  const mode = await reminderModeFor(env, tid, cfg, username);
+  const dl = tsDeadlineFor(monday, cfg);
+  const base = { mode, week: monday, dueAt: dl.iso, dueLabel: dl.label, overdue: Date.now() > dl.ms };
+  if (mode === "off" || !remindersEnabled(cfg)) return { ...base, due: false };
+  const done = mode === "invoice" ? !!await invoiceFor(env, tid, username, monday) : await timesheetDoneFor(env, tid, username, monday, cfg);
+  return { ...base, due: !done };
+}
+function bytesToB64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+  return btoa(s);
+}
+function londonDowHour(now2 = /* @__PURE__ */ new Date()) {
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dow2 = names.indexOf(now2.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "short" }));
+  const hour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  const date = now2.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  return { dow: dow2, hour, date };
+}
 async function assignedJobsByDay(env, tid, username, monday) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -3874,13 +3920,14 @@ async function sweepTimesheetReminders(env, tid = 1) {
   try {
     const cfg = await getCfg(env, tid);
     if (!remindersEnabled(cfg)) return;
-    const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const L2 = londonDowHour();
+    if (L2.hour !== 8) return;
+    const curMon = mondayOf(L2.date);
     const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
     pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
     const dl = tsDeadlineFor(prevMon, cfg);
-    const nowMs = Date.now();
-    if (nowMs < dl.ms - 3 * 36e5 || nowMs > dl.ms) return;
+    if (Date.now() > dl.ms + 24 * 36e5) return;
     const key = "ts:reminded:" + tid;
     let sent = [];
     try {
@@ -3888,21 +3935,69 @@ async function sweepTimesheetReminders(env, tid = 1) {
       if (row && row.value) sent = JSON.parse(row.value) || [];
     } catch {
     }
-    if (sent.includes(prevMon)) return;
+    const slot = prevMon + ":" + L2.date;
+    if (sent.includes(slot)) return;
     const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
     for (const u of users || []) {
-      if (!await hasEngTimesheet(env, tid, u.username)) continue;
-      const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
-      if (g.count > 0) await sendToUser(env, tid, u.username, {
-        title: "Timesheet due",
-        body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours \u2014 complete last week's timesheet by " + dl.label + ".",
+      const st = await reminderStateFor(env, tid, cfg, u.username, prevMon);
+      if (st.mode === "off" || !st.due) continue;
+      const inv = st.mode === "invoice";
+      await sendToUser(env, tid, u.username, {
+        title: inv ? "Invoice due" : "Timesheet due",
+        body: inv ? "Last week's invoice hasn't been sent in \u2014 submit it on your timesheet by " + dl.label + "." : "Last week's timesheet still needs completing \u2014 enter your hours by " + dl.label + ".",
         url: "/engineer-timesheet.html?week=" + prevMon,
         tag: "ts-due:" + prevMon
       });
     }
-    sent.push(prevMon);
-    sent = sent.slice(-8);
+    sent.push(slot);
+    sent = sent.slice(-30);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(sent)).run();
+  } catch {
+  }
+}
+async function sweepTimesheetInvoiceEmails(env, tid = 1) {
+  try {
+    await ensureTables(env);
+    const cfg = await getCfg(env, tid);
+    if (cfg.defaults && cfg.defaults.emailInvoices === false) return;
+    const to = String(cfg.defaults && cfg.defaults.invoiceEmail || "accounts@mostlane.com").trim();
+    if (!to) return;
+    const L2 = londonDowHour();
+    const wantDow = Number(cfg.defaults && cfg.defaults.emailDow != null ? cfg.defaults.emailDow : 3);
+    const wantHour = parseInt(String(cfg.defaults && cfg.defaults.emailTime || "13:00").split(":")[0], 10) || 0;
+    if (L2.dow !== wantDow || L2.hour !== wantHour) return;
+    const cutoff = new Date(Date.now() - 35 * 864e5).toISOString();
+    let rows = [];
+    try {
+      const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+      rows = r.results || [];
+    } catch {
+      return;
+    }
+    if (!rows.length) return;
+    const names = {};
+    try {
+      const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of r.results || []) names[u.username] = displayName(u);
+    } catch {
+    }
+    for (const inv of rows) {
+      try {
+        const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
+        if (!obj) continue;
+        const b642 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
+        const who = names[inv.username] || inv.username;
+        const wkTxt = (/* @__PURE__ */ new Date(inv.week + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+        const subject = "Invoice #" + inv.number + " \u2014 " + who + " \u2014 w/c " + wkTxt;
+        const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who) + "</b> for the week commencing " + escHtml(wkTxt) + ".</p><p>Total: <b>" + money(inv.total || 0) + '</b></p><p style="color:#667;font-size:12px">Sent automatically from the Mostlane portal timesheet system.</p>';
+        const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
+        const res = await sendEmail(env, { to, subject, html, attachments: [{ filename: fn, content: b642 }] });
+        if (res && res.ok !== false) {
+          await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, inv.id).run();
+        }
+      } catch {
+      }
+    }
   } catch {
   }
 }
@@ -4165,21 +4260,31 @@ async function handle3(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/outstanding" && method === "GET") {
-    if (!remindersEnabled(cfg) || !await hasEngTimesheet(env, tid, me))
-      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
     const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
     pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
-    const prev = await timesheetGaps(env, tid, me, prevMon, cfg);
+    const st = await reminderStateFor(env, tid, cfg, me, prevMon);
+    let count = 0, missing = [];
+    if (st.due && st.mode === "timesheet") {
+      const g = await timesheetGaps(env, tid, me, prevMon, cfg);
+      count = g.count;
+      missing = g.missing;
+    } else if (st.due) count = 1;
+    const sun = weekDays(prevMon)[6];
+    const weekLabel = (/* @__PURE__ */ new Date(prevMon + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " \u2013 " + (/* @__PURE__ */ new Date(sun + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     return json({
       ok: true,
+      mode: st.mode,
+      kind: st.mode,
       week: prevMon,
-      dueAt: prev.dueAt,
-      dueLabel: prev.dueLabel,
-      overdue: prev.overdue,
-      count: prev.count,
-      missing: prev.missing
+      weekLabel,
+      due: st.due,
+      overdue: st.overdue,
+      dueAt: st.dueAt,
+      dueLabel: st.dueLabel,
+      count,
+      missing
     }, {}, env, request);
   }
   if (sub === "/my" && method === "GET") {
@@ -5110,18 +5215,16 @@ async function handle3(request, env, ctx, url, sess) {
       const { results: users } = await env.DB.prepare(
         "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
       ).bind(tid).all();
-      return json({
-        ok: true,
-        defaults: cfg.defaults,
-        byUser: cfg.byUser,
-        users: (users || []).map((u) => ({
-          username: u.username,
-          name: displayName(u),
-          employment: u.employment_type || "Employed",
-          selfEmployed: isSelfEmployed(u),
-          effective: effectiveCfg(cfg, u)
-        }))
-      }, {}, env, request);
+      const uList = await Promise.all((users || []).map(async (u) => ({
+        username: u.username,
+        name: displayName(u),
+        employment: u.employment_type || "Employed",
+        selfEmployed: isSelfEmployed(u),
+        reminder: cfg.byUser && cfg.byUser[u.username] && cfg.byUser[u.username].reminder || "",
+        effReminder: await reminderModeFor(env, tid, cfg, u.username),
+        effective: effectiveCfg(cfg, u)
+      })));
+      return json({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser, users: uList }, {}, env, request);
     }
     if (sub === "/admin/config" && method === "POST") {
       const b = await request.json().catch(() => ({}));
@@ -5142,6 +5245,10 @@ async function handle3(request, env, ctx, url, sess) {
             }
           }
           if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;
+          if ("reminder" in v) {
+            if (REMINDER_MODES.has(v.reminder)) mine.reminder = v.reminder;
+            else delete mine.reminder;
+          }
           if ("homePostcode" in v) mine.homePostcode = String(v.homePostcode || "").toUpperCase().slice(0, 10);
           if ("details" in v) mine.details = (Array.isArray(v.details) ? v.details : String(v.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 5);
         }
@@ -5152,7 +5259,7 @@ async function handle3(request, env, ctx, url, sess) {
   }
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
-var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES;
+var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES, REMINDER_MODES, escHtml;
 var init_timesheets = __esm({
   "src/routes/timesheets.js"() {
     init_http();
@@ -5161,6 +5268,7 @@ var init_timesheets = __esm({
     init_pdf();
     init_holidays();
     init_push();
+    init_email();
     CFG_KEY = (tid) => `engts:cfg:${tid}`;
     INV_PREFIX = (tid) => `invoices/${tid}/`;
     isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -5186,7 +5294,12 @@ var init_timesheets = __esm({
       dueTime: "12:00",
       remindersOn: true,
       basePostcode: "PO15 5RQ",
-      company: "Mostlane"
+      company: "Mostlane",
+      // Weekly auto-email of submitted self-employed invoices to the accounts inbox.
+      emailInvoices: true,
+      emailDow: 3,
+      emailTime: "13:00",
+      invoiceEmail: "accounts@mostlane.com"
     };
     VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
     normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -5199,6 +5312,8 @@ var init_timesheets = __esm({
     DRIVE_MEMO = /* @__PURE__ */ new Map();
     DRIVE_MEMO_TTL = 12 * 3600 * 1e3;
     AT_HOME_MILES = 1;
+    REMINDER_MODES = /* @__PURE__ */ new Set(["off", "timesheet", "invoice"]);
+    escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 });
 
@@ -53338,6 +53453,7 @@ var worker = {
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
       ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
       ctx.waitUntil(sweepTimesheetReminders(env).catch((e) => console.error("scheduled timesheet reminder:", e)));
+      ctx.waitUntil(sweepTimesheetInvoiceEmails(env).catch((e) => console.error("scheduled invoice email:", e)));
       ctx.waitUntil(sweepStaffRecordReminders(env).catch((e) => console.error("scheduled staff-record reminder:", e)));
       if (env.SITELOG_DB) ctx.waitUntil(sweepAutoClose(env).catch((e) => console.error("scheduled sitelog auto-close:", e)));
     }

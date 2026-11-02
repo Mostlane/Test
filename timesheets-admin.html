@@ -473,17 +473,29 @@ g("cfgBtn").onclick=async()=>{
     <label title="The deadline for engineers to complete a week's hours — the day/time in the week AFTER the timesheet week (like van checks).">Timesheet due by
       <select id="d-duedow" style="width:120px">${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((n,i)=>`<option value="${i}" ${(r.defaults.dueDow!=null?+r.defaults.dueDow:3)===i?"selected":""}>${n}</option>`).join("")}</select>
       <input type="time" id="d-duetime" value="${esc(r.defaults.dueTime||"12:00")}" step="300" style="width:110px"></label>
-    <label style="display:flex;align-items:center;gap:8px" title="Turn off to stop chasing engineers to complete their hours (reminders, home-screen alerts and pushes). Only engineers with the Engineer Timesheet permission are ever alerted.">
-      <input type="checkbox" id="d-remind" ${r.defaults.remindersOn===false?"":"checked"}> Send timesheet reminders to engineers</label>
+    <label style="display:flex;align-items:center;gap:8px" title="Master switch. Turn off to stop ALL timesheet/invoice reminders, home-screen alerts, pushes and the blocking pop-up. Who is chased (and whether for a timesheet or an invoice) is set per person in the table below.">
+      <input type="checkbox" id="d-remind" ${r.defaults.remindersOn===false?"":"checked"}> Send timesheet / invoice reminders</label>
+    <label style="display:flex;align-items:center;gap:8px" title="When ON, every submitted self-employed invoice is emailed to the accounts inbox as a PDF attachment, one email per invoice, on the day/time set here. Late ones are caught on the next weekly run.">
+      <input type="checkbox" id="d-emailon" ${r.defaults.emailInvoices===false?"":"checked"}> Auto-email submitted invoices to accounts</label>
+    <label title="The day/time each week the submitted invoices are emailed to accounts. Set this AFTER the timesheet deadline above so people have had chance to get them in.">Email invoices on
+      <select id="d-emaildow" style="width:120px">${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((n,i)=>`<option value="${i}" ${(r.defaults.emailDow!=null?+r.defaults.emailDow:3)===i?"selected":""}>${n}</option>`).join("")}</select>
+      <input type="time" id="d-emailtime" value="${esc(r.defaults.emailTime||"13:00")}" step="300" style="width:110px"></label>
+    <label style="flex:1;min-width:220px">Accounts email (where invoices are sent)
+      <input type="email" id="d-accemail" value="${esc(r.defaults.invoiceEmail||"accounts@mostlane.com")}" style="width:100%"></label>
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
-  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th title="Overtime multiplier of the normal hourly rate, for hours over the daily threshold. Blank = no overtime.">OT ×</th><th title="Overtime kicks in after this many PAID hours in a day (after lunch/travel come off). Blank = use the default below.">OT after h</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
+  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th title="What this person is chased + locked for last week. Default = timesheet for engineers, off for everyone else. Set 'Invoice' for self-employed who must send an invoice.">Reminder</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th title="Overtime multiplier of the normal hourly rate, for hours over the daily threshold. Blank = no overtime.">OT ×</th><th title="Overtime kicks in after this many PAID hours in a day (after lunch/travel come off). Blank = use the default below.">OT after h</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
     r.users.map(u=>{
       const o=(r.byUser&&r.byUser[u.username])||{};
       const e=u.effective;
       return `<tr data-u="${esc(u.username)}"><td style="text-align:left;font-weight:600">${esc(u.name)}</td>
         <td class="muted">${esc(u.employment)}</td>
+        <td><select class="c-reminder" title="What they're reminded + locked to do for last week">
+          <option value="" ${!o.reminder?"selected":""}>Default (${esc(u.effReminder==="invoice"?"invoice":u.effReminder==="timesheet"?"timesheet":"off")})</option>
+          <option value="off" ${o.reminder==="off"?"selected":""}>Off</option>
+          <option value="timesheet" ${o.reminder==="timesheet"?"selected":""}>Timesheet</option>
+          <option value="invoice" ${o.reminder==="invoice"?"selected":""}>Invoice</option></select></td>
         <td><input type="checkbox" class="c-commute" ${e.commute?"checked":""}></td>
         <td><input type="checkbox" class="c-lunch" ${e.lunch?"checked":""}></td>
         <td><input type="checkbox" class="c-mileage" ${e.mileage?"checked":""}></td>
@@ -560,6 +572,7 @@ function collectCfg(){
   const byUser={};
   g("cfgTable").querySelectorAll("tr[data-u]").forEach(tr=>{
     byUser[tr.dataset.u]={
+      reminder:tr.querySelector(".c-reminder").value,
       commute:tr.querySelector(".c-commute").checked,
       lunch:tr.querySelector(".c-lunch").checked,
       mileage:tr.querySelector(".c-mileage").checked,
@@ -578,6 +591,9 @@ function collectCfg(){
     radiusMiles:+g("d-radius").value||10,overtimeThresholdH:+g("d-otthresh").value||8,
     dueDow:+g("d-duedow").value,dueTime:g("d-duetime").value||"12:00",
     remindersOn:g("d-remind").checked,
+    emailInvoices:g("d-emailon").checked,
+    emailDow:+g("d-emaildow").value,emailTime:g("d-emailtime").value||"13:00",
+    invoiceEmail:g("d-accemail").value.trim(),
     basePostcode:g("d-base").value.trim().toUpperCase()||"PO15 5RQ",
     company:g("d-company").value};
   return {defaults,byUser};

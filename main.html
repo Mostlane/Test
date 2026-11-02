@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <script src="/portal-config.js?v=47"></script>
   <script src="/van-check-gate.js?v=4"></script>
+  <script src="/timesheet-gate.js?v=1"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -1137,13 +1138,17 @@ const MAP = window.ML_PERM_MAP || {
       jobs.push(fetch(window.MOSTLANE_API + "/ts/outstanding", H)
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (!d || !d.ok || !(d.count > 0)) return;
+          if (!d || !d.ok || !d.due) return;
+          var invoice = (d.kind === "invoice" || d.mode === "invoice");
           var dueMs = d.dueAt ? new Date(d.dueAt).getTime() : 0;
           var dueTxt = d.dueAt ? new Date(d.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) : (d.dueLabel || "");
+          var text;
+          if (invoice) text = d.overdue ? "Your invoice for last week is past the deadline — was due " + dueTxt + "." : "Submit your invoice for last week by " + dueTxt + ".";
+          else text = (d.overdue ? "Enter your hours for last week — was due " + dueTxt + "." : "Enter the hours you worked last week by " + dueTxt + ".") + (d.count > 0 ? " " + d.count + " job" + (d.count === 1 ? "" : "s") + " still need hours." : "");
           notes.push({
-            n: d.count, icon: "⏱", href: "engineer-timesheet.html?week=" + encodeURIComponent(d.week),
-            title: d.overdue ? "Timesheet OVERDUE" : "Complete last week's timesheet",
-            text: (d.overdue ? "Enter hours for every job — was due " + dueTxt + "." : "Enter the hours you worked on every job by " + dueTxt + ".") + " " + d.count + " job" + (d.count === 1 ? "" : "s") + " still need hours.",
+            n: d.count || 1, icon: invoice ? "🧾" : "⏱", href: "engineer-timesheet.html?week=" + encodeURIComponent(d.week),
+            title: invoice ? (d.overdue ? "Invoice OVERDUE" : "Send last week's invoice") : (d.overdue ? "Timesheet OVERDUE" : "Complete last week's timesheet"),
+            text: text,
             timeGated: true,
             snoozeUntil: (dueMs && !d.overdue) ? (dueMs - 2 * 3600 * 1000) : 0,
             dueMs: dueMs
