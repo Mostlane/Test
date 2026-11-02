@@ -367,16 +367,22 @@ async function listStoreFiles(env, origin, tid, scheme, code) {
   for (const r of results || []) {
     (byType[r.type] = byType[r.type] || []).push({
       id: r.id, year: r.year, filename: r.filename, label: r.label || null, pinned: r.pinned ? 1 : 0,
-      size: r.size, date: r.doc_date || r.uploaded_at,
+      size: r.size, date: r.doc_date || r.uploaded_at, uploadedAt: r.uploaded_at || null,
       url: await signedFileUrl(env, origin, "/compliance/file", r.r2_key),
     });
   }
   // "current" set per type: if any files are pinned, ALL pinned ones are current
-  // (two linked docs stay current together); else the newest single file is current.
+  // (two linked docs stay current together, and a pin is how the office chooses
+  // WHICH document the 📄 icon opens). With no pin, the MOST RECENTLY UPLOADED file
+  // is current (not the newest by cert date) — so a freshly uploaded doc shows by
+  // default even if it carries an older/blank date.
   for (const t of Object.keys(byType)) {
     const arr = byType[t];
     const anyPinned = arr.some((f) => f.pinned);
-    arr.forEach((f, i) => { f.current = anyPinned ? !!f.pinned : (i === 0); });
+    if (anyPinned) { arr.forEach((f) => { f.current = !!f.pinned; }); continue; }
+    let newest = 0;
+    for (let i = 1; i < arr.length; i++) if ((arr[i].uploadedAt || "") > (arr[newest].uploadedAt || "")) newest = i;
+    arr.forEach((f, i) => { f.current = (i === newest); });
   }
   return byType;
 }
@@ -522,8 +528,10 @@ export async function handle(request, env, ctx, url, sess) {
   // ── Latest cert URL for a store+type (used by the 📄 links) ─────────────────
   if (sub === "/file-url" && method === "GET") {
     const code = pad4(q.get("code")), type = canonType(q.get("type"));
+    // Pinned doc wins (the office's chosen "show this one"), else the most
+    // recently UPLOADED — same rule as listStoreFiles' `current`.
     const row = await env.DB.prepare(
-      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
+      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY pinned DESC, uploaded_at DESC, COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
     ).bind(tid, scheme, code, type).first();
     if (!row) return jr({ error: "No file" }, headers, 404);
     return jr({ ok: true, url: await signedFileUrl(env, url.origin, "/compliance/file", row.r2_key) }, headers);

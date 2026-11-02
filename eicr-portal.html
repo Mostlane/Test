@@ -737,7 +737,7 @@ function openUploadModal(code, file){
       <input type="file" id="ufolder" webkitdirectory directory multiple>
       <p class="drop-note" style="margin:4px 0 0">Every PDF inside the folder <b>and its sub-folders</b> is added as its own named document (named from its file/sub-folder path). Desktop only.</p>
     </div>
-    <p class="drop-note">The newest document becomes the current one; older ones are kept as previous versions (never deleted). A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
+    <p class="drop-note">The most recently uploaded document becomes the current one (the one the 📄 icon opens); older ones are kept as previous versions (never deleted). To pin a specific document as the one shown, open 🗂 Documents and tick <b>keep</b> on it. A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
     <div class="actions">
       <button class="btn" id="udo">Upload</button>
       <button class="btn" style="background:#ccc;color:#000;" id="uc">Cancel</button>
@@ -870,7 +870,7 @@ async function openVersionsModal(code){
     const isOther=(type==='other');
     const badge=isOther?'':(f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>');
     const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
-    const keep=(canEdit&&!isOther)?`<label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
+    const keep=(canEdit&&!isOther)?`<label class="pin" title="Show this document as the current one (the 📄 icon opens it). Tick two or more of a type to link them as current together."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
     const edit=canEdit?`${keep}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:'';
     return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${esc(f.id)}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${esc(f.url)}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
   }
