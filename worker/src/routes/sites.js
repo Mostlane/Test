@@ -418,11 +418,23 @@ async function ensureCustomer(env, tenantId, id) {
 // missing, otherwise update coords / category / rename. `oldName` lets a rename
 // find the existing row so the geofence follows the portal record. Best-effort.
 // Uses the in-process handler when SITELOG_DB is bound, else the remote HTTP API.
+// Which portal sites belong in SiteLog (QR sign-ins): every Project, plus any
+// other site ticked "Use for SiteLog sign-ins" (data.siteLog === true).
+// Everything else stays portal-only (2 Nov 2026 tidy — SiteLog used to hold all ~500).
+export function siteLogEligible(site) {
+  return String((site && site.client) || "").toLowerCase().trim() === "projects" || !!(site && site.siteLog === true);
+}
+
 export async function syncSiteToSiteLog(env, site, oldName) {
   try {
     if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "no-secret" };
     const name = String(site.siteName || "").trim();
     if (!name) return { ok: false, reason: "no-name" };
+    if (!siteLogEligible(site)) {
+      // Tick switched off → archive its geofence; otherwise leave SiteLog alone.
+      if (site.siteLog === false) return await removeSiteFromSiteLog(env, oldName || name, { archive: true });
+      return { ok: false, reason: "not-sitelog-site" };
+    }
     const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
     // Always send `archived` (0 or 1) so a site flipped Inactive→Active on the
     // portal ALSO un-archives the geofence — otherwise archive is one-way.

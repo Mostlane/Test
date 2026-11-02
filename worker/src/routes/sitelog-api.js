@@ -1291,6 +1291,10 @@ async function handleInner(request, env, ctx) {
 
     // GET /sites
     if (url.pathname === "/sites" && request.method === "GET") {
+      // Admin only (2 Nov 2026): it lists every site's name, location and rules,
+      // and was readable by anyone. The scanner never calls it.
+      const guardSites = requireAdmin();
+      if (guardSites) return guardSites;
       await ensureOfflineSchema(env);
       const rows = await env.SITELOG_DB.prepare(
         "SELECT * FROM sites ORDER BY site_name ASC"

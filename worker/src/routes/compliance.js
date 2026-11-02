@@ -908,7 +908,7 @@ export async function handle(request, env, ctx, url, sess) {
               .bind(JSON.stringify(d), tid, s.client, siteNo).run();
             // Push the new coord to SiteLog too (upsert, so an existing geofence
             // gets moved instead of a duplicate). Best-effort.
-            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client }));
+            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client, siteLog: d.siteLog }));
           }
         }
       } catch {}
