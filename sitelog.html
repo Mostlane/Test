@@ -100,6 +100,12 @@
     .ev.auto{ background:#fff5f5; } .ev.open{ background:#fffbeb; } .ev.scanned{ background:#f5f3ff; } .ev.refused{ background:#fef2f2; }
     .ev.refused .site{ color:#b91c1c; }
     .lgempty{ padding:22px; text-align:center; color:var(--muted); }
+    .osr{ padding:9px 0; border-bottom:1px solid #eef1f5; } .osr:last-child{ border-bottom:none; }
+    .osr-top{ display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; } .osr-t{ margin-left:auto; font-size:13px; color:#475569; }
+    .osr-loc{ display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; margin-top:4px; font-size:13px; }
+    .locv.ok{ color:#0e7a3b; font-weight:600; } .locv.no{ color:#b91c1c; font-weight:600; }
+    .soft{ margin-top:14px; padding:10px 12px; border:1px dashed #c4b5fd; background:#faf7ff; border-radius:12px; }
+    .soft h3{ margin:0 0 4px; font-size:14px; color:#5b21b6; }
     .site-grp{ margin-bottom:10px; } .site-grp h3{ margin:0 0 4px; font-size:14px; color:#0f172a; }
     .kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
     .kpi{ border:1px solid #e5e9ef; border-radius:12px; padding:10px 12px; cursor:pointer; background:#fff; }
@@ -231,26 +237,43 @@ function fmtTime(v){ try { const d = new Date(v); return isNaN(d) ? String(v||""
 
 async function loadOnSite(){
   try{
-    const res = await authFetch(`${API}/sitelog/on-site`, {cache:"no-store"});
+    const res = await authFetch(`${API}/sitelog-ts/now`, {cache:"no-store"});
     if(res.status === 403 || res.status === 401) return;
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || "SiteLog error");
-    const list = Array.isArray(data) ? data : (data.rows || data.visits || data.onSite || data.people || []);
+    const list = data.onSite || [], offered = data.offered || [];
     $("onSiteCount").textContent = `(${list.length})`;
-    if(!list.length){ $("onSiteList").textContent = "Nobody is signed in to a site right now."; return; }
-    const bySite = {};
-    list.forEach(v => { const site = v.site_name || v.site || v.site_code || v.provided_site_name || "Unknown site"; (bySite[site] = bySite[site] || []).push(v); });
-    $("onSiteList").innerHTML = Object.keys(bySite).sort().map(site => `<div class="site-grp"><h3>${esc(site)} <span class="muted">(${bySite[site].length})</span></h3>` +
-      bySite[site].map(v => {
-        const name = v.name || [v.first_name, v.last_name].filter(Boolean).join(" ") || v.person_name || "Unknown";
-        const inAt = v.check_in_at || v.checkin_at || v.in_at || "";
-        return `<div class="row"><b>${esc(name)}</b><span class="muted">${esc(v.company || "")}</span><span class="meta">${inAt ? "since " + esc(fmtTime(inAt)) : ""}</span></div>`;
-      }).join("") + `</div>`).join("");
+    const loc = v => v.verified
+      ? `<span class="locv ok">${tick(true)} Location verified${v.distance != null ? ` · ${v.distance} m from site` : ""}</span>`
+      : `<span class="locv no">${tick(false)} ${v.manual ? "Added by the office — no location" : v.offline ? "Signed in offline — not checked" : "Location not verified"}</span>`;
+    let html = "";
+    if(!list.length) html = `<div class="muted">Nobody is signed in to a site right now.</div>`;
+    else {
+      const bySite = {};
+      list.forEach(v => (bySite[v.site || "Unknown site"] = bySite[v.site || "Unknown site"] || []).push(v));
+      html = Object.keys(bySite).sort().map(site => `<div class="site-grp"><h3>${esc(site)} <span class="muted">(${bySite[site].length})</span></h3>` +
+        bySite[site].map(v => `<div class="osr"><div class="osr-top"><b>${esc(v.name)}</b><span class="muted">${esc(v.company)}</span>
+          <span class="osr-t">since ${esc(v.inTime)}${v.notToday ? ` <span class="pill bad">since ${esc(v.inDay)}</span>` : ""} · ${hm(v.soFar)}</span></div>
+          <div class="osr-loc">${loc(v)} ${mapBtn(v.mapUrl)}</div></div>`).join("") + `</div>`).join("");
+    }
+    if(offered.length){
+      html += `<div class="soft"><h3>🟣 Sign-in offered, not tapped <span class="muted">(${offered.length})</span></h3>
+        <div class="muted" style="font-size:12.5px;margin:-2px 0 6px">Scanned the QR today but never pressed <b>Sign in</b> — they are <b>not</b> counted as on site.</div>` +
+        offered.map(o => {
+          const where = o.inside === true ? `<span class="locv ok">${tick(true)} Inside the site boundary${o.distance != null ? ` · ${o.distance} m` : ""}</span>`
+            : o.inside === false ? `<span class="locv no">${tick(false)} Outside the boundary · ${o.distance} m away</span>`
+            : `<span class="locv no">${tick(false)} Location not known</span>`;
+          const what = o.kind === "new_phone" ? "New phone — registration offered" : "Soft scan — sign-in offered";
+          return `<div class="osr soft-r"><div class="osr-top"><b>${esc(o.name)}</b><span class="muted">${esc(o.company)}</span>
+            <span class="osr-t">${esc(o.site)} · ${esc(o.time)}${o.attempts > 1 ? ` (${o.attempts} scans from ${esc(o.firstTime)})` : ""}</span></div>
+            <div class="osr-loc"><span class="pill scn">${what}</span> ${where} ${mapBtn(o.mapUrl)}</div></div>`;
+        }).join("") + `</div>`;
+    }
+    $("onSiteList").classList.remove("muted");
+    $("onSiteList").innerHTML = html;
   }catch(e){
     $("onSiteList").textContent = "";
-    $("adminMsg").textContent = e.message === "SITELOG_ADMIN_SECRET is not configured on this worker"
-      ? "SiteLog secret isn't set on the portal worker yet."
-      : "Couldn't reach SiteLog: " + e.message;
+    $("adminMsg").textContent = "Couldn't reach SiteLog: " + e.message;
   }
 }
 
