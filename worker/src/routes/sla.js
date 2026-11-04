@@ -2587,6 +2587,7 @@ export async function handle(request, env, ctx, url, sess) {
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
       const pOpts = edited != null ? { details: edited } : {};
       if (typeof b.target === "string") pOpts.target = b.target;   // per-email response-time override ("" hides it)
+      pOpts.addrPrefix = await siteAddrPrefix(env, tenantId, job);
       if (sc.declineLink) pOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, true);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, pOpts);
       const warnings = [];
@@ -2690,6 +2691,7 @@ export async function handle(request, env, ctx, url, sess) {
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
       const sOpts = edited != null ? { details: edited } : {};
       if (typeof b.target === "string") sOpts.target = b.target;   // per-email response-time override ("" hides it)
+      sOpts.addrPrefix = await siteAddrPrefix(env, tenantId, job);
       if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
       const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html, attachments: ab.attachments });
@@ -7538,6 +7540,13 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
   // The address box always carries the postcode (it used to be in the subject only).
   let addr = String(job.address || job.siteName || "").trim();
+  // Brand prefix by site type (Jamie's spec) — e.g. "The Southern co-op, <address>".
+  // Skipped when the address already leads with it (don't double-prefix).
+  const addrPrefix = opts.addrPrefix ? String(opts.addrPrefix).trim() : "";
+  if (addrPrefix) {
+    const norm = s => String(s).toLowerCase().replace(/[\s'’,.]/g, "");
+    if (!norm(addr).startsWith(norm(addrPrefix))) addr = addr ? addrPrefix + ", " + addr : addrPrefix;
+  }
   if (pc && !addr.toUpperCase().replace(/\s/g, "").includes(pc.replace(/\s/g, ""))) addr = addr ? addr + ", " + pc : pc;
   const details = opts.details != null ? String(opts.details) : subconDetails(job);
   const box = (label, val, big = true) => `<table style="width:100%;background:#f3f6fa;border-radius:12px;margin-bottom:10px"><tr><td style="padding:14px 18px"><div style="font-size:12px;color:#7a8794;text-transform:uppercase;letter-spacing:.04em">${escH(label)}</div><div style="font-size:${big ? 16 : 15}px;${big ? "font-weight:600;color:#1c2733" : "color:#33424f;line-height:1.5"};margin-top:3px">${escH(val || "—").replace(/\n/g, "<br>")}</div></td></tr></table>`;
@@ -8705,6 +8714,34 @@ function customerForClient(c) {
   if (c === "fbc") return "Fareham Borough Council";
   if (c === "chapplins") return "Chapplins Lettings";
   return "";
+}
+
+// The brand prefix prepended to a subcontractor order's ADDRESS so the sub knows
+// the customer/premises type (Jamie's spec). Keyed by the site's `client`/storeType.
+function addrPrefixForClient(c) {
+  c = String(c || "").toLowerCase().trim().replace(/[\s'’_]/g, "");
+  if (c === "cobra") return "Starbucks";
+  if (c === "retail") return "The Southern co-op";
+  if (c === "els" || c === "elsprivate") return "Co-operative Funeralcare";
+  if (c === "wenzels" || c === "wenzel") return "Wenzel's";
+  return "";
+}
+// Resolve a job's address-prefix: job.client/storeType first, else the site record.
+async function siteAddrPrefix(env, tenantId, job) {
+  let cl = job.client || job.storeType || "";
+  if (!cl) {
+    const code = String(job.siteCode || "").trim();
+    if (code) {
+      try {
+        const padded = /^\d+$/.test(code) ? code.padStart(4, "0") : code;
+        const row = await env.DB.prepare(
+          "SELECT client FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
+        ).bind(tenantId, code, padded, code).first();
+        if (row) cl = row.client || "";
+      } catch {}
+    }
+  }
+  return addrPrefixForClient(cl);
 }
 
 // Resolve a job's billing customer name AND full site name from the site record

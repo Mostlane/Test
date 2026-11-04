@@ -259,6 +259,16 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   const e = sla.buildMetroRodEmail({ address: "1 High St, PO12 4EH", postcode: "PO12 4EH" }, 0, "1", null, { details: "Edited text" });
   ok("postcode not doubled + details override used", !/PO12 4EH, PO12 4EH/.test(e.html) && /Edited text/.test(e.html)); }
 
+// Brand prefix on the address by site type (Jamie's spec)
+{ const addr = m => (m.html.match(/Address[\s\S]*?font-size:1[56]px[^>]*>([\s\S]*?)<\/div>/) || [])[1] || "";
+  const build = (pfx, job) => sla.buildMetroRodEmail(job, 0, "PO1", null, { addrPrefix: pfx });
+  ok("Retail → The Southern co-op,", addr(build("The Southern co-op", { address: "1 High St", postcode: "PO1 1AA" })) === "The Southern co-op, 1 High St, PO1 1AA");
+  ok("Cobra → Starbucks,", addr(build("Starbucks", { address: "Jubilee St" })).startsWith("Starbucks, Jubilee St"));
+  ok("ELS → Co-operative Funeralcare,", addr(build("Co-operative Funeralcare", { address: "5 Mill Rd" })).startsWith("Co-operative Funeralcare, 5 Mill Rd"));
+  ok("Wenzels → Wenzel's,", addr(build("Wenzel's", { address: "3 Bakery Ln" })).startsWith("Wenzel&#39;s, 3 Bakery Ln"));
+  ok("no prefix for FBC/others", addr(build("", { address: "Civic Offices" })) === "Civic Offices");
+  ok("never double-prefixes an address that already has it", (addr(build("The Southern co-op", { address: "The Southern co-op, 1 High St" })).match(/Southern co-op/gi) || []).length === 1); }
+
 // preview before send + test copy + edited details actually sent
 { const E = makeEnv();
   const p = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" });
