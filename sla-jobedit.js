@@ -186,6 +186,33 @@
     if (y < MLJE_YR - 1 || y > MLJE_YR + 3) return label + " has the year " + y + " — check the date.";
     return null;
   }
+  // 📆 Allocate on more than one day — add an extra-day row (date box + ✕ remove).
+  function mljeAddDay(prefill) {
+    const box = document.getElementById("mljeExtraDays"); if (!box) return;
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;align-items:center;";
+    const inp = document.createElement("input");
+    inp.type = "date"; inp.className = "mlje-extra-day"; inp.min = MLJE_DMIN; inp.max = MLJE_DMAX;
+    inp.style.cssText = "flex:1 1 150px;min-width:140px;padding:8px;border:1px solid #cbd5e1;border-radius:8px;";
+    if (prefill) inp.value = prefill;
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.textContent = "✕"; rm.title = "Remove this day";
+    rm.style.cssText = "background:#fff;border:1px solid #cdd6e0;color:#b4232a;font-weight:700;border-radius:8px;padding:6px 10px;cursor:pointer;";
+    rm.addEventListener("click", () => row.remove());
+    row.appendChild(inp); row.appendChild(rm);
+    box.appendChild(row);
+  }
+  // The chosen extra days (YYYY-MM-DD), deduped, blanks dropped.
+  function mljeExtraDayList() {
+    const cb = document.getElementById("mljeMultiDay");
+    if (!cb || !cb.checked) return [];
+    const out = [], seen = {};
+    document.querySelectorAll("#mljeExtraDays .mlje-extra-day").forEach(i => {
+      const v = (i.value || "").trim();
+      if (v && !seen[v]) { seen[v] = 1; out.push(v); }
+    });
+    return out;
+  }
   const HTML = `
   <div class="mlje-modal" role="dialog" aria-modal="true">
     <h2 id="mljeTitle">Edit job</h2>
@@ -239,6 +266,12 @@
         <div id="mljeSchedUndo" style="display:none;margin-top:6px;">
           <button type="button" id="mljeSchedUndoBtn" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-weight:600;font-size:13px;border-radius:8px;padding:6px 10px;cursor:pointer;">↩ Undo last schedule change</button>
           <span id="mljeSchedUndoWhen" class="mlje-hint" style="margin-left:6px;"></span>
+        </div>
+        <label class="mlje-chk" style="margin-top:8px;"><input type="checkbox" id="mljeMultiDay"> 📆 Allocate on more than one day</label>
+        <div id="mljeMultiWrap" style="display:none;margin-top:4px;">
+          <div class="mlje-hint" style="margin:0 0 6px;">A copy of this job (same time, engineers &amp; details) is created on each extra day you add.</div>
+          <div id="mljeExtraDays" style="display:flex;flex-direction:column;gap:6px;"></div>
+          <button type="button" id="mljeAddDayBtn" style="margin-top:6px;background:#eef3f9;border:1px solid #cdd6e0;color:#003468;font-weight:600;font-size:13px;border-radius:8px;padding:6px 10px;cursor:pointer;">➕ Add another day</button>
         </div>
 
         <label for="mljeDuration">Expected duration <small style="font-weight:400;color:#64748b;">(time on site — used to predict the route/day)</small></label>
@@ -373,6 +406,13 @@
     $("mljeSchedClear").addEventListener("click", () => {
       $("mljeSchedDate").value = ""; $("mljeSchedStart").value = ""; $("mljeSchedEnd").value = "";
     });
+    // 📆 Allocate on more than one day: tick to reveal the extra-day list.
+    $("mljeMultiDay").addEventListener("change", () => {
+      const on = $("mljeMultiDay").checked;
+      $("mljeMultiWrap").style.display = on ? "block" : "none";
+      if (on && !$("mljeExtraDays").children.length) mljeAddDay();
+    });
+    $("mljeAddDayBtn").addEventListener("click", () => mljeAddDay());
     // One-tap undo of the last schedule change (a common accidental mobile nudge).
     // The server stashes the pre-change times on the job; this reverts to them.
     $("mljeSchedUndoBtn").addEventListener("click", async () => {
@@ -695,6 +735,8 @@
     $("mljeSchedDate").value = (sAt && !isNaN(sAt)) ? pd(sAt) : "";
     $("mljeSchedStart").value = (sAt && !isNaN(sAt)) ? p2(sAt.getHours()) + ":" + p2(sAt.getMinutes()) : "";
     $("mljeSchedEnd").value = (sEnd && !isNaN(sEnd)) ? p2(sEnd.getHours()) + ":" + p2(sEnd.getMinutes()) : "";
+    // Reset the "allocate on more than one day" control for this job.
+    if ($("mljeMultiDay")) { $("mljeMultiDay").checked = false; $("mljeMultiWrap").style.display = "none"; $("mljeExtraDays").innerHTML = ""; }
     // Expected duration: the job's own field, else derived from start→finish, else 1h.
     {
       let dm = (job.durationMinutes && job.durationMinutes >= 15) ? Math.round(job.durationMinutes)
@@ -908,6 +950,15 @@
       if (badDate) { msg.textContent = "⚠ " + badDate; msg.className = "mlje-msg err"; $("mljeSave").disabled = false; return; }
     }
 
+    // 📆 Allocate on more than one day: the main day must be scheduled (it's the
+    // first day), and every extra day must be a sane date.
+    const extraDays = mljeExtraDayList();
+    if (extraDays.length) {
+      if (!scheduledAt) { msg.textContent = "⚠ Set this job's date & time first — the extra days copy its time."; msg.className = "mlje-msg err"; $("mljeSave").disabled = false; return; }
+      const bd = extraDays.map(d => mljeBadDate(d + "T12:00:00", "An extra day")).find(Boolean);
+      if (bd) { msg.textContent = "⚠ " + bd; msg.className = "mlje-msg err"; $("mljeSave").disabled = false; return; }
+    }
+
     // Visibility ("release"): null = visible now, else the chosen mode.
     let release = null;
     const vm = visMode();
@@ -991,7 +1042,44 @@
       });
       if (!r.ok) { let t = ""; try { t = (await r.json()).error || ""; } catch (e) {} throw new Error(t || ("HTTP " + r.status)); }
       const saved = await r.json();
-      msg.textContent = "✅ Saved.";
+      // 📆 Allocate on more than one day: create an independent copy of this job
+      // on each extra day (same time, engineers & details). New job per day (no id),
+      // so each stands on its own; not a project drip series.
+      let multiMade = 0;
+      if (extraDays.length) {
+        const timeStr = schedStart || "08:00";
+        const base = {
+          reference: $("mljeRef").value.trim() || undefined,
+          description: $("mljeDesc").value.trim() || undefined,
+          priority: $("mljePriority").value,
+          status: $("mljeStatus").value,
+          workArea: $("mljeWorkArea") ? ($("mljeWorkArea").value || "") : undefined,
+          siteCode: siteCode || undefined, siteName, address, postcode, telephone,
+          lat: (lat != null ? lat : undefined), lon: (lon != null ? lon : undefined),
+          storeType: currentJob.storeType || undefined,
+          note: $("mljeNote").value.trim() || undefined,
+          durationMinutes: durationMinutes || undefined,
+          assignedEngineers: assignedEngineers, assignedTo: assignedEngineers[0] || "",
+          requiresRA: $("mljeReqRA").checked, requiresSignature: $("mljeReqSig").checked,
+          requiresPhoto: $("mljeReqPhoto").checked, requiresNote: $("mljeReqNote").checked,
+          release: release,
+          firestopping: !!currentJob.firestopping, elecTest: !!currentJob.elecTest,
+          emTest: !!currentJob.emTest, emKind: currentJob.emKind || undefined,
+          pat: !!currentJob.pat, pumpMaintenance: !!currentJob.pumpMaintenance,
+          pumpStore: currentJob.pumpStore || undefined,
+          projectId: currentJob.projectId || undefined,
+          changedBy: currentUser()
+        };
+        msg.textContent = "Creating " + extraDays.length + " more day" + (extraDays.length === 1 ? "" : "s") + "…";
+        for (const d of extraDays) {
+          const st = new Date(d + "T" + timeStr + ":00");
+          let en;
+          if (schedEnd) { const e = new Date(d + "T" + schedEnd + ":00"); if (!isNaN(e)) { if (e <= st) e.setDate(e.getDate() + 1); en = e.toISOString(); } }
+          const dp = Object.assign({}, base, { scheduledAt: st.toISOString(), scheduledEnd: en });
+          try { const rr = await authFetch("/sla/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dp) }); if (rr.ok) multiMade++; } catch (e) {}
+        }
+      }
+      msg.textContent = "✅ Saved." + (multiMade ? " +" + multiMade + " more day" + (multiMade === 1 ? "" : "s") + "." : "");
       msg.className = "mlje-msg ok";
       const cb = onSavedCb;
       if (cb) { try { cb(saved); } catch (e) {} }
