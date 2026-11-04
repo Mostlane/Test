@@ -6366,6 +6366,15 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `buildMetroRodEmail` (5th arg `opts.details`): the Address box now carries the
   **postcode** (it was only in the subject), a 1–3 digit store code is padded ("0148"),
   and `subconDetails` strips the portal's own "↩ …" visit-link lines. A sub with no email
+  **Address brand prefix by site type (4 Nov 2026, Jamie):** the Address box leads with the
+  customer/premises brand so the sub knows what kind of place it is — **Cobra → "Starbucks,"**,
+  **Retail → "The Southern co-op,"**, **ELS + ELS Private → "Co-operative Funeralcare,"**,
+  **Wenzels → "Wenzel's,"** (FBC/Chapplins/projects/unknown get none). `addrPrefixForClient(client)`
+  is the map; `siteAddrPrefix(env,tid,job)` resolves the client from `job.client`/`storeType` else
+  the `sites` record (so a Concerto job with only a siteCode still resolves) and is passed as
+  `opts.addrPrefix` on BOTH the send AND the preview/test paths; `buildMetroRodEmail` prepends it
+  **guarded so it never double-prefixes** an address that already leads with the brand. Tests in
+  test-drainage.mjs (all five brands + no-prefix + no-double).
   now gets "X has no email address" instead of "Unknown subcontractor" (only Metro Rod has
   one today). OPEN: the email footer says "Segensworth Business Centre, Fareham, PO15 5RQ"
   — other templates say "Segensworth Road… Titchfield"; confirm the right one.
