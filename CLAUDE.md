@@ -2885,7 +2885,7 @@ leaks, taps, cisterns, flushing, water supply; hot water, water hygiene, washroo
 - **Pages:** engineer-skills.html is TRANSPOSED (types down the side grouped by trade, tap a
   name for its description; engineers across; a grey **trade row sets every type in that
   trade** at once) and the editor has group + description per type; subcontractors.html,
-  add-job.html and sla-jobedit.js (`?v=36`) group the picker by trade with descriptions as
+  add-job.html and sla-jobedit.js (`?v=37`) group the picker by trade with descriptions as
   tooltips. **Adding a type:** add it to WORK_TYPES with a sharp description + kw, add
   real examples to test-worktypes.mjs. A tenant's saved custom list is never overwritten.
 
@@ -3267,16 +3267,26 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   the URL). If the block isn't there (engineer is office staff hidden by the toggle /
   no slot that day) the status line says so instead of a blank board. Unassigned or
   unscheduled jobs keep the old success panel.
-- **📆 Allocate on more than one day (add-job.html, Nov 2026).** A "📆 Allocate on
-  more than one day" tickbox under the Allocate date/time reveals an add-a-day list
-  (each a date box + ✕). On submit, after the main job is created, add-job.html loops
-  the extra days and POSTs **one independent copy of the job per day** (`POST /jobs`,
-  same description/site/engineers/requirements/release, `scheduledAt` = that day +
-  the chosen time via `extraDayDates()`); the success line reads "…+N more days".
-  Client-only — the main day must be set (it's the first day), each extra day is
-  year-checked, and it's ignored for a standby/fallback template. Deliberately NOT a
-  project drip series (no `seriesId`, no auto-skip-on-clash) — these are plain
-  reactive jobs that each stand alone, so editing one doesn't touch the others.
+- **📆 Allocate on more than one day — Add Job AND every edit card (Nov 2026).** A
+  "📆 Allocate on more than one day" tickbox under the Allocate/Schedule date & time
+  reveals an add-a-day list (each a date box + ✕). On save, after the main job is
+  created/updated, **one independent copy of the job is created per extra day** (same
+  description/site/engineers/requirements/release/job-type/duration, `scheduledAt` =
+  that day + the chosen start time; `scheduledEnd` from the finish box). The success
+  line reads "…+N more days". Client-only, no worker change — `POST /sla/jobs` with no
+  `id` mints a fresh job each time (same reference is fine: it only upserts-by-ref with
+  `dedupeByRef`). The main day must be scheduled first (it's day one), each extra day is
+  year-checked, and it's skipped for a standby/fallback template. Deliberately NOT a
+  project drip series (no `seriesId`, no auto-skip-on-clash) — plain reactive jobs that
+  each stand alone, so editing one doesn't touch the others.
+  - **add-job.html**: tickbox under "Allocate", loops `extraDayDates()` → `POST /jobs`
+    (the bridged create). 
+  - **The shared editor `sla-jobedit.js` (`?v=37`)** — the "Edit job" card on sla-main /
+    sla-scheduler / job-view: tickbox under "Scheduled date & times" (`#mljeMultiDay`/
+    `#mljeExtraDays`, helpers `mljeAddDay`/`mljeExtraDayList`). After the job's PATCH it
+    builds a create payload from the editor's current values + `currentJob`'s job-type
+    flags and `POST`s `/sla/jobs` (no id) per extra day. Reset on each open. So multi-day
+    allocation is available on EVERY job-editing card, not just Add Job.
 
 ## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
 A live at-a-glance office view of where every field engineer is right now.
