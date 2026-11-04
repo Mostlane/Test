@@ -673,14 +673,15 @@ function shapeOrder(r) {
     emailSubject: r.email_subject || "", emailFrom: r.email_from || "",
   };
 }
-// The trade an order is for — so the board can filter by it. R/REM orders and
-// anything matched to an EM/EICR/electrical-test remedial are Electrical; else
-// the description is read by the work-type classifier (group name), default
-// "General".
+// The trade an order is for — so the board can filter by it. Anything matched to
+// an EM/EICR/electrical-test remedial is Electrical, as is a REM#### remedial
+// order. A bare R#####/PPM##### is just Concerto's order number and can be ANY
+// trade (e.g. "replacement worktop"), so it's read by the work-type classifier
+// (group name) from the description; default "General".
 function tradeForOrder(o) {
-  const num = String(o.orderNumber || "").trim().toUpperCase();
-  if (/^(R|REM)\d/.test(num) || /^(R|REM)[-\s]/.test(num)) return "Electrical";
   if (o.matchedKind === "em" || o.matchedKind === "fiveyear" || o.matchedKind === "elec") return "Electrical";
+  const num = String(o.orderNumber || "").trim().toUpperCase();
+  if (/^REM[\d\-\s]/.test(num)) return "Electrical";   // REM#### = electrical remedials
   try {
     const hit = classifyWork([o.title, o.detail, o.description].filter(Boolean).join("\n"));
     if (hit && hit.group) return hit.group;

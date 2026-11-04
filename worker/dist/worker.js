@@ -19331,9 +19331,9 @@ function shapeOrder(r) {
   };
 }
 function tradeForOrder(o) {
-  const num5 = String(o.orderNumber || "").trim().toUpperCase();
-  if (/^(R|REM)\d/.test(num5) || /^(R|REM)[-\s]/.test(num5)) return "Electrical";
   if (o.matchedKind === "em" || o.matchedKind === "fiveyear" || o.matchedKind === "elec") return "Electrical";
+  const num5 = String(o.orderNumber || "").trim().toUpperCase();
+  if (/^REM[\d\-\s]/.test(num5)) return "Electrical";
   try {
     const hit = classifyWork([o.title, o.detail, o.description].filter(Boolean).join("\n"));
     if (hit && hit.group) return hit.group;

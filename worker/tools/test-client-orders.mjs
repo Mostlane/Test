@@ -291,13 +291,18 @@ const inbound = (E, body) => J(certs, "/certs/remedials/order-inbound", null, { 
 }
 { // 13. the board tags each order with a TRADE and offers one "create works job" button
   const E = makeEnv();
-  await inbound(E, { orderNumber: "R30100", client: "Southern Co-op", orderValue: 200, storeCode: "0335", siteName: "Test Store", description: "EICR remedial works", externalId: "<ord-13a@concerto>" });
+  await inbound(E, { orderNumber: "REM0300", client: "Southern Co-op", orderValue: 200, storeCode: "0335", siteName: "Test Store", description: "EICR remedial works", externalId: "<ord-13a@concerto>" });
   await inbound(E, { orderNumber: "00088000/1", client: "Southern Co-op", orderValue: 90, storeCode: "0335", siteName: "Test Store", description: "Toilet blocked and overflowing, backing up", externalId: "<ord-13b@concerto>" });
   const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
   const byNum = n => b.body.orders.find(o => o.orderNumber === n);
-  ok("R-order tagged Electrical + canCreateWorks", byNum("R30100").trade === "Electrical" && byNum("R30100").canCreateWorks === true, JSON.stringify({ t: byNum("R30100").trade, c: byNum("R30100").canCreateWorks }));
+  ok("REM remedial order tagged Electrical + canCreateWorks", byNum("REM0300").trade === "Electrical" && byNum("REM0300").canCreateWorks === true, JSON.stringify({ t: byNum("REM0300").trade, c: byNum("REM0300").canCreateWorks }));
   ok("a blocked-drain reactive order is tagged Drainage", byNum("00088000/1").trade === "Drainage", byNum("00088000/1").trade);
   ok("GET returns the list of trades present", Array.isArray(b.body.trades) && b.body.trades.includes("Electrical") && b.body.trades.includes("Drainage"), JSON.stringify(b.body.trades));
+  // A bare R#### Concerto order is NOT inherently electrical — classify by content.
+  await inbound(E, { orderNumber: "R32985", client: "Southern Co-op", orderValue: 453, storeCode: "0373", siteName: "Cranbrook", description: "replacement worktop", externalId: "<ord-13c@concerto>" });
+  const b2 = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
+  const wt = b2.body.orders.find(o => o.orderNumber === "R32985");
+  ok("a bare R#### 'replacement worktop' order is NOT tagged Electrical", wt && wt.trade !== "Electrical", wt && wt.trade);
 }
 { // 14. create-works on an EM-matched order → raises the EM works job carrying the fittings, order actioned + linked
   const E = makeEnv();
