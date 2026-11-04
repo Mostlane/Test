@@ -35,6 +35,7 @@
     .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
     .p-needs{background:#fef3c7;color:#92400e;} .p-live{background:#dbeafe;color:#1e40af;} .p-done{background:#dcfce7;color:#166534;} .p-dis{background:#f1f5f9;color:#64748b;}
     .p-client{background:#eef4fb;color:#003466;border:1px solid #cfe0f3;}
+    .p-trade{background:#f3eefb;color:#5b2a86;border:1px solid #e0d2f0;}
     .jl{font-size:13px;margin-top:4px;}
     .jl a{color:var(--brand);font-weight:600;}
     .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
@@ -71,6 +72,7 @@
     <div id="forbidden">🚫 Client orders carry financial information, which is visible to Full Access users and office staff only.</div>
     <div id="board">
       <div class="bar" id="stageBar"></div>
+      <div class="bar" id="tradeBar"></div>
       <div class="bar">
         <select id="clientSel"><option value="">All clients</option></select>
         <input type="search" id="q" placeholder="Search order no. / site / words…">
@@ -101,11 +103,14 @@
     }
 
     const STAGES = [["live","Live"],["needs_job","Needs a job"],["done","Done"],["dismissed","Dismissed"],["all","All"]];
-    let DATA = { orders: [], clients: [] };
-    let stage = "live";
+    const TRADE_EMOJI = { "Electrical":"⚡", "Drainage":"🚿", "Plumbing & water":"🚰", "Heating, cooling & gas":"🔥", "Fire safety":"🚨", "Doors, windows & security":"🚪", "Building fabric":"🧱", "Roofs & external":"🏠", "Fixtures & fittings":"🔧", "Equipment & systems":"⚙️", "Hygiene & environment":"🧼", "Compliance & testing":"📋", "General":"🛠", "Other":"🛠" };
+    let DATA = { orders: [], clients: [], trades: [] };
+    let stage = "live", tradeF = "all";
     try { stage = localStorage.getItem("mlOrdersStage") || "live"; } catch(e){}
+    try { tradeF = localStorage.getItem("mlOrdersTrade") || "all"; } catch(e){}
     // "Live" on the board = anything still in play: needs a job OR the job is open.
     const inStage = o => stage === "all" ? true : (stage === "live" ? (o.stage === "live" || o.stage === "needs_job") : o.stage === stage);
+    const inTrade = o => tradeF === "all" || o.trade === tradeF;
 
     async function load(){
       if(!canMoney()){ g("forbidden").style.display = "block"; g("board").style.display = "none"; return; }
@@ -128,7 +133,15 @@
       const counts = {}; STAGES.forEach(([k]) => counts[k] = all.filter(o => (k==="all") || (k==="live" ? (o.stage==="live"||o.stage==="needs_job") : o.stage===k)).length);
       g("stageBar").innerHTML = STAGES.map(([k,l]) => '<button class="chip'+(stage===k?' on':'')+'" data-stage="'+k+'">'+l+'<span class="n">'+counts[k]+'</span></button>').join("");
       [].forEach.call(g("stageBar").querySelectorAll(".chip"), b => b.onclick = () => { stage = b.dataset.stage; try{ localStorage.setItem("mlOrdersStage", stage); }catch(e){} render(); });
-      const rows = all.filter(o => inStage(o) && (!client || o.client === client) && (!q || [o.orderNumber, o.siteName, o.storeCode, o.title, o.detail, o.description, o.job && o.job.ref].join(" ").toLowerCase().includes(q)));
+      // Trade filter — chips built from the trades present in the current stage view.
+      const inStageList = all.filter(o => inStage(o) && (!client || o.client === client));
+      const trades = [...new Set(inStageList.map(o => o.trade).filter(Boolean))].sort();
+      if (tradeF !== "all" && !trades.includes(tradeF)) tradeF = "all";
+      const tcount = t => inStageList.filter(o => o.trade === t).length;
+      g("tradeBar").innerHTML = '<button class="chip'+(tradeF==="all"?' on':'')+'" data-trade="all">All trades<span class="n">'+inStageList.length+'</span></button>'
+        + trades.map(t => '<button class="chip'+(tradeF===t?' on':'')+'" data-trade="'+esc(t)+'">'+(TRADE_EMOJI[t]||"")+' '+esc(t)+'<span class="n">'+tcount(t)+'</span></button>').join("");
+      [].forEach.call(g("tradeBar").querySelectorAll(".chip"), b => b.onclick = () => { tradeF = b.dataset.trade; try{ localStorage.setItem("mlOrdersTrade", tradeF); }catch(e){} render(); });
+      const rows = all.filter(o => inStage(o) && inTrade(o) && (!client || o.client === client) && (!q || [o.orderNumber, o.siteName, o.storeCode, o.title, o.detail, o.description, o.trade, o.job && o.job.ref].join(" ").toLowerCase().includes(q)));
       const total = rows.reduce((s,o) => s + (isFinite(Number(o.orderValue)) ? Number(o.orderValue) : 0), 0);
       g("tot").innerHTML = rows.length + " order" + (rows.length===1?"":"s") + (total ? ' · <b>' + money(total) + '</b> ex VAT' : "");
       if(!rows.length){ g("list").innerHTML = '<p class="muted" style="padding:18px 4px;">No orders here.</p>'; return; }
@@ -151,15 +164,18 @@
         jobLine = '<div class="jl">🔗 Job <a href="/job-view.html?jobId=' + encodeURIComponent(j.id) + '">' + esc(j.ref) + '</a> · ' + esc(j.status || "") +
           (j.engineers && j.engineers.length ? ' · 👤 ' + esc(j.engineers.join(", ")) : ' · <span class="muted">not allocated</span>') +
           (j.scheduledAt ? ' · 🗓 ' + esc(fmtDT(j.scheduledAt)) : '') + '</div>';
-      } else if (o.matchedKind === "em" || o.matchedKind === "elec") {
-        jobLine = '<div class="jl">🔧 ' + esc(o.matchNote || "Matched to a remedial") + ' — <a href="/cert-review.html?orders=1">approve on the remedials tracker</a></div>';
+      } else if (o.matchNote) {
+        // A matched remedial with no job yet — the create button below carries the
+        // site-audit checklist + the engineer's photos onto the works job.
+        jobLine = '<div class="jl">🔧 ' + esc(o.matchNote) + '</div>';
       }
+      const carriesRemedial = !j && (o.matchedKind === "em" || o.matchedKind === "fiveyear" || o.matchedKind === "elec");
       const earlier = (o.earlier || []).length
-        ? '<div class="earlier">↩ Earlier visit' + (o.earlier.length>1?'s':'') + ' on this incident: ' + o.earlier.map(e => '<a href="/job-view.html?jobId=' + encodeURIComponent(e.id) + '">' + esc(e.ref) + '</a> (' + esc(e.status) + ')').join(", ") + (j ? '' : ' — making the job carries their notes and photos across') + '</div>'
+        ? '<div class="earlier">↩ Earlier visit' + (o.earlier.length>1?'s':'') + ' on this incident: ' + o.earlier.map(e => '<a href="/job-view.html?jobId=' + encodeURIComponent(e.id) + '">' + esc(e.ref) + '</a> (' + esc(e.status) + ')').join(", ") + (j ? '' : ' — the works job carries their notes and photos across') + '</div>'
         : '';
       let acts = "";
-      if(o.stage === "needs_job"){
-        if(o.matchedKind !== "em") acts += '<button class="btn green" data-make="' + esc(o.id) + '">➕ Make the job</button> ';
+      if(o.canCreateWorks){
+        acts += '<button class="btn green" data-create="' + esc(o.id) + '">➕ Create works job</button> ';
         acts += '<button class="btn ghost" data-dismiss="' + esc(o.id) + '">Dismiss</button>';
       } else if (o.stage === "dismissed") {
         acts += '<button class="btn ghost" data-reopen="' + esc(o.id) + '">↩ Reopen</button>';
@@ -170,6 +186,7 @@
       else if(o.link) acts += ' <a class="btn ghost" href="' + esc(safeUrl(o.link)) + '" target="_blank" rel="noopener">📧 Email</a>';
       return '<div class="ocard ' + esc(o.stage) + '" id="o' + esc(o.id) + '">'
         + '<div class="top"><span class="ref">' + esc(o.orderNumber || "(no number)") + '</span>'
+        + (o.trade ? '<span class="pill p-trade">' + (TRADE_EMOJI[o.trade]||"") + ' ' + esc(o.trade) + '</span>' : '')
         + (o.client ? '<span class="pill p-client">' + esc(o.client) + '</span>' : '')
         + stagePill(o)
         + (o.priority ? '<span class="muted">P' + esc(o.priority) + '</span>' : '')
@@ -184,18 +201,22 @@
     }
     function setMsg(id, t, err){ const m = document.querySelector('[data-msg="' + CSS.escape(id) + '"]'); if(m){ m.textContent = t; m.className = "msg" + (err ? " err" : " ok"); } }
     function wire(){
-      [].forEach.call(document.querySelectorAll("[data-make]"), b => b.onclick = async () => {
-        const id = b.dataset.make, o = (DATA.orders||[]).find(x => x.id === id) || {};
-        const q = "Make the job for order " + (o.orderNumber || "") + (o.orderValue != null ? " (" + money(o.orderValue) + ")" : "") + "?" +
-          ((o.earlier||[]).length ? "\n\nIt will be linked to the earlier visit " + o.earlier[0].ref + " and carry that visit's notes and photos across." : "\n\nA fresh job will be raised at the store.") +
+      [].forEach.call(document.querySelectorAll("[data-create]"), b => b.onclick = async () => {
+        const id = b.dataset.create, o = (DATA.orders||[]).find(x => x.id === id) || {};
+        const carries = (o.matchedKind === "em" || o.matchedKind === "fiveyear" || o.matchedKind === "elec");
+        const q = "Create the works job for order " + (o.orderNumber || "") + (o.orderValue != null ? " (" + money(o.orderValue) + ")" : "") + "?" +
+          (carries ? "\n\nThe remedial works (and the engineer's site photos) are carried across as a site-audit checklist."
+            : ((o.earlier||[]).length ? "\n\nIt links to the earlier visit " + o.earlier[0].ref + " and carries that visit's notes and photos across." : "\n\nA fresh job is raised at the store.")) +
           "\n\nIt lands on the board unallocated — assign an engineer from the job card.";
-        if(!(window.MLUI ? await MLUI.confirm(q, { title:"Make the job", okLabel:"Make the job" }) : confirm(q))) return;
-        b.disabled = true; setMsg(id, "Making the job…");
+        if(!(window.MLUI ? await MLUI.confirm(q, { title:"Create works job", okLabel:"Create the job" }) : confirm(q))) return;
+        b.disabled = true; setMsg(id, "Creating the works job…");
         try{
-          const r = await authFetch("/certs/orders/make-job", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) }).then(x => x.json());
-          if(r && r.ok){ setMsg(id, (r.how === "linked" ? "Linked to the existing job " : (r.how === "cloned" ? "Job made from the earlier visit — " : "Job made — ")) + (r.ref||"") + ". Opening it…"); setTimeout(() => { location.href = "/job-view.html?jobId=" + encodeURIComponent(r.jobId); }, 600); }
-          else { setMsg(id, (r && r.error) || "Couldn't make the job.", true); b.disabled = false; }
-        }catch(e){ setMsg(id, "Couldn't make the job.", true); b.disabled = false; }
+          const r = await authFetch("/certs/orders/create-works", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) }).then(x => x.json());
+          if(r && r.ok){
+            if(r.jobId){ setMsg(id, (r.note || "Works job created.") + " Opening it…"); setTimeout(() => { location.href = "/job-view.html?jobId=" + encodeURIComponent(r.jobId); }, 700); }
+            else { setMsg(id, r.note || "Done."); setTimeout(load, 900); }
+          } else { setMsg(id, (r && r.error) || "Couldn't create the job.", true); b.disabled = false; }
+        }catch(e){ setMsg(id, "Couldn't create the job.", true); b.disabled = false; }
       });
       [].forEach.call(document.querySelectorAll("[data-dismiss]"), b => b.onclick = async () => {
         const id = b.dataset.dismiss;

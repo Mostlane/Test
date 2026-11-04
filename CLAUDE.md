@@ -5888,7 +5888,33 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   status · engineer · time), the incident's **earlier visits**, ➕ Make the job /
   Dismiss / Reopen / Open job / 📧. **API (certs.js):** GET `/certs/orders?client=`
   → `{orders,clients}`; POST `/certs/orders/make-job {id}` → `sla.js raiseJobForOrder`;
-  POST `/certs/orders/link {id,jobId}` (hand-link). **How an order meets its job
+  POST `/certs/orders/link {id,jobId}` (hand-link).
+  - **ONE "Create works job" button + trade filter (4 Nov 2026, Jamie: "all the R/REM
+    electrical orders in one place… press a button that creates the job… the site-audit
+    remedials from an EICR or EM test carried across… easily filterable by trade").** The
+    board used to BOUNCE an EM/EICR-matched order to cert-review / five-year-remedials to
+    raise the works job; now one endpoint does it for every kind. **GET /certs/orders**
+    carries per-order **`trade`** (`tradeForOrder`: R/REM order no. or an em/fiveyear/elec
+    match ⇒ Electrical, else `classifyWork` group, else General) + **`canCreateWorks`** +
+    a top-level **`trades`** list; `shapeOrder` now also returns `description`. **An elec
+    match's `matchedJobId` is the TEST job** (the inbound auto-link is now EM-only — elec
+    stays `matched`, not linked, so its value isn't stamped on the completed test job), so
+    the GET resolves the order's real job through the test job's `remedialsWorksJobId` and
+    shows `needs_job` (`elecNeedsWorks`) until the works job exists.
+    **POST /certs/orders/create-works {id, scheduledAt?, assignedEngineers?, durationMinutes?}**
+    (office + canSeeMoney) dispatches by `matched_kind`: **em** → `poReceived` (raises the
+    EM works job with every failed fitting + photos, or files the clean cert when all were
+    replaced on site); **fiveyear** → `createWorksJobFromRemedials` on the register row's
+    linked test job (else its typed `lines`), stage → `in_works`; **elec** →
+    `createWorksJobFromRemedials` on the test job (carries the C1/C2/FI checklist + the
+    engineer's photos); **none** → `raiseJobForOrder` (link/clone/fresh). It links the
+    order to the new works job + marks it `actioned`. Idempotent (reuses an existing works
+    job). Front-end **client-orders.html**: a **trade-chip row** (persisted
+    localStorage `mlOrdersTrade`, counts scoped to the current stage+client view) + a trade
+    pill per card, and a single **➕ Create works job** button on every `canCreateWorks`
+    order (confirm text says the remedials/photos are carried across). Test cases 13–15 in
+    `test-client-orders.mjs`. (No `?v=`/SW bump — client-orders.html is network-first.)
+  **How an order meets its job
   (sla.js):** (1) order arrives and a job with EXACTLY that reference exists →
   `linkOrderToExistingJob` stamps value + number on it (intake reply `status:
   "linked"`, push says so, not actionable); (2) the job arrives later via
