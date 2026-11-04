@@ -91,7 +91,7 @@ function makeEnv() {
       return { meta: {} }; },
   }; return st; }, batch(s) { return Promise.all(s.map(x => x.run())); } };
   const r2 = { async list({ prefix }) { return { objects: Object.keys(files).filter(k => k.startsWith(prefix)).map(key => ({ key })), truncated: false }; },
-    async get(k) { return files[k] != null ? { body: files[k], httpMetadata: {}, customMetadata: {} } : null; }, async put(k, body) { files[k] = body; }, async delete() {} };
+    async get(k) { return files[k] != null ? { body: files[k], httpMetadata: {}, customMetadata: {}, arrayBuffer: async () => files[k] } : null; }, async put(k, body) { files[k] = body; }, async delete() {} };
   return { env: { DB: db, JOB_FILES: r2, ASSET_BUCKET: r2, JOBS_INBOUND_TOKEN: "tok" }, jobs, orders, files, acks, rems, fyrs };
 }
 const sessOf = u => ({ user: { username: u }, tenantId: 1 });
@@ -288,6 +288,47 @@ const inbound = (E, body) => J(certs, "/certs/remedials/order-inbound", null, { 
   ok("per-fitting prices + the total line are stripped", sla.stripPricing(rem) === "Failed EM fittings at store 0335:\nFitting 16 - Light replacement (replaced on site)\nFitting 22 - Light replacement", JSON.stringify(sla.stripPricing(rem)));
   ok("four-figure amounts without a thousands comma are stripped too", sla.stripPricing("Supply the unit.\n\nLabour - 960.00\n\nMaterials - 1151.00\n\nPlease note this is like for like.") === "Supply the unit.\n\nPlease note this is like for like.", JSON.stringify(sla.stripPricing("Supply the unit.\n\nLabour - 960.00\n\nMaterials - 1151.00\n\nPlease note this is like for like.")));
   ok("a line that merely STARTS with a cost word but carries no amount is kept", sla.stripPricing("Materials to be supplied by the client.\nTotal of 3 doors to replace.") === "Materials to be supplied by the client.\nTotal of 3 doors to replace.");
+}
+{ // 13. the board tags each order with a TRADE and offers one "create works job" button
+  const E = makeEnv();
+  await inbound(E, { orderNumber: "R30100", client: "Southern Co-op", orderValue: 200, storeCode: "0335", siteName: "Test Store", description: "EICR remedial works", externalId: "<ord-13a@concerto>" });
+  await inbound(E, { orderNumber: "00088000/1", client: "Southern Co-op", orderValue: 90, storeCode: "0335", siteName: "Test Store", description: "Toilet blocked and overflowing, backing up", externalId: "<ord-13b@concerto>" });
+  const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
+  const byNum = n => b.body.orders.find(o => o.orderNumber === n);
+  ok("R-order tagged Electrical + canCreateWorks", byNum("R30100").trade === "Electrical" && byNum("R30100").canCreateWorks === true, JSON.stringify({ t: byNum("R30100").trade, c: byNum("R30100").canCreateWorks }));
+  ok("a blocked-drain reactive order is tagged Drainage", byNum("00088000/1").trade === "Drainage", byNum("00088000/1").trade);
+  ok("GET returns the list of trades present", Array.isArray(b.body.trades) && b.body.trades.includes("Electrical") && b.body.trades.includes("Drainage"), JSON.stringify(b.body.trades));
+}
+{ // 14. create-works on an EM-matched order → raises the EM works job carrying the fittings, order actioned + linked
+  const E = makeEnv();
+  E.acks.push({ cert_id: "CERT-D", site_code: "0335", site_name: "Test Store", cert_number: "0335-26", stage: "quoted", job_id: null });
+  E.rems.push({ id: "CERT-D:0", cert_id: "CERT-D", kind: "light", status: "pending", fitting_no: 3, photos: "[]", site_code: "0335", site_name: "Test Store", cert_number: "0335-26" });
+  await inbound(E, { orderNumber: "R29070", client: "Southern Co-op", orderValue: 50, storeCode: "0335", siteName: "Test Store", description: "Fitting 3 - Light replacement", externalId: "<ord-14@concerto>" });
+  const oid = Object.values(E.orders)[0].id;
+  const cw = await J(certs, "/certs/orders/create-works", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid } });
+  ok("EM create-works raises the works job + carries the value across", cw.status === 200 && cw.body.how === "em" && cw.body.jobId === "emrem:CERT-D" && E.jobs["emrem:CERT-D"] && E.jobs["emrem:CERT-D"].orderNumber === "R29070", JSON.stringify(cw.body));
+  ok("order actioned + linked to the EM works job", E.orders[oid].status === "actioned" && E.orders[oid].matched_job_id === "emrem:CERT-D");
+  const cwF = await J(certs, "/certs/orders/create-works", sessOf("Field Fred"), { env: E.env, method: "POST", body: { id: oid } });
+  ok("create-works refused to a field engineer", cwF.status === 403);
+}
+{ // 15. create-works on an electrical-test match → audit works job from the test job's remedials; a plain order → a fresh job
+  const E = makeEnv();
+  E.files["jobs/elec-1/remedial/i1/p.jpg"] = "REMPHOTO";
+  E.jobs["elec-1"] = { id: "elec-1", helpdeskRef: "00077000/1", status: "Complete", createdAt: "2026-09-05T10:00:00.000Z", siteCode: "0335", siteName: "Test Store", elecTest: true,
+    remedials: [{ id: "i1", code: "C2", description: "Replace damaged socket", photos: ["jobs/elec-1/remedial/i1/p.jpg"] }] };
+  await inbound(E, { orderNumber: "R29080", client: "Southern Co-op", orderValue: 300, storeCode: "0335", siteName: "Test Store", description: "Carry out the remedials", externalId: "<ord-15@concerto>" });
+  const oid = Object.values(E.orders).find(o => o.order_number === "R29080").id;
+  const cw = await J(certs, "/certs/orders/create-works", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid } });
+  const wj = cw.body.jobId && E.jobs[cw.body.jobId];
+  ok("elec create-works builds an audit job from the remedials", cw.status === 200 && cw.body.how === "elec" && wj && Array.isArray(wj.auditItems) && wj.auditItems.length === 1 && /Replace damaged socket/.test(wj.auditItems[0].text), JSON.stringify(cw.body));
+  ok("the remedial photo is carried onto the audit item", wj && (wj.auditItems[0].refPhotos || []).some(k => E.files[k] === "REMPHOTO"));
+  ok("order actioned + linked to the audit works job", E.orders[oid].status === "actioned" && E.orders[oid].matched_job_id === cw.body.jobId);
+
+  const E2 = makeEnv();
+  await inbound(E2, { orderNumber: "00066000/2", client: "Southern Co-op", orderValue: 120, storeCode: "0335", siteName: "Test Store", description: "Replace a cracked window pane", externalId: "<ord-15b@concerto>" });
+  const oid2 = Object.values(E2.orders)[0].id;
+  const cw2 = await J(certs, "/certs/orders/create-works", sessOf("Office Olly"), { env: E2.env, method: "POST", body: { id: oid2 } });
+  ok("a plain reactive order → create-works raises a fresh job", cw2.status === 200 && cw2.body.jobId && E2.jobs[cw2.body.jobId] && E2.jobs[cw2.body.jobId].orderValue === 120, JSON.stringify(cw2.body));
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

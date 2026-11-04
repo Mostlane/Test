@@ -30,6 +30,7 @@ import { sendToUser, sendToPermission } from "./push.js";
 import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById, unlinkOrderFromJob, createWorksJobFromRemedials } from "./sla.js";
 import { canSeeMoney } from "../lib/auth.js";
 import { learnConcertoRef } from "./concerto.js";
+import { classifyWork } from "../lib/worktypes.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
@@ -663,7 +664,7 @@ function shapeOrder(r) {
   return {
     id: r.id, externalId: r.external_id || "", orderNumber: r.order_number || "", client: r.client || "",
     priority: r.priority, orderValue: r.order_value, currency: r.currency || "GBP",
-    title: r.title || "", detail: r.detail || "", jobCategory: r.job_category || "", observationCodes: codes,
+    title: r.title || "", detail: r.detail || "", description: r.description || "", jobCategory: r.job_category || "", observationCodes: codes,
     alreadyDone: r.already_done === 1, storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "",
     notifiedAt: r.notified_at || "", link: r.link || "", source: r.source || "", status: r.status || "new",
     matchedKind: r.matched_kind || "", matchedCertId: r.matched_cert_id || "", matchedJobId: r.matched_job_id || "",
@@ -671,6 +672,20 @@ function shapeOrder(r) {
     unlinkedJobId: r.unlinked_job_id || "", hasEmail: r.has_email != null ? !!Number(r.has_email) : !!r.email_text,
     emailSubject: r.email_subject || "", emailFrom: r.email_from || "",
   };
+}
+// The trade an order is for — so the board can filter by it. R/REM orders and
+// anything matched to an EM/EICR/electrical-test remedial are Electrical; else
+// the description is read by the work-type classifier (group name), default
+// "General".
+function tradeForOrder(o) {
+  const num = String(o.orderNumber || "").trim().toUpperCase();
+  if (/^(R|REM)\d/.test(num) || /^(R|REM)[-\s]/.test(num)) return "Electrical";
+  if (o.matchedKind === "em" || o.matchedKind === "fiveyear" || o.matchedKind === "elec") return "Electrical";
+  try {
+    const hit = classifyWork([o.title, o.detail, o.description].filter(Boolean).join("\n"));
+    if (hit && hit.group) return hit.group;
+  } catch {}
+  return "General";
 }
 async function handleOrderInbound(env, tid, b, ctx, request) {
   const now = new Date().toISOString();
@@ -735,20 +750,23 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   // or the office typed the order number into a hand-made job's reference)? Stamp
   // the order's value on it and mark the order linked. A LATE order for an EM case
   // whose works job already exists links to that works job the same way.
+  // Auto-link only when m.jobId is a genuine WORKS job: an EM late order (its works
+  // job already exists). For an elec match, m.jobId is the TEST job — leave the order
+  // matched (kind "elec", not linked) so the board offers "create works job".
   let linkedJob = null;
   if (!m) { try { linkedJob = await linkOrderToExistingJob(env, tid, oShape); } catch {} }
-  else if (m.jobId) { try { linkedJob = await linkOrderToJobById(env, tid, oShape, m.jobId, "", { kind: "em" }); } catch {} }
+  else if (m.jobId && m.kind === "em") { try { linkedJob = await linkOrderToJobById(env, tid, oShape, m.jobId, "", { kind: "em" }); } catch {} }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
     const isFy = m && m.kind === "fiveyear";
     const body = linkedJob
       ? `Client order ${orderNumber || ""} for ${site} — linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).`
       : isFy
-        ? `Client order ${orderNumber || ""} for ${site} — matched to a 5-year electrical remedial and marked ordered. Raise the works job from the 5-year remedials list.`
+        ? `Client order ${orderNumber || ""} for ${site} — matched to a 5-year electrical remedial. Create the works job from the Client orders board.`
         : (m
-          ? `Client order ${orderNumber || ""} for ${site} — matches an EM remedial awaiting approval. Review & raise the works job.`
+          ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting works. Create the works job from the Client orders board.`
           : `Client order ${orderNumber || ""} for ${site} — open the Client orders board to make the job.`);
-    const url = linkedJob ? "/client-orders.html" : (isFy ? "/five-year-remedials.html" : (m ? "/cert-review.html?orders=1" : "/client-orders.html"));
+    const url = linkedJob ? "/client-orders.html" : "/client-orders.html";
     ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
       { title: (m && !linkedJob) ? "Client order — remedial" : "Client order received", body, url, tag: "client-order:" + id, actionable: !linkedJob }, "", { officeOnly: true }).catch(() => {}));
   }
@@ -2226,15 +2244,30 @@ export async function handle(request, env, ctx, url, sess) {
     let doneNames = new Set(); try { const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); (JSON.parse((c && c.value) || "[]") || []).forEach(x => { if (x && x.done) doneNames.add(String(x.name || "").toLowerCase()); }); } catch {}
     const finished = j => { const st = String((j && j.status) || "").toLowerCase(); return ["complete", "closed jobs", "closed", "invoiced", "cancelled"].includes(st) || doneNames.has(st); };
     const shaped = rows.map(o => {
-      const j = (o.matchedJobId && byId.get(o.matchedJobId)) || null;
+      const linked = (o.matchedJobId && byId.get(o.matchedJobId)) || null;
+      // For an electrical-test match, matchedJobId points at the TEST job, not the
+      // works job — the remedial works still need raising until that test job
+      // spawns a works job (remedialsWorksJobId). So the order's "job" is that
+      // works job, and it's "needs a job" until then.
+      let j = linked, elecNeedsWorks = false;
+      if (o.matchedKind === "elec" && linked) {
+        if (linked.remedialsWorksJobId && byId.get(linked.remedialsWorksJobId)) j = byId.get(linked.remedialsWorksJobId);
+        else { j = null; elecNeedsWorks = true; }
+      }
       const incident = (/^(\d{5,12})\/\d{1,3}$/.exec(o.orderNumber || "") || [])[1] || "";
       const earlier = incident ? all.filter(x => new RegExp("^" + incident + "/\\d{1,3}$").test(String(x.helpdeskRef || "")) && (!j || x.id !== j.id)).map(x => ({ id: x.id, ref: x.helpdeskRef || x.id, status: x.status || "" })) : [];
-      const stage = o.status === "dismissed" ? "dismissed" : (!j ? "needs_job" : (finished(j) ? "done" : "live"));
-      return { ...o, stage, incident, earlier,
+      const stage = o.status === "dismissed" ? "dismissed" : ((!j || elecNeedsWorks) ? "needs_job" : (finished(j) ? "done" : "live"));
+      const trade = tradeForOrder(o);
+      // One-press "create works job" is offered whenever there's no works job yet
+      // (every match kind — EM / EICR / elec-test / plain reactive — routes through
+      // the one create-works endpoint, which carries the site-audit remedials across).
+      const canCreateWorks = stage === "needs_job";
+      return { ...o, stage, trade, canCreateWorks, incident, earlier,
         job: j ? { id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "", engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [], scheduledAt: j.scheduledAt || null, cancelledAt: j.cancelledAt || null, orderValue: j.orderValue ?? null } : null };
     }).filter(o => !client || String(o.client || "").toLowerCase() === client);
     const clients = [...new Set(rows.map(o => String(o.client || "").trim()).filter(Boolean))].sort();
-    return json({ ok: true, orders: shaped, clients }, {}, env, request);
+    const trades = [...new Set(shaped.map(o => o.trade).filter(Boolean))].sort();
+    return json({ ok: true, orders: shaped, clients, trades }, {}, env, request);
   }
   if (sub === "/orders/make-job" && method === "POST") {
     if (!(await canSeeMoney(env, tid, me)) || !isOffice) return error("Office access required", 403, env, request);
@@ -2246,6 +2279,80 @@ export async function handle(request, env, ctx, url, sess) {
     const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : undefined;
     const res = await raiseJobForOrder(env, tid, o, { changedBy: me, scheduledAt, durationMinutes: Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : undefined, assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : [] });
     return json({ ok: true, jobId: res.job.id, ref: res.job.helpdeskRef || res.job.id, how: res.how, from: res.from || null }, {}, env, request);
+  }
+  // POST /certs/orders/create-works {id, scheduledAt?, assignedEngineers?, durationMinutes?}
+  // The ONE button for the orders board: raises the works job for an order and
+  // dispatches by what it's matched to — an EM remedial case, a 5-year (EICR)
+  // remedial, an electrical-test job carrying remedials, or a plain reactive
+  // order — carrying any site-audit remedials (+ the engineer's photos) across.
+  if (sub === "/orders/create-works" && method === "POST") {
+    if (!(await canSeeMoney(env, tid, me)) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    if (ord.status === "dismissed") return error("This order was dismissed — reopen it first", 400, env, request);
+    // An elec match's matched_job_id is the TEST job — the works job still needs
+    // raising — so the "already has a job" short-circuit skips the elec branch.
+    if (ord.matched_job_id && ord.matched_kind !== "elec") return json({ ok: true, jobId: ord.matched_job_id, how: "existing", note: "A job is already linked to this order." }, {}, env, request);
+    const o = shapeOrder(ord);
+    const now = new Date().toISOString();
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : undefined;
+    const engs = Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : [];
+    const durationMinutes = Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : undefined;
+
+    // EM remedial → same as "PO received": raise the EM works job with every
+    // failed fitting + its photos (or file the clean cert when all replaced on site).
+    if (o.matchedKind === "em" && o.matchedCertId) {
+      const res = await poReceived(env, tid, o.matchedCertId, me, ctx);
+      const jobId = res.jobId || null;
+      if (jobId) { try { await linkOrderToJobById(env, tid, o, jobId, me, { kind: "em" }); } catch {} }
+      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=COALESCE(?,matched_job_id), actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(jobId, now, me, tid, o.id).run();
+      const note = res.stage === "done" ? "All fittings were replaced on site — updated certificate filed to compliance." : (res.awaitingBatteries ? "Works job raised (awaiting batteries)." : "Works job raised with the failed fittings carried across.");
+      return json({ ok: true, jobId, how: "em", note, stage: res.stage }, {}, env, request);
+    }
+
+    // 5-year (EICR) remedial → the audit works job from the linked test job's
+    // remedials, else from the register row's typed lines.
+    if (o.matchedKind === "fiveyear" && o.matchedCertId) {
+      const row = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, o.matchedCertId).first();
+      if (!row) return error("The matched 5-year remedial no longer exists.", 404, env, request);
+      let d = {}; try { d = JSON.parse(row.data || "{}"); } catch {}
+      let res;
+      if (d.jobId) {
+        const src = await getJob(env, tid, d.jobId);
+        if (!src) return error("The linked test job no longer exists — open the 5-year remedials list.", 404, env, request);
+        res = await createWorksJobFromRemedials(env, tid, src, { by: me, assignedEngineers: engs, scheduledAt, durationMinutes, fiveYearCase: row.id, existingId: d.worksJobId });
+      } else {
+        let lines = []; try { lines = JSON.parse(row.lines || "[]"); } catch {}
+        const items = (Array.isArray(lines) ? lines : []).map(l => ({ code: l.code || "", description: l.action || l.description || "", photos: Array.isArray(l.photos) ? l.photos : [] })).filter(l => l.description);
+        if (!items.length) return error("This 5-year remedial has no recorded works to turn into a job.", 400, env, request);
+        const stub = { id: null, siteCode: row.store_code || "", siteName: row.site_name || "", helpdeskRef: row.sr || "" };
+        res = await createWorksJobFromRemedials(env, tid, stub, { items, synthetic: true, by: me, assignedEngineers: engs, scheduledAt, durationMinutes, fiveYearCase: row.id, existingId: d.worksJobId });
+      }
+      if (res.error) return error(res.error, res.status || 400, env, request);
+      d.worksJobId = res.id;
+      const stage = (row.stage === "done" || row.stage === "invoiced") ? row.stage : "in_works";
+      await env.DB.prepare("UPDATE five_year_remedials SET data=?, stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), stage, now, tid, row.id).run();
+      try { await linkOrderToJobById(env, tid, o, res.id, me, { kind: "fiveyear" }); } catch {}
+      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=?, actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(res.id, now, me, tid, o.id).run();
+      _fyrTestedCache = { tid: null, at: 0, map: null };
+      return json({ ok: true, jobId: res.id, ref: res.ref, how: "fiveyear", existing: !!res.existing, note: res.existing ? "The works job already existed — linked." : "Audit works job raised from the EICR remedials." }, {}, env, request);
+    }
+
+    // Electrical-test remedials → the audit works job from that test job.
+    if (o.matchedKind === "elec" && o.matchedJobId) {
+      const src = await getJob(env, tid, o.matchedJobId);
+      if (!src) return error("The electrical-test job no longer exists.", 404, env, request);
+      const res = await createWorksJobFromRemedials(env, tid, src, { by: me, assignedEngineers: engs, scheduledAt, durationMinutes });
+      if (res.error) return error(res.error, res.status || 400, env, request);
+      try { await linkOrderToJobById(env, tid, o, res.id, me, { kind: "elec" }); } catch {}
+      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=?, actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(res.id, now, me, tid, o.id).run();
+      return json({ ok: true, jobId: res.id, ref: res.ref, how: "elec", existing: !!res.existing, note: res.existing ? "The works job already existed — linked." : "Audit works job raised with the remedials carried across." }, {}, env, request);
+    }
+
+    // Plain reactive order (no remedial match) → raise / clone / link a job.
+    const res = await raiseJobForOrder(env, tid, o, { changedBy: me, scheduledAt, durationMinutes, assignedEngineers: engs });
+    return json({ ok: true, jobId: res.job.id, ref: res.job.helpdeskRef || res.job.id, how: res.how, from: res.from || null, note: "Job " + (res.how === "linked" ? "linked to the matching job" : res.how === "cloned" ? "created from the earlier visit" : "created") + "." }, {}, env, request);
   }
   // POST /certs/orders/unlink {id} — the office decides this order is NOT for the job
   // it was attached to: the job forgets the order (number/value), the order goes
