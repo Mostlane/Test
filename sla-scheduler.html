@@ -709,6 +709,21 @@ function engSchedFor(job, username){
   if(es && es.scheduledAt) return { scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd || null };
   return { scheduledAt: (job && job.scheduledAt) || null, scheduledEnd: (job && job.scheduledEnd) || null };
 }
+// Are ALL the job's assigned engineers currently on the SAME slot? If so, dragging
+// the block moves them together (the common "both booked for one visit" case);
+// only when someone has been deliberately given a different per-engineer time does
+// a drag move just the engineer whose lane was dragged.
+function engineersSynced(job){
+  const engs = (job && job.assignedEngineers) || [];
+  if(engs.length < 2) return true;
+  let first = null;
+  for(const u of engs){
+    const at = engSchedFor(job, u).scheduledAt || "";
+    if(first === null) first = at;
+    else if(at !== first) return false;
+  }
+  return true;
+}
 // The ACTUAL worked window for a finished job in one engineer's lane, read from
 // the status history (In Progress → Complete). Returns {start,end} Dates, or
 // null when we can't tell (→ the block keeps its scheduled slot). Never changes
@@ -1470,15 +1485,23 @@ async function onPointerUp(e){
   const h = Math.floor(targetMins/60), m = targetMins%60;
   const startDate = withTime(selectedDate, h, m);
 
-  let newEngineers, perEngineerTarget = null;
+  let newEngineers, perEngineerTarget = null, moveWhole = false;
   if(fromTray && !job.assignedEngineers.length){
     // Unassigned job dropped on a lane: that engineer takes it.
     newEngineers = [targetEngineer];
   } else if(job.assignedEngineers.length > 1){
-    // Multi-engineer job: change ONLY this engineer's OWN time (their engSchedule),
-    // leaving everyone else's slot untouched. The roster is unchanged.
     newEngineers = job.assignedEngineers;
-    perEngineerTarget = targetEngineer;
+    if(engineersSynced(job)){
+      // The engineers share one slot (one visit together) → move the WHOLE job so
+      // they all stay together. This is what "move the job to Monday" means when a
+      // job is booked for two people — dragging one lane used to leave the other
+      // behind, which is the bug this fixes.
+      moveWhole = true;
+    } else {
+      // They already have different per-engineer times (set on purpose) → move only
+      // the engineer whose lane was dragged, leaving the others untouched.
+      perEngineerTarget = targetEngineer;
+    }
   } else if(job.assignedEngineers.length === 1 &&
             job.assignedEngineers[0].toLowerCase() !== (targetEngineer||"").toLowerCase()){
     // Single-engineer job dropped in another lane: hand it over.
@@ -1498,6 +1521,17 @@ async function onPointerUp(e){
     render();
     const engName = (engineers.find(e => e.username && e.username.toLowerCase() === (perEngineerTarget||"").toLowerCase()) || {}).name || perEngineerTarget;
     setStatus(`Moved ${job.ref || job.title} → ${pad2(h)}:${pad2(m)} for ${engName} only`);
+  } else if(moveWhole){
+    // Move every engineer together: set the shared time and clear the per-engineer
+    // map ({} wipes it server-side) so nobody is left behind on the old day.
+    const endIso = new Date(startDate.getTime() + (job.durationMinutes || 60)*60000).toISOString();
+    job.scheduledAt = startIso;
+    job.scheduledEnd = endIso;
+    job.engSchedule = undefined;
+    patchBody = { scheduledAt: startIso, scheduledEnd: endIso, engSchedule: {}, durationMinutes: job.durationMinutes, assignedEngineers: newEngineers, assignedTo: newEngineers[0] || "", changedBy: currentUser || "scheduler" };
+    if(job.status === "Pending") job.status = "Scheduled";
+    render();
+    setStatus(`Moved ${job.ref || job.title} → ${pad2(h)}:${pad2(m)} for all ${newEngineers.length} engineers`);
   } else {
     job.scheduledAt = startIso;
     job.assignedEngineers = newEngineers;

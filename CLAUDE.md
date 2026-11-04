@@ -585,9 +585,21 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   **`effSchedule(job,eng)`** returns the engineer's slice else the shared top-level
   `scheduledAt`/`scheduledEnd` (single-engineer + legacy jobs unchanged). Set via
   patch: **`scheduleForEngineer:{engineer,scheduledAt,scheduledEnd}`** sets ONE slice
-  (the scheduler drag — moving a multi-eng block moves only that engineer, never the
-  others), while **`engSchedule:{…}`** REPLACES the whole map (the editor is
-  authoritative; `{}` clears it). `createOrUpdateJobFromPayload` MERGES `body.engSchedule`
+  without touching the others, while **`engSchedule:{…}`** REPLACES the whole map (the editor is
+  authoritative; `{}` clears it).
+  **Scheduler drag (Nov 2026 — "it only moved one of the two"):** dragging a
+  multi-engineer day-view block is now SLOT-AWARE (`engineersSynced(job)` in
+  sla-scheduler.html). When every assigned engineer is on the SAME slot (the usual
+  "one visit, two people" case) the drag moves the WHOLE job together — it sets the
+  shared `scheduledAt`/`scheduledEnd` AND sends `engSchedule:{}` to wipe the
+  per-engineer map so nobody is left behind (status: "…for all N engineers"). Only
+  when engineers already have DIFFERENT per-engineer times (set deliberately, e.g.
+  via the editor's "Per-engineer times" row) does a drag fall back to
+  `scheduleForEngineer` and move just the dragged engineer. Before this, EVERY
+  multi-eng drag used `scheduleForEngineer`, so a job booked for two people left one
+  behind on the old day (St Trinity Church — Connor stuck on Fri while Chris moved
+  to Mon; repaired in D1 by clearing its stray `engSchedule` slice). Week view edits
+  via the modal, so it's unaffected. `createOrUpdateJobFromPayload` MERGES `body.engSchedule`
   (used by the fallback add) + preserves it; `pruneEngSchedule` drops slices for
   engineers no longer on the job. **GET /sla/jobs/for-engineer overwrites scheduledAt/
   scheduledEnd with the engineer's OWN** (like it does status), so route/jobs/inbox/
@@ -3255,6 +3267,16 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   the URL). If the block isn't there (engineer is office staff hidden by the toggle /
   no slot that day) the status line says so instead of a blank board. Unassigned or
   unscheduled jobs keep the old success panel.
+- **📆 Allocate on more than one day (add-job.html, Nov 2026).** A "📆 Allocate on
+  more than one day" tickbox under the Allocate date/time reveals an add-a-day list
+  (each a date box + ✕). On submit, after the main job is created, add-job.html loops
+  the extra days and POSTs **one independent copy of the job per day** (`POST /jobs`,
+  same description/site/engineers/requirements/release, `scheduledAt` = that day +
+  the chosen time via `extraDayDates()`); the success line reads "…+N more days".
+  Client-only — the main day must be set (it's the first day), each extra day is
+  year-checked, and it's ignored for a standby/fallback template. Deliberately NOT a
+  project drip series (no `seriesId`, no auto-skip-on-clash) — these are plain
+  reactive jobs that each stand alone, so editing one doesn't touch the others.
 
 ## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
 A live at-a-glance office view of where every field engineer is right now.
