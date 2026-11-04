@@ -316,6 +316,14 @@
   </div>
 </div>
 
+<!-- SiteLog QR sign-ins (projects always; other sites only when ticked) -->
+<div id="siteLogRow" style="margin-top:10px;">
+  <label style="display:flex;gap:8px;align-items:center;font-weight:600;cursor:pointer;">
+    <input type="checkbox" id="editSiteLog" style="width:20px;height:20px;"> Use for SiteLog sign-ins (QR code on site)
+  </label>
+  <div id="siteLogHint" style="font-size:12px;color:#64748b;margin-top:3px;">Projects are always in SiteLog. Tick this for any other site where a SiteLog QR code is put up.</div>
+</div>
+
 <!-- Job Number (projects only) -->
 <div id="jobNumberRow" style="display:none; margin-top:10px;">
   <label>Job Number (auto-assigned)</label>
@@ -1027,6 +1035,8 @@ jobInput.value = isProject
         });
     }
     editActive.value = (currentEditing.active!==false) ? "true" : "false";
+    { const cb = document.getElementById("editSiteLog"), proj = (currentEditing.client||"").toLowerCase()==="projects";
+      cb.checked = proj || currentEditing.siteLog === true; cb.disabled = proj; }
     editName.value = currentEditing.siteName || "";
 editPostcode.value = cleanPostcode(currentEditing) || "";
     editPhone.value = telOf(currentEditing) || "";
@@ -1130,6 +1140,8 @@ if (isProjectSave) {
 if (!isProjectSave) delete currentEditing.jobNumber;
 
       currentEditing.active = (editActive.value === "true");
+      { const cb = document.getElementById("editSiteLog");
+        if (cb && !cb.disabled) currentEditing.siteLog = !!cb.checked; }
       currentEditing.siteName = editName.value.trim();
 currentEditing.postcode = editPostcode.value.trim();  
 // never allow saving a postcode with *

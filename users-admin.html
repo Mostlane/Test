@@ -223,8 +223,8 @@
     </div>
 
     <p class="muted" id="orderHint" style="margin:2px 2px 12px; line-height:1.5;">
-      Drag the <b>⠿</b> handle to reorder. <b>Office</b> staff show first everywhere, then <b>Field</b> staff.
-      Drag a person between the two lists to change their type, then press <b>Save order</b>.
+      Drag the <b>⠿</b> handle to reorder — the order saves on its own. <b>Office</b> staff show first everywhere, then <b>Field</b> staff.
+      Drag a person between the two lists to change their type.
     </p>
 
     <div id="listMsg" class="muted" style="display:none; margin:8px 2px;">Loading…</div>
@@ -1032,6 +1032,10 @@
       drag = null;
       refreshCounts();
       setDirty(true);
+      // Auto-save on drop (debounced) — Jamie's rule: a drag reorder should just
+      // stick, like the vehicle cards + the menu tiles. The "Save order" button
+      // stays as a manual retry if an auto-save fails.
+      scheduleSave();
     }
     function collectOrder() {
       const order = [];
@@ -1040,7 +1044,13 @@
       });
       return order;
     }
-    g("saveOrderBtn").onclick = async () => {
+    let saveTimer = null, saving = false;
+    function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveOrder, 600); }
+    async function saveOrder() {
+      clearTimeout(saveTimer);
+      if (saving) { scheduleSave(); return; }        // a drop landed mid-save — re-save after
+      if (g("search").value.trim()) return;          // never save a filtered DOM (would drop hidden rows)
+      saving = true;
       const btn = g("saveOrderBtn"); btn.disabled = true; btn.textContent = "Saving…";
       try {
         const order = collectOrder();
@@ -1052,10 +1062,11 @@
             if (u.Profile) { u.Profile.staffType = o.StaffType; u.Profile.sortOrder = o.SortOrder; } } });
         allUsers.sort((a, b) => ((a.StaffType==="office"?0:1) - (b.StaffType==="office"?0:1)) || ((a.SortOrder ?? 9999) - (b.SortOrder ?? 9999)));
         setDirty(false);
-        btn.textContent = "Saved ✓"; setTimeout(() => { btn.textContent = "Save order"; }, 1600);
-      } catch (_) { btn.textContent = "Save failed — retry"; }
-      finally { btn.disabled = false; }
-    };
+        btn.textContent = "Saved ✓"; setTimeout(() => { if (!orderDirty) btn.textContent = "Save order"; }, 1600);
+      } catch (_) { btn.textContent = "Save failed — retry"; btn.style.display = ""; }
+      finally { saving = false; btn.disabled = false; }
+    }
+    g("saveOrderBtn").onclick = saveOrder;
     g("listWrap").addEventListener("pointerdown", onPointerDown);
 
     // ── Block / re-enable a user (full offboard: disable + kill sessions + PO) ─

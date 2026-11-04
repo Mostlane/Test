@@ -33,6 +33,7 @@
 // All tables self-migrate. Every read tolerates rows written before a column
 // existed. Nothing here may ever break a job save or timesheet save.
 
+import { siteLogEligible } from "./sites.js";
 import { json, error } from "../lib/http.js";
 import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { poOrderSiteNames } from "./timesheets.js";
@@ -111,7 +112,7 @@ export async function handle(request, env, ctx, url, sess) {
               b.postcode !== undefined ? String(b.postcode || "").toUpperCase().trim() : null,
               JSON.stringify(data), tid, client, num).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      if (ll && siteLogEligible({ client, siteLog: data.siteLog })) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
       return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
 
@@ -130,7 +131,7 @@ export async function handle(request, env, ctx, url, sess) {
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`)
         .bind(tid, client, num, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
+      if (ll && siteLogEligible({ client })) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
       return json({ ok: true, client, siteNumber: num, sitelogPushed: pushed }, {}, env, request);
     }
 

@@ -33,7 +33,7 @@
       color:var(--text);
       background:transparent;
       background-size:180%;
-    }
+    } body{ background:transparent; } /* page colour sits on html so the portal watermark shows */
     .shell{
       max-width:1100px;
       margin:24px auto;
@@ -460,7 +460,7 @@
       --radius:16px;
       --shadow:0 6px 18px rgba(14,23,40,.07), 0 1px 3px rgba(14,23,40,.05);
     }
-    html,body{ background:var(--ml-bg); }
+    html{ background:var(--ml-bg); } body{ background:transparent; }
     .shell{ max-width:560px; margin:0 auto; padding:16px 14px 46px; }
     /* This is the OFFICE job view (opened on desktop from the SLA board /
        scheduler). The mobile-first restyle above clamped it to 560px at EVERY
@@ -1122,36 +1122,56 @@ function renderAuditView(){
   if(auditViewTimer){ clearInterval(auditViewTimer); auditViewTimer = null; }
   if(!items.length){ card.style.display = "none"; return; }
   card.style.display = "";
-  const doneN = items.filter(it => it.done && it.donePhoto).length;
-  const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + items.length + " done";
+  const tasks = items.filter(it => it && !it.header);
+  const doneN = tasks.filter(it => it.done && it.donePhoto).length;
+  const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + tasks.length + " done";
+  const canNote = (typeof isAdminView === "function") ? isAdminView() : false;   // office/admin may add notes
   const cell = (p, cls, label) => p && (p.url || p.thumb)
     ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt="" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}"><figcaption>'+label+'</figcaption></figure>'
     : '<figure class="au-cell au-empty"><div class="au-ph">—</div><figcaption>'+label+'</figcaption></figure>';
+  let n = 0;
   const rowsHtml = items.map((it, i) => {
+    if(it && it.header){ return '<div class="au-row-sec" style="font-weight:800;color:#003468;margin:14px 0 6px;padding-bottom:4px;border-bottom:2px solid #e2e8f0">'+esc(it.text||"")+'</div>'; }
+    n++;
     const refs = (it.refPhotoUrls || []);
     const extras = (it.extraPhotoUrls || []);
     const refHtml = refs.length ? refs.map(p => cell(p, "au-img", "Reference")).join("") : cell(null, "", "Reference");
     const doneHtml = (it.done && it.donePhotoUrl) ? cell(it.donePhotoUrl, "au-img au-done", "Completed") : cell(null, "", "Completed");
     const extraHtml = extras.map((p,k) => cell(p, "au-img", "Added " + (k+1))).join("");
     const when = (it.done && it.doneAt) ? ('<span class="sub">✓ ' + esc(it.doneBy || "") + (it.doneAt ? ' · ' + fmtWhen(it.doneAt) : '') + '</span>') : '<span class="sub" style="color:#b45309;">Outstanding</span>';
+    const noteHtml = canNote
+      ? '<div class="au-note" style="margin-top:8px"><label style="display:block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;margin-bottom:4px">Notes <span style="font-weight:600;text-transform:none;letter-spacing:0">(optional)</span></label><textarea class="au-noteedit" data-note="'+esc(it.id)+'" rows="2" placeholder="Add a note (optional)" style="width:100%;box-sizing:border-box;border:1px solid #d7dee6;border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;color:#0f2438;resize:vertical">'+esc(it.note||"")+'</textarea></div>'
+      : (it.note ? '<div class="au-note" style="margin-top:8px"><div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;margin-bottom:2px">Notes</div><div style="white-space:pre-wrap;font-size:14px;color:#0f2438">'+esc(it.note)+'</div></div>' : '');
     return '<div class="au-row'+((it.done&&it.donePhoto)?' done':'')+'">'+
-      '<div class="au-row-h"><span class="au-num">'+(i+1)+'</span><div class="au-txt">'+esc(it.text||"")+'</div>'+when+'</div>'+
-      '<div class="au-imgs">'+refHtml+doneHtml+extraHtml+'</div></div>';
+      '<div class="au-row-h"><span class="au-num">'+n+'</span><div class="au-txt">'+esc(it.text||"")+'</div>'+when+'</div>'+
+      '<div class="au-imgs">'+refHtml+doneHtml+extraHtml+'</div>'+noteHtml+'</div>';
   }).join("");
   // Collapsible: the summary is always visible; expand to see every item + photos.
   const wasOpen = (()=>{ const d = $("auditBody").querySelector("details"); return d ? d.open : true; })();
   $("auditBody").innerHTML =
-    '<details '+(wasOpen?'open':'')+'><summary style="cursor:pointer;font-weight:700;color:#003468;margin:2px 0 8px;user-select:none">Each item &amp; photos ('+doneN+' / '+items.length+' complete)</summary>'
+    '<details '+(wasOpen?'open':'')+'><summary style="cursor:pointer;font-weight:700;color:#003468;margin:2px 0 8px;user-select:none">Each item &amp; photos ('+doneN+' / '+tasks.length+' complete)</summary>'
     + rowsHtml + '</details>';
   // Open any thumbnail full-size in the existing photo modal.
   [].forEach.call($("auditBody").querySelectorAll("img[data-full]"), im => {
     im.onclick = () => { const u = im.getAttribute("data-full"); if(u && typeof openPhotoModalUrl === "function") openPhotoModalUrl(u); else if(u) window.open(u, "_blank"); };
+  });
+  // Office note editing (admins): save on blur / debounced input, no clobber of photos.
+  [].forEach.call($("auditBody").querySelectorAll(".au-noteedit"), t => {
+    let tmr = null;
+    const keep = () => { const id=t.getAttribute("data-note"); const it=(job.auditItems||[]).find(x=>x.id===id); if(it) it.note=t.value; };
+    const save = () => { const id=t.getAttribute("data-note"); keep();
+      mApi("/sla/jobs/"+encodeURIComponent(job.id)+"/audit-item",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({itemId:id,note:t.value})}).catch(()=>{}); };
+    t.addEventListener("input", () => { keep(); clearTimeout(tmr); tmr=setTimeout(save,900); });
+    t.addEventListener("blur", () => { clearTimeout(tmr); save(); });
   });
   // Live: re-fetch the job's audit items every 15s while the tab is visible so the
   // admin view reflects the engineer's autosaves (and stays in step across a
   // reassignment — it's ONE shared job). Read-only, so a refresh loses nothing.
   auditViewTimer = setInterval(async () => {
     if(document.visibilityState !== "visible") return;
+    // Don't wipe a note the admin is typing on the 15s background refresh.
+    const ae = document.activeElement;
+    if(ae && ae.classList && ae.classList.contains("au-noteedit")) return;
     try{
       const r = await fetch(`${SLA_API}/jobs/${encodeURIComponent(job.id)}?t=${Date.now()}`, { cache:"no-store" });
       if(!r.ok) return;

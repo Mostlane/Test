@@ -784,8 +784,10 @@ export async function handle(request, env, ctx) {
     try { out = await res.clone().json(); } catch (e) {}
     const outcome = out.status || (out.ok === false ? "error" : (res.ok ? "ok" : "http_" + res.status));
     const refused = !res.ok || out.ok === false || !SCAN_OK.has(outcome);
+    // The app re-checks on its own (every minute while open, and whenever it comes back on screen).
+    // Those are logged as "recheck", not as a QR scan, so they never look like a person scanning.
     const p = logScan(env, {
-      kind, outcome, refused, reason: out.error || out.reason || null,
+      kind: kind === "scan" && body.auto === true ? "recheck" : kind, outcome, refused, reason: out.error || out.reason || null,
       deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
       site: out.site || body.site || null, lat: body.lat, lng: body.lng, accuracy: body.accuracy,
       distance: out.distance_m, nearest: out.nearestSite || null
@@ -1289,12 +1291,29 @@ async function handleInner(request, env, ctx) {
 
     // GET /sites
     if (url.pathname === "/sites" && request.method === "GET") {
+      // Admin only (2 Nov 2026): it lists every site's name, location and rules,
+      // and was readable by anyone. The scanner never calls it.
+      const guardSites = requireAdmin();
+      if (guardSites) return guardSites;
       await ensureOfflineSchema(env);
       const rows = await env.SITELOG_DB.prepare(
         "SELECT * FROM sites ORDER BY site_name ASC"
       ).all();
 
       return json({ sites: rows.results || [] });
+    }
+
+    // GET /site-stats — per site: visits, last visit, people signed in now (admin).
+    // Powers the portal's Sites map.
+    if (url.pathname === "/site-stats" && request.method === "GET") {
+      const guardStats = requireAdmin();
+      if (guardStats) return guardStats;
+      const rows = await env.SITELOG_DB.prepare(
+        `SELECT site_code AS site, COUNT(*) AS visits, MAX(check_in_at) AS last_visit,
+                SUM(CASE WHEN check_out_at IS NULL THEN 1 ELSE 0 END) AS on_site
+         FROM visits GROUP BY site_code`
+      ).all();
+      return json({ ok: true, stats: rows.results || [] });
     }
 
     // POST /update-site
@@ -1441,6 +1460,7 @@ async function handleInner(request, env, ctx) {
                COALESCE(is_main,0) as is_main,
                portal_username,
                COALESCE(doc_access_always,0) as doc_access_always,
+               COALESCE(is_transfer_pending,0) as is_transfer_pending,
                (SELECT COUNT(*) FROM visits WHERE visits.person_id = people.id) AS visit_count,
                (SELECT COUNT(*) FROM devices WHERE devices.person_id = people.id) AS device_count,
                (SELECT MAX(last_seen) FROM devices WHERE devices.person_id = people.id) AS device_last_seen
@@ -1724,6 +1744,13 @@ async function handleInner(request, env, ctx) {
         ).bind(primaryId, ...mergeIds).run();
       } catch (e) { /* documents tables may not exist on every deployment */ }
 
+      // Keep the scan log pointing at the kept person (refused-scan lists).
+      try {
+        await env.SITELOG_DB.prepare(
+          `UPDATE scan_log SET person_id = ? WHERE person_id IN (${placeholders})`
+        ).bind(primaryId, ...mergeIds).run();
+      } catch (e) { /* scan_log not created yet */ }
+
       await env.SITELOG_DB.prepare(
         `DELETE FROM people WHERE id IN (${placeholders})`
       ).bind(...mergeIds).run();
@@ -1796,10 +1823,12 @@ async function handleInner(request, env, ctx) {
       const radius = body.radius !== undefined ? Number(body.radius) : null;
       const oldName = String(body.oldName || "").trim();
       // Lookup: prefer the old name (rename), else the new name.
-      const lookupName = oldName || name;
-      const existing = await env.SITELOG_DB.prepare(
+      // If the old name isn't there any more (another caller already renamed it),
+      // fall back to the new name — never create a second copy of the same site.
+      const byName = n => env.SITELOG_DB.prepare(
         "SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1"
-      ).bind(lookupName).first();
+      ).bind(n).first();
+      const existing = (oldName && await byName(oldName)) || await byName(name);
       if (existing) {
         const sets = ["site_name = ?"]; const binds = [name];
         if (lat !== null && isFiniteNumber(lat)) { sets.push("lat = ?"); binds.push(lat); }
@@ -2442,7 +2471,15 @@ async function handleInner(request, env, ctx) {
       ).bind(device.person_id, siteCode).first();
 
       if (intent === "out") {
-        if (!openVisit) return await logPending(siteCode, "no_open_visit");
+        if (!openVisit) {
+          // A retry of a sign-out we already applied (the reply was lost):
+          // the visit is closed at exactly this offline time. Not a lost event.
+          const done = await env.SITELOG_DB.prepare(
+            "SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at = ? AND COALESCE(offline_synced,0) = 1 LIMIT 1"
+          ).bind(device.person_id, siteCode, occurredSql).first();
+          if (done) return json({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
+          return await logPending(siteCode, "no_open_visit");
+        }
         // Use the offline time only if it's after check-in; else fall back to now.
         // Both strings are 'YYYY-MM-DD HH:MM:SS' UTC, so they compare lexically.
         const outSql = occurredSql > String(openVisit.check_in_at) ? occurredSql : toSqlUtc(nowMs);
@@ -2868,6 +2905,18 @@ async function handleInner(request, env, ctx) {
       return json(await personWeek(env, device.person_id, url.searchParams.get("week") || ""));
     }
 
+    // GET /my-summary?deviceToken=&range=this_week|last_14|this_month|last_month|all
+    // Totals by site, from the same calculation as /my-timesheet.
+    if (url.pathname === "/my-summary" && request.method === "GET") {
+      const deviceToken = url.searchParams.get("deviceToken");
+      if (!deviceToken) return json({ error: "Missing deviceToken" }, 400);
+      const device = await env.SITELOG_DB.prepare(
+        "SELECT person_id FROM devices WHERE device_token = ?").bind(String(deviceToken).slice(0, 128)).first();
+      if (!device) return json({ ok: false, error: "This phone isn't registered" }, 404);
+      const { personSummary } = await import("./sitelogts.js");
+      return json(await personSummary(env, device.person_id, url.searchParams.get("range") || "this_week"));
+    }
+
     // GET /scan-log?days=7&refused=1 — admin: who tried to scan and what happened.
     if (url.pathname === "/scan-log" && request.method === "GET") {
       const guard = requireAdmin();
@@ -3217,6 +3266,29 @@ async function handleInner(request, env, ctx) {
       const guard = requireAdmin();
       if (guard) return guard;
       const site = url.searchParams.get("site") || "";
+
+      // No site named = everyone signed in anywhere (the portal's "On site right now").
+      if (!site) {
+        const all = await env.SITELOG_DB.prepare(`
+          SELECT v.id as visit_id, v.person_id, v.site_code, v.check_in_at, p.first_name, p.last_name, p.company
+          FROM visits v
+          JOIN people p ON v.person_id = p.id
+          WHERE v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0
+          ORDER BY v.site_code, v.check_in_at
+        `).all();
+        const people = (all.results || []).map((r) => {
+          const t = r.check_in_at ? String(r.check_in_at) : "";
+          return {
+            visit_id: r.visit_id,
+            person_id: r.person_id || "",
+            name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+            company: r.company || "",
+            site: r.site_code || "",
+            check_in_at: t && !/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t.replace(" ", "T") + "Z" : t
+          };
+        });
+        return json({ people });
+      }
 
       const rows = await env.SITELOG_DB.prepare(`
         SELECT v.id as visit_id, v.person_id, p.first_name, p.last_name, p.company

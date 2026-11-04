@@ -161,6 +161,13 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   per-page `body{background:… url(Mostlane_Embossed.png) …}` copies were
   stripped so nothing doubles. Standalone sub-apps under /fsm and /vehicles
   keep their own copy (they don't load portal-config.js).
+  **A page must NOT paint both `html` and `body` (2 Nov 2026).** With html left
+  transparent the browser moves body's colour onto the canvas, BEHIND the
+  watermark — fine. But `html,body{background:X}` paints body as a box OVER the
+  `z-index:-1` layer and hides it. Put the page colour on `html` and make
+  `body{background:transparent}`. Fixed on 15 pages (site-arrival, sitelog,
+  cpd, cpd-admin, customers, daily-logs, day-sessions, health, job-durations,
+  my-day, oncall-history, oncall_current, settings, stats, job-view).
 - View As (owner only, OWNER="Jamie Line"), Story Mode "⚡ My Day" button.
   The purple "Viewing as…" return bar (fixed bottom:0) now **lifts the field
   app's `.tabbar` above itself** (addBar measures its height, sets the tabbar's
@@ -578,9 +585,21 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   **`effSchedule(job,eng)`** returns the engineer's slice else the shared top-level
   `scheduledAt`/`scheduledEnd` (single-engineer + legacy jobs unchanged). Set via
   patch: **`scheduleForEngineer:{engineer,scheduledAt,scheduledEnd}`** sets ONE slice
-  (the scheduler drag — moving a multi-eng block moves only that engineer, never the
-  others), while **`engSchedule:{…}`** REPLACES the whole map (the editor is
-  authoritative; `{}` clears it). `createOrUpdateJobFromPayload` MERGES `body.engSchedule`
+  without touching the others, while **`engSchedule:{…}`** REPLACES the whole map (the editor is
+  authoritative; `{}` clears it).
+  **Scheduler drag (Nov 2026 — "it only moved one of the two"):** dragging a
+  multi-engineer day-view block is now SLOT-AWARE (`engineersSynced(job)` in
+  sla-scheduler.html). When every assigned engineer is on the SAME slot (the usual
+  "one visit, two people" case) the drag moves the WHOLE job together — it sets the
+  shared `scheduledAt`/`scheduledEnd` AND sends `engSchedule:{}` to wipe the
+  per-engineer map so nobody is left behind (status: "…for all N engineers"). Only
+  when engineers already have DIFFERENT per-engineer times (set deliberately, e.g.
+  via the editor's "Per-engineer times" row) does a drag fall back to
+  `scheduleForEngineer` and move just the dragged engineer. Before this, EVERY
+  multi-eng drag used `scheduleForEngineer`, so a job booked for two people left one
+  behind on the old day (St Trinity Church — Connor stuck on Fri while Chris moved
+  to Mon; repaired in D1 by clearing its stray `engSchedule` slice). Week view edits
+  via the modal, so it's unaffected. `createOrUpdateJobFromPayload` MERGES `body.engSchedule`
   (used by the fallback add) + preserves it; `pruneEngSchedule` drops slices for
   engineers no longer on the job. **GET /sla/jobs/for-engineer overwrites scheduledAt/
   scheduledEnd with the engineer's OWN** (like it does status), so route/jobs/inbox/
@@ -3040,6 +3059,58 @@ gives the call 30s, shows "Loading everyone's week…", and on failure says WHIC
 (`health_events` kind='slow') is the place to look when a page "won't load" —
 it records every >2.5s response by endpoint.
 
+## Timesheet / invoice reminders + weekly invoice email to accounts (2 Nov 2026)
+Jamie: "schedule the self-employed invoice to be emailed to accounts@mostlane.com
+at a set day/time each week as a PDF attachment; and if timesheets/invoices aren't
+done in the portal, send alerts — per user (employed or self-employed) that I set:
+some complete hours only, some send an invoice — with van-check-style pop-ups that
+take them to the correct week." Built ON the existing `engts:cfg:<tid>` config +
+`/ts/outstanding` + the existing main.html attention note (no new table beyond an
+`eng_invoices.emailed_at` column).
+- **Per-user reminder MODE** (set on timesheets-admin → ⚙️ Settings, new "Reminder"
+  column): `engts:cfg.byUser[<user>].reminder` = **off | timesheet | invoice**.
+  `reminderModeFor()` defaults UNSET → **off** (opt-in — "user by user that I set";
+  it no longer auto-chases every EngTimesheet holder). `timesheet` = must complete
+  last week's hours; `invoice` = must have SUBMITTED last week's invoice (self-employed).
+  `timesheetDoneFor` = office-approved OR invoiced OR (no job-gaps AND the week has
+  content); `invoice` done = an `eng_invoices` row exists for the week. All gated by
+  the master **`defaults.remindersOn`** switch.
+- **`reminderStateFor(env,tid,cfg,user,monday)`** is the ONE source → `{mode, due,
+  overdue, week, dueAt, dueLabel}`. **GET /ts/outstanding** (reworked, mode-aware)
+  returns `{mode, kind, week, weekLabel, due, overdue, dueAt, dueLabel, count, missing}`
+  for the caller's LAST completed week (prevMon). It drives THREE surfaces:
+  (a) **main.html attention note** — snoozeable up to 2h before the deadline, per-kind
+  wording (⏱ timesheet / 🧾 invoice), keyed on `due` (was `count>0`);
+  (b) **timesheet-gate.js** (NEW, mirrors van-check-gate.js; loaded after portal-config
+  on main/route/engineer-jobs/inbox/you — NOT engineer-timesheet.html, the escape) —
+  a FULL-SCREEN BLOCK when `due && overdue`, button → `engineer-timesheet.html?week=<week>`
+  (which already honours `?week=`). Fails OPEN (no token / bad reply → no block);
+  View-As = dismissible preview;
+  (c) **push** — `sweepTimesheetReminders` reworked: daily ~08:00 London from the
+  Monday the week ends through the deadline day, to anyone `due` (per mode), deduped
+  per `(prevMon, londonDate)` in app_config `ts:reminded:<tid>`.
+- **Weekly invoice email** — **`sweepTimesheetInvoiceEmails`** (cron, in the hourly
+  `minute<5` block): self-gates to `defaults.emailDow`/`emailTime` (London; **default
+  Wednesday 13:00**), forwards EVERY submitted invoice from the last ~5 weeks with
+  `emailed_at IS NULL` to `defaults.invoiceEmail` (**accounts@mostlane.com**) — ONE
+  email per invoice, the stored R2 PDF (`invoices/<tid>/<user>/…`) attached (base64 via
+  `sendEmail`/Resend) — then stamps `emailed_at` so it's sent ONCE; a late invoice is
+  caught on the next run. Independent of the reminder mode (all invoices are forwarded,
+  not just `invoice`-mode users). Master switch `defaults.emailInvoices`.
+- **Settings UI (timesheets-admin.html ⚙️):** the deadline day/time (relabelled
+  "timesheet / invoice"), a master reminders switch, the invoice-email switch +
+  day/time + accounts address, and a per-row **Reminder** dropdown (Default / Off /
+  Timesheet / Invoice; the GET returns `effReminder` for the "Default (…)" label).
+- **Live config set (2 Nov):** `remindersOn:true` (was false), deadline **Tue 16:00**
+  (`dueDow:2`), email **Wed 13:00** (`emailDow:3`), `invoiceEmail:accounts@mostlane.com`,
+  and **Lionel Ponsonby → reminder:"invoice"** (the named self-employed example).
+  Everyone else defaults off — Jamie turns people on in Settings. DEFAULTS in
+  timesheets.js carry emailInvoices/emailDow(3)/emailTime("13:00")/invoiceEmail so a
+  fresh tenant works out of the box.
+- `_headers` no-cache on timesheet-gate.js. No new table (self-migrating
+  `eng_invoices.emailed_at`). **GO-LIVE:** needs `RESEND_API_KEY` (present) + the
+  invoice PDFs already live in R2; nothing else to deploy.
+
 ## XSS audit of every page (10 Sep 2026)
 Jamie: "How secure is this portal?" → "Do the 143 HTML." Every page + shared script
 (187 files) was read for places API/user text is written into HTML unescaped.
@@ -3196,6 +3267,16 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   the URL). If the block isn't there (engineer is office staff hidden by the toggle /
   no slot that day) the status line says so instead of a blank board. Unassigned or
   unscheduled jobs keep the old success panel.
+- **📆 Allocate on more than one day (add-job.html, Nov 2026).** A "📆 Allocate on
+  more than one day" tickbox under the Allocate date/time reveals an add-a-day list
+  (each a date box + ✕). On submit, after the main job is created, add-job.html loops
+  the extra days and POSTs **one independent copy of the job per day** (`POST /jobs`,
+  same description/site/engineers/requirements/release, `scheduledAt` = that day +
+  the chosen time via `extraDayDates()`); the success line reads "…+N more days".
+  Client-only — the main day must be set (it's the first day), each extra day is
+  year-checked, and it's ignored for a standby/fallback template. Deliberately NOT a
+  project drip series (no `seriesId`, no auto-skip-on-clash) — these are plain
+  reactive jobs that each stand alone, so editing one doesn't touch the others.
 
 ## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
 A live at-a-glance office view of where every field engineer is right now.
@@ -5658,12 +5739,16 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Approved - Send to Contractor** → `job` (create/update); **G01. Add a note,
   photo or document** / **"Additional information has been added"** → `note`
   (kind:"note" → **outcome `note`**, never a job: emailjob `appendJobNote` POSTs
-  **/sla/inbound {action:"note"}** → sla.js `appendIncidentNote` appends it to the
-  matching incident's job CARD (`job.events` timeline, prefers the OPEN job, else
-  the newest; 404 if we hold none) AND `createIntakeTask` raises a **📝 Concerto
-  note** task for the WHOLE OFFICE (category "Concerto notes", link → job-view,
-  `@office`+shared so the first person to press Done clears it for everyone) so it's
-  actioned + ticked off; no live job → the task alone); any OTHER action →
+  **/sla/inbound {action:"note"}** → sla.js `appendIncidentNote` appends it QUIETLY
+  to the matching incident's job CARD (`job.events` timeline, prefers the OPEN job,
+  else the newest; 404 if we hold none). **NO task is raised and NO notification
+  fires for a routine note (Jamie, Nov 2026 — "updating the job is enough")** — the
+  `createIntakeTask` call was removed from this branch (that task-create was also
+  what fired the per-note "New task" push). **ONLY a note whose words read as urgent
+  / an escalation / a complaint / a safety issue (`isUrgentNote`, a keyword regex in
+  emailjob.js) sends ONE office push** (`sendToPermission ["FullAccess","SLAAdmin"]`,
+  officeOnly, tag `note-urgent:<jobId>`) — still never a task. A note with no live
+  job just logs (outcome `note`); any OTHER action →
   `job`+missing → review. The completed→quoted→ordered RETURN (e.g. 00025826: dispatched Jul,
   came back Sep as BARE `00025826` AM01 + `Order 00025826/2` £2,105 seconds
   apart) is handled by /sla/inbound's existing matchSameIncident: bare dispatch →
@@ -5702,8 +5787,9 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `CHAP-<n>`), else by the PROPERTY (`sla.js jobsByProperty`: first three address
   words must lead the job's site name/address, so 32A ≠ 32C; jobs found by id/ref
   `CHAP-` OR `storeType:"chapplins"` — the office renames refs to the address).
-  Appended to the job card + a shared "📝 Chapplins note" task; no job → task only.
-  Remittance/invoice/statement subjects → dropped. **FBC P5** ("On next planned
+  Appended QUIETLY to the job card — no task, no notification (same Nov 2026 rule
+  as Concerto notes); only an urgent/escalation note (`isUrgentNote`) pushes the
+  office. Remittance/invoice/statement subjects → dropped. **FBC P5** ("On next planned
   visit") → Priority 4 + "Client priority: P5 …" in the description; "Out of
   hours"-style lines no longer land in the address; `lookupSite` falls back to a
   unique EXACT site-name match when the form's postcode disagrees with the register
@@ -6446,6 +6532,26 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   nothing). Recipients: app_config `sitelog:pushnotify:<tid>` = `{enabled, recipients:[usernames]}` on
   the MAIN DB; no row = OWNER_USERNAME only; `enabled:false` mutes. Auto sign-outs (16:00 sweep) do
   NOT push. Test `node --no-warnings worker/tools/test-sitelog-signpush.mjs` (11).
+- **One admin screen — phase 1: 👷 People tab (1 Nov 2026).** sitelog.html now has admin tabs (`#tabs`: 📊 Overview = the old cards, 👷 People; `#people` deep-link). People = search + Active/Archived/All, add, edit (name/company/purpose/portal link datalist from /users/main/24-7 docs), archive, "Forget their phone" (/reset-device), merge (auto "appears N times" same-name groups + manual), and **📲 New phones waiting** (device_transfers approve/reject with a same-name guess). Phone-transfer temp records (`is_transfer_pending`, now returned by /engineers) are hidden from the list. **Pay is Full Access only** (Jamie's decision): `routes/sitelog.js` proxy strips `MONEY_FIELDS` from GET /engineers and from /update-engineer + /add-engineer bodies for non-Full-Access, and 403s /job-costing. /merge-people now also repoints `scan_log`. Test `node --no-warnings worker/tools/test-sitelog-admin.mjs` (10). Agreed plan (SiteLog CLAUDE.md "Next up 3"): People → visit editing + Problems → Sites + Companies → Documents → retire admin.html, then **replace the 4-digit PIN (`SITELOG_ADMIN_SECRET`) with a long random secret** (approved).
+- **Site Log admin page REBUILT as 4 tabs (1 Nov 2026, Jamie: "rubbish for admin… tidy, less complicated, all the info quick… only through the portal").** sitelog.html: admins get **🟢 Now · 📋 Logs · 👷 People · ⚙ Settings** (non-admins still just see the scan button; admins get a small 📲 Scan in the header). **Now** = on-site list grouped by site (refreshes every 60 s) + "Today so far" tiles (people, hours, still on site, missed sign-outs, failed scans, not confirmed — the problem tiles open Logs filtered to problems). **Logs** = pick a person and/or site + Today/Yesterday/This week/Last week/This month/Last month or any from–to (capped ~3 months) → one card per person (green/amber/red stripe + badges: missed sign-out, failed scan, not confirmed, on site now, not location-checked, or ✓ All complete), every visit with In/Out times, a **green ✓ / red ✗ location check and a 📍 Map button on EVERY event** (greyed "📍 —" when no location was recorded), distance from site, status pill + note, and **failed scans inline as red rows** (with why + distance + their own map); "only show problems" toggle, Expand all, CSV. Backend **GET /sitelog-ts/logs?from=&to=&person=&site=** (`sitelogts.adminLogs` — loadPeriod + scan_log refused rows incl. unregistered phones, signed map links; a refused scan's map focuses that scan via key `pid|day|scan:<at>|x`) and **GET /sitelog-ts/pickers** (people excl. transfer temps + sites). **Settings** = timesheet emails + re-send sites + visitor arrival messages. The old Timesheet card, refused-scan card and the link to the old site-log.co.uk dashboard are gone. Test `node --no-warnings worker/tools/test-sitelog-logs.mjs` (14).
+- **Now tab detail + soft scans (2 Nov 2026).** The 🟢 Now list reads **GET /sitelog-ts/now** (`sitelogts.liveNow`): every open visit (all sites) with the sign-in's location check (✓ verified + metres + 📍 map, or why not: offline / office-added), time so far, and a red "since <date>" if left open from a past day; plus **🟣 Scanned, not confirmed** = today's `scan_log` offers never tapped (confirm_check_in / confirm_sign_out / first_visit), merged per person+site, gone once they sign in/out. Each has **✕** (dismiss) and **Make it a sign-in / sign-out** → **POST /sitelog-ts/soft {action:dismiss|signin|signout, ids}**: sign-in uses the FIRST scan's time+GPS, sign-out the LAST; verified only if that fix was inside the boundary; the visit carries `office_from_scan` ("Sign-in confirmed by X from a scan at HH:MM", shown in Logs/timesheets). Scans are never deleted — `scan_log.dismissed_at/by/as` marks them, and dismissed scans no longer feed the timesheet "scanned but not confirmed" fallback. Unregistered phones can only be dismissed. (/on-site with no `site` now also returns all open visits.) Map tiles = OpenStreetMap (CARTO needs a key now; map page sends `Referrer-Policy: strict-origin`). Tests in test-sitelog-logs.mjs (30).
+- **Only a real QR scan counts as a scan (2 Nov 2026).** The app re-scans by itself (every 60 s while open, on coming back on screen, on page restore, the Refresh button) — those were logged as `kind='scan'`, so they looked like people scanning (Koyes/Zane "sign-out offered" minutes after signing in; 16 of 63 sign-out offers since 15 Oct). Now `scan.html` adds `qr=<time>` when a QR opens SiteLog; app.html reads it ONCE (strips it from the URL + remembers it in localStorage `ml_qr_used`), and only the first successful /scan after a fresh (<10 min) stamp is sent as `auto:false`; everything else sends `auto:true`, which the `handle()` wrapper logs as **`kind='recheck'`**. Rechecks never appear as soft scans, failed scans, map events or the timesheet "scanned not confirmed" fallback (all filter on kind='scan' / exclude 'recheck'). Old app versions (no flag) still log as 'scan'; the Now list additionally ignores a sign-out offer within 20 min of the sign-in. Test cases in test-sitelog-scanlog.mjs.
+- **🧾 Timesheet tab (2 Nov 2026).** sitelog.html tab `ts` (`#ts`): date chips/from–to + a tick-list of ACTIVE SiteLog people
+  (none ticked = everyone with visits) → an on-screen copy of the emailed PDF (navy header sheets: summary table, then one
+  sheet per person with chips + visit rows, ✓/✗ dots, 📍 map links) and **⬇ Download PDF**. Backend: `/sitelog-ts/data` takes
+  `from`/`to`/`people` (comma ids), `/sitelog-ts/pdf` takes `{from,to,people}`; `rangePeriod` (≤93 days, kind `range`, title
+  "SiteLog timesheet") + `pickPeople` (a chosen person with no visits still gets a "No visits" sheet). loadPeriod people now
+  carry `id`. Page widens to 1080px on this tab (`body.wide`). Tests in test-sitelog-timesheets.mjs (57).
+- **🗺 Sites tab — map of every SiteLog site (2 Nov 2026).** sitelog.html tab `sites` (`#sites`): **Google Maps** (JS API lazy-loaded with the same restricted browser key sites.html uses; Map/Satellite toggle; `gestureHandling:cooperative` so the page still scrolls on a phone; switched from Leaflet+OSM the same day); a pin + boundary circle per site (colour by category, green ring = people on site now, archived behind a toggle), plus a list. Tap a pin/row → inline editor: name (read-only for project sites — renamed on the project), boundary metres (number + slider, circle updates live), pin (drag it, tap the map, or postcode → postcodes.io), worker + visitor arrival messages, Archive/Restore. Save = SiteLog `/upsert-site` FIRST (with `oldName`), then — only when the name or pin changed and the site is on the portal register — portal `/update-site` (`siteLog:true` for non-projects) so the register stays the master. Archive/Restore also flips the portal `siteLog` tick (not for projects). ＋ Add a site = tap the map → portal `/add-site?category=site` (S-number, `siteLog:true`) then upsert radius/messages; projects come via the project wizard. Backend: new admin **GET /site-stats** (visits, last visit, on site, grouped by `visits.site_code`); `/upsert-site` now falls back to the NEW name when `oldName` isn't found (the portal's own sync arriving second used to be able to create a duplicate). NB a rename does not rewrite old `visits.site_code`. Test: scratchpad `stmap.cjs` (Google Maps stubbed — the sandbox can't load it).
+- **SiteLog holds only QR sites (2 Nov 2026 tidy).** SiteLog had ~500 geofences (every portal site). Now only
+  **Projects + any site ticked "Use for SiteLog sign-ins"** (`sites.data.siteLog=true`, tick on the sites.html edit
+  modal) are pushed: `sites.js siteLogEligible(site)` gates `syncSiteToSiteLog` (used by /add-site, /update-site,
+  projects-api, compliance store-meta pins) and costing's register add/update; unticking archives the geofence;
+  sitelog.html "Re-send" sends eligible sites only. 470 unused SiteLog sites were ARCHIVED (not deleted; list kept in
+  sitelog-db table `sites_tidy_20261102`); kept = all Projects, sites with a sign-in in the last 12 months, any
+  scan/document, and the Brighton/Hove Starbucks (Cobra) stores, which carry siteLog=true in the portal. The portal
+  Sites list is untouched — it remains the full record. **GET /sites on api2 is now admin-only** (it was a public
+  list of every site + coordinates + rules); docs/import-sites.json was deleted from the public SiteLog repo.
 - **Site Log admin permission `SiteLogAdmin` (16 Oct 2026).** The office view of SiteLog (sitelog.html:
   🟢 on site now, 🧾 timesheet emails/PDFs, 🚫 refused scans, site push) + the `/sitelog/*` admin proxy +
   `/sitelog-ts/*` are gated **FullAccess | SiteLogAdmin** (was Full Access only). It is a SEPARATE key
@@ -6460,7 +6566,7 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   hours the office sees — missed sign-outs, scanned-not-confirmed, ✓/✗ location checks — week by week
   (‹ Earlier / Later ›), plus "Scans that didn't go through" from `scan_log` in plain English. The old
   client-side list (UTC days, its own maths) is kept only as a fallback (`loadHistoryListOld`). No
-  coordinates or ids are returned. Summary card still uses /my-visits (TODO: move it over too).
+  coordinates or ids are returned. **The Summary card now reads GET /my-summary?range=this_week|last_14|this_month|last_month|all** (`sitelogts.personSummary`, same loadPeriod — totals by site with open/missed/unconfirmed counts; the app falls back to the old /my-visits sum if it fails). /sync-event: a re-sent offline sign-out already applied returns `duplicate_ignored` (was a false pending row). Test `test-sitelog-offline.mjs`. **api.site-log.co.uk was retired 1 Nov 2026** (the `sitelog-api` worker had become an old PO-system copy; the address no longer resolves; delete that worker after 8 Nov). Only api2 is live.
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /
@@ -6484,6 +6590,9 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `scannedOut`), purple in the portal Day/Week view, the PDF (row + legend + chip) and the email
   line; `personTotals().scanned`. Real-data cases it was built against: a sign-in scan at another
   site while still signed in (ignored), a re-scan before a later confirmed sign-out (ignored).
+  **A "sign out?" offer within 60 min of the sign-in is NEVER used as the out time** (`EARLY_OUT_MS`, also the Now list):
+  it's the app re-checking (before 2 Nov rechecks were logged as scans) — Oleh 28 Oct got 0h 16m from an 08:17 offer
+  15 min after signing in; now that day reads as a missed sign-out to 16:00.
   A sign-in scan within 30 min AFTER a real sign-out is also ignored (someone walking off — Zane's
   daily 16:08 'North Road' scan as he leaves Jubilee Street).
   **📍 Location map per event (21 Oct 2026).** Every sign-in / sign-out with a stored fix (visits

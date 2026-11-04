@@ -2286,9 +2286,16 @@ export async function handle(request, env, ctx, url, sess) {
         item.extraPhotos = (item.extraPhotos || []).filter(k => k !== b.removeExtra);
         try { await env.JOB_FILES.delete(b.removeExtra); await env.JOB_FILES.delete(b.removeExtra + ".thumb"); } catch {}
       }
+      // Optional per-item note (engineer or office) — an added extra, never gates
+      // completion (the photo is what's required). Anyone on the job can set it.
+      if ("note" in b) {
+        item.note = String(b.note || "").slice(0, 2000);
+        item.noteBy = (sess.user && sess.user.username) || "";
+        item.noteAt = new Date().toISOString();
+      }
       job.updatedAt = new Date().toISOString();
       await saveJob(env, tenantId, job);
-      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
+      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done, note: item.note || "" }, headers);
     }
 
     // POST /sla/jobs/{id}/remedial-photo  -> attach a photo to a remedial item on an
@@ -3709,9 +3716,10 @@ function firestopMissing(job) {
 function isAuditJob(job) { return !!(job && Array.isArray(job.auditItems) && job.auditItems.length); }
 function auditMissing(job) {
   const items = (job && job.auditItems) || [];
-  const outstanding = items.filter(it => !(it && it.done && it.donePhoto));
+  const tasks = items.filter(it => it && !it.header);   // section headers aren't completable
+  const outstanding = tasks.filter(it => !(it.done && it.donePhoto));
   if (!outstanding.length) return [];
-  return [`a completion photo on ${outstanding.length} of ${items.length} audit item${items.length === 1 ? "" : "s"}`];
+  return [`a completion photo on ${outstanding.length} of ${tasks.length} audit item${tasks.length === 1 ? "" : "s"}`];
 }
 // Normalise a builder's audit-item list into the stored shape, PRESERVING each
 // item's completion state + photos from the existing job (matched by id) so an
@@ -3723,6 +3731,12 @@ function normAuditItems(input, existing) {
   const out = [];
   for (const raw of input) {
     if (!raw) continue;
+    if (raw.header) {                                        // a section header — no photo/completion
+      const ht = String(raw.text || raw.title || "").trim();
+      if (ht) out.push({ id: String(raw.id || "") || crypto.randomUUID(), text: ht.slice(0, 2000), header: true });
+      if (out.length >= 200) break;
+      continue;
+    }
     const text = String(raw.text || raw.title || "").trim();
     if (!text && !(raw.id && prev[raw.id])) continue;       // drop blank new rows
     const id = String(raw.id || "") || crypto.randomUUID();
@@ -3737,6 +3751,10 @@ function normAuditItems(input, existing) {
       doneAt: was.doneAt || null,
       doneBy: was.doneBy || null,
       extraPhotos: Array.isArray(was.extraPhotos) ? was.extraPhotos : [],
+      // Optional per-item note — kept across re-saves (written via /audit-item).
+      note: (raw.note != null ? String(raw.note).slice(0, 2000) : (was.note || "")),
+      noteBy: was.noteBy || null,
+      noteAt: was.noteAt || null,
     });
     if (out.length >= 200) break;                            // sane cap
   }

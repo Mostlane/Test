@@ -54,6 +54,8 @@
     @keyframes uppulse{0%,100%{opacity:.55}50%{opacity:1}}
     .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
     /* Site-audit checklist */
+    .au-sec{font-weight:800;color:var(--accent,#003468);font-size:15px;margin:16px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--line)}
+    .au-sec:first-child{margin-top:2px}
     .au-item{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--card)}
     .au-item.au-ok{border-color:#58b784;background:color-mix(in srgb,#58b784 8%,var(--card))}
     .au-h{display:flex;align-items:flex-start;gap:9px}
@@ -63,6 +65,10 @@
     .au-refs{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0 2px}
     .au-lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
     .au-ref,.au-done{width:60px;height:60px;border-radius:10px;object-fit:cover;border:1px solid var(--line);cursor:pointer;background:#eef2f6}
+    .au-note{margin-top:10px}
+    .au-note .au-lbl{display:block;margin-bottom:4px}
+    .au-note-opt{font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)}
+    .au-note-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;color:#0f2438;background:#fff;resize:vertical;min-height:40px}
     .au-done{border-color:#58b784}
     .au-foot{display:flex;align-items:center;gap:10px;margin-top:10px}
     .au-add{background:var(--accent);color:#fff;border:none}
@@ -326,7 +332,7 @@
   function jobIsProject(){ return /^p\d/i.test(String((job&&job.siteCode)||"")) || /project/i.test(String((job&&(job.storeType||job.client))||"")); }
   // Site-audit job: a checklist of items, each needing ONE completion photo.
   function jobIsAudit(){ return !!(job && Array.isArray(job.auditItems) && job.auditItems.length); }
-  function auditOutstanding(){ return (job&&job.auditItems||[]).filter(function(it){ return !(it && it.done && it.donePhoto); }).length; }
+  function auditOutstanding(){ return (job&&job.auditItems||[]).filter(function(it){ return it && !it.header && !(it.done && it.donePhoto); }).length; }
   function raRequired(){ return (job&&job.requiresRA!==undefined)? !!job.requiresRA : !jobIsProject(); }
   function sigRequired(){ return (job&&job.requiresSignature!==undefined)? !!job.requiresSignature : !jobIsProject(); }
   function photoRequired(){ return (job&&job.requiresPhoto!==undefined)? !!job.requiresPhoto : !jobIsProject(); }
@@ -612,7 +618,7 @@
     // just needs its pack (reason + what's needed) like a normal job, so the
     // engineer can park a part-finished works job for office approval.
     if(jobIsAudit()){
-      if(chosen==="Complete"){ var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; }
+      if(chosen==="Complete"){ if(isFullAccess()) return []; var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; }
       if(chosen==="On Hold"){ var hm2=[]; if(!ntrim("holdReason"))hm2.push("the reason"); if(!ntrim("holdNeeds"))hm2.push("what's needed to resume"); return hm2; }
       return null;
     }
@@ -1082,10 +1088,17 @@
   function auditPendingIds(){ var s={}; (pendingPhotos||[]).forEach(function(p){ if(p.kind==="audit" && (p.stage||"done")!=="extra") s[p.itemId]=true; }); return s; }
   function renderAuditList(){
     var host=$("auditList"); if(!host) return;
+    // Don't blow away a note the engineer is mid-way through typing on a
+    // background re-render (the note value is already kept on job.auditItems).
+    if(host.querySelector(".au-note-in:focus")) return;
     var items=(job&&job.auditItems)||[]; var pend=auditPendingIds();
-    var doneCount=items.filter(function(it){return it.done&&it.donePhoto;}).length;
-    var cc=$("auditCount"); if(cc) cc.textContent=items.length? (doneCount+" / "+items.length+" done") : "";
+    var tasks=items.filter(function(it){return it&&!it.header;});
+    var doneCount=tasks.filter(function(it){return it.done&&it.donePhoto;}).length;
+    var cc=$("auditCount"); if(cc) cc.textContent=tasks.length? (doneCount+" / "+tasks.length+" done") : "";
+    var n=0;
     host.innerHTML=items.map(function(it,i){
+      if(it&&it.header){ return '<div class="au-sec">'+esc(it.text||"")+'</div>'; }
+      n++;
       // Reference photos copied from a certificate / added by the office have no
       // ".thumb" copy — fall back to the full photo rather than a broken tile.
       var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}">'; };
@@ -1099,16 +1112,25 @@
                    : '<button class="btn au-add" data-add="'+esc(it.id)+'">📷 Add completion photo</button>');
       var addExtra='<button class="btn line au-add2" data-extra="'+esc(it.id)+'">＋ Add photo</button>';
       return '<div class="au-item'+((it.done&&it.donePhoto)?' au-ok':'')+'">'+
-        '<div class="au-h"><span class="au-n">'+(i+1)+'</span><div class="au-tx">'+esc(it.text||"")+'</div>'+((it.done&&it.donePhoto)?'<span class="au-badge">Done</span>':'')+'</div>'+
+        '<div class="au-h"><span class="au-n">'+n+'</span><div class="au-tx">'+esc(it.text||"")+'</div>'+((it.done&&it.donePhoto)?'<span class="au-badge">Done</span>':'')+'</div>'+
         (refs?'<div class="au-refs"><span class="au-lbl">Reference</span>'+refs+'</div>':'')+
         (extra?'<div class="au-refs"><span class="au-lbl">Added on site</span>'+extra+'</div>':'')+
         '<div class="au-foot">'+doneImg+action+addExtra+'</div>'+
+        '<div class="au-note"><label class="au-lbl">Notes <span class="au-note-opt">(optional)</span></label>'+
+          '<textarea class="au-note-in" rows="2" data-note="'+esc(it.id)+'" placeholder="Add a note (optional)">'+esc(it.note||"")+'</textarea></div>'+
       '</div>';
     }).join("") || '<div class="hint">No items on this audit.</div>';
     [].forEach.call(host.querySelectorAll("[data-add]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-add")); }; });
     [].forEach.call(host.querySelectorAll("[data-redo]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-redo")); }; });
     [].forEach.call(host.querySelectorAll("[data-extra]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-extra"),"extra"); }; });
     [].forEach.call(host.querySelectorAll(".au-ref,.au-done"),function(im){ im.onclick=function(){ var f=im.getAttribute("data-full"); if(f) openAuditImg(f); }; });
+    [].forEach.call(host.querySelectorAll(".au-note-in"),function(t){
+      var id=t.getAttribute("data-note"), tmr=null;
+      function save(){ var it=(job.auditItems||[]).find(function(x){return x.id===id;}); if(it) it.note=t.value;
+        jfetch("/jobs/"+encodeURIComponent(jobId)+"/audit-item",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({itemId:id,note:t.value})}).catch(function(){}); }
+      t.addEventListener("input",function(){ var it=(job.auditItems||[]).find(function(x){return x.id===id;}); if(it) it.note=t.value; clearTimeout(tmr); tmr=setTimeout(save,900); });
+      t.addEventListener("blur",function(){ clearTimeout(tmr); save(); });
+    });
   }
   // Camera-or-gallery chooser (shared with remedials/cert/pump forms). Photo areas
   // that AREN'T "live only" call this: it asks the engineer, then opens the given
