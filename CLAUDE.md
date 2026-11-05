@@ -3089,14 +3089,26 @@ take them to the correct week." Built ON the existing `engts:cfg:<tid>` config +
   (c) **push** — `sweepTimesheetReminders` reworked: daily ~08:00 London from the
   Monday the week ends through the deadline day, to anyone `due` (per mode), deduped
   per `(prevMon, londonDate)` in app_config `ts:reminded:<tid>`.
-- **Weekly invoice email** — **`sweepTimesheetInvoiceEmails`** (cron, in the hourly
-  `minute<5` block): self-gates to `defaults.emailDow`/`emailTime` (London; **default
-  Wednesday 13:00**), forwards EVERY submitted invoice from the last ~5 weeks with
+- **Weekly invoice email** — the shared worker is **`forwardPendingInvoices(env,tid)`**
+  (timesheets.js): forwards EVERY submitted invoice from the last ~5 weeks with
   `emailed_at IS NULL` to `defaults.invoiceEmail` (**accounts@mostlane.com**) — ONE
-  email per invoice, the stored R2 PDF (`invoices/<tid>/<user>/…`) attached (base64 via
-  `sendEmail`/Resend) — then stamps `emailed_at` so it's sent ONCE; a late invoice is
-  caught on the next run. Independent of the reminder mode (all invoices are forwarded,
-  not just `invoice`-mode users). Master switch `defaults.emailInvoices`.
+  email per invoice, the stored R2 PDF (`invoices/<tid>/<user>/…`) attached (base64) —
+  then stamps `emailed_at` so it's sent ONCE; a late invoice is caught on the next run.
+  Independent of the reminder mode (all invoices are forwarded, not just `invoice`-mode
+  users). Master switch `defaults.emailInvoices`. **`sweepTimesheetInvoiceEmails`** (cron,
+  hourly `minute<5` block) is just the time-gate (self-gates to `defaults.emailDow`/
+  `emailTime` London; **default Wednesday 13:00**) → calls `forwardPendingInvoices`.
+  **SEND PATH (5 Nov 2026 fix — "the scheduled invoice email didn't work"):** it now goes
+  via **`sendSubconMail` (Microsoft 365 AS `orders@mostlane.com` FIRST, Resend fallback)**,
+  NOT bare `sendEmail`/Resend. Resend ALONE does not reliably reach **@mostlane.com**
+  inboxes (the same reason 2FA codes + subcontractor orders use 365), so the 4 Nov 13:00
+  run stamped three invoices `emailed_at` (Resend returned ok) yet `accounts@` never got
+  them. Needs the Graph `GRAPH_*` secrets + Mail.Send (already live for subcontractor
+  orders) and `sla:subconsender:<tid>` set. **Manual flush:** admins get a
+  **📧 "Send outstanding invoices now"** button in the ⚙️ Settings modal →
+  **POST /ts/invoice/send-now** (TimesheetAdmin|FullAccess → `forwardPendingInvoices`,
+  returns `{sent,skipped,failed,to,errors}`), so you never wait for the weekly window.
+  Re-queue a falsely-stamped invoice by clearing its `eng_invoices.emailed_at` in D1.
 - **Settings UI (timesheets-admin.html ⚙️):** the deadline day/time (relabelled
   "timesheet / invoice"), a master reminders switch, the invoice-email switch +
   day/time + accounts address, and a per-row **Reminder** dropdown (Default / Off /

@@ -1429,10 +1429,73 @@ export async function sweepTimesheetReminders(env, tid = 1) {
   } catch {}
 }
 
+// Send an invoice forward email: Microsoft 365 AS the configured sender mailbox
+// FIRST (reliable delivery to @mostlane.com inboxes), with the portal mail service
+// (Resend) as a fallback — the SAME path subcontractor orders + 2FA codes use.
+// Resend ALONE does not reliably reach mostlane.com inboxes, so accounts@ never
+// saw the invoices even though Resend returned "ok". Returns {ok, ...}.
+async function sendInvoiceMail(env, tid, opts) {
+  try {
+    const { sendSubconMail } = await import("./sla.js");   // dynamic: sla.js ← timesheets.js statically, avoid the cycle
+    const r = await sendSubconMail(env, tid, opts);         // 365 first, Resend fallback, built-in
+    if (r && r.ok) return r;
+    return r || { ok: false, error: "send failed" };
+  } catch (e) {
+    // Last resort if sendSubconMail can't be reached at all.
+    try { return await sendEmail(env, opts); } catch { return { ok: false, error: String(e && e.message || e) }; }
+  }
+}
+
+// Forward every submitted self-employed invoice from the last ~5 weeks that hasn't
+// been emailed yet to the accounts inbox (PDF attached), and stamp emailed_at so
+// each is sent ONCE — a late one is caught on the next run. No time gate: the cron
+// wraps this behind the day/time window; the admin "Send now" button calls it
+// directly. Returns {sent, skipped, failed, to, errors[]}.
+export async function forwardPendingInvoices(env, tid = 1) {
+  const out = { sent: 0, skipped: 0, failed: 0, to: "", errors: [] };
+  await ensureTables(env);
+  const cfg = await getCfg(env, tid);
+  if (cfg.defaults && cfg.defaults.emailInvoices === false) { out.disabled = true; return out; }
+  const to = String((cfg.defaults && cfg.defaults.invoiceEmail) || "accounts@mostlane.com").trim();
+  out.to = to;
+  if (!to) { out.errors.push("No accounts email address is set."); return out; }
+  const cutoff = new Date(Date.now() - 35 * 86400e3).toISOString();
+  let rows = [];
+  try {
+    const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+    rows = r.results || [];
+  } catch (e) { out.errors.push("database: " + String(e && e.message || e)); return out; }
+  if (!rows.length) return out;
+  const names = {};
+  try { const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all(); for (const u of r.results || []) names[u.username] = displayName(u); } catch {}
+  for (const inv of rows) {
+    const who = names[inv.username] || inv.username;
+    try {
+      const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
+      if (!obj) { out.skipped++; continue; }   // PDF missing / not ready — retried next run
+      const b64 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
+      const wkTxt = new Date(inv.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+      const subject = "Invoice #" + inv.number + " — " + who + " — w/c " + wkTxt;
+      const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who)
+        + "</b> for the week commencing " + escHtml(wkTxt) + ".</p>"
+        + "<p>Total: <b>" + money(inv.total || 0) + "</b></p>"
+        + "<p style=\"color:#667;font-size:12px\">Sent automatically from the Mostlane portal timesheet system.</p>";
+      const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
+      const res = await sendInvoiceMail(env, tid, { to, subject, html, attachments: [{ filename: fn, content: b64, contentType: "application/pdf" }] });
+      if (res && res.ok) {
+        await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind(new Date().toISOString(), tid, inv.id).run();
+        out.sent++;
+      } else {
+        out.failed++;
+        out.errors.push("#" + inv.number + " (" + who + "): " + ((res && (res.error || res.reason)) || "send failed"));
+      }
+    } catch (e) { out.failed++; out.errors.push("#" + inv.number + " (" + who + "): " + String(e && e.message || e)); }
+  }
+  return out;
+}
+
 // Cron: email each submitted self-employed invoice PDF to the accounts inbox,
-// on the day/time set in Settings (default Wednesday 13:00 London). Forwards
-// every invoice from the last ~5 weeks not yet emailed — so a late one is caught
-// on the next run — and marks each emailed_at so it's only ever sent once.
+// on the day/time set in Settings (default Wednesday 13:00 London).
 export async function sweepTimesheetInvoiceEmails(env, tid = 1) {
   try {
     await ensureTables(env);
@@ -1444,34 +1507,7 @@ export async function sweepTimesheetInvoiceEmails(env, tid = 1) {
     const wantDow = Number(cfg.defaults && cfg.defaults.emailDow != null ? cfg.defaults.emailDow : 3);
     const wantHour = parseInt(String((cfg.defaults && cfg.defaults.emailTime) || "13:00").split(":")[0], 10) || 0;
     if (L.dow !== wantDow || L.hour !== wantHour) return;
-    const cutoff = new Date(Date.now() - 35 * 86400e3).toISOString();
-    let rows = [];
-    try {
-      const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
-      rows = r.results || [];
-    } catch { return; }
-    if (!rows.length) return;
-    const names = {};
-    try { const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all(); for (const u of r.results || []) names[u.username] = displayName(u); } catch {}
-    for (const inv of rows) {
-      try {
-        const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
-        if (!obj) continue;   // PDF missing / not ready — retried next run
-        const b64 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
-        const who = names[inv.username] || inv.username;
-        const wkTxt = new Date(inv.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-        const subject = "Invoice #" + inv.number + " — " + who + " — w/c " + wkTxt;
-        const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who)
-          + "</b> for the week commencing " + escHtml(wkTxt) + ".</p>"
-          + "<p>Total: <b>" + money(inv.total || 0) + "</b></p>"
-          + "<p style=\"color:#667;font-size:12px\">Sent automatically from the Mostlane portal timesheet system.</p>";
-        const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
-        const res = await sendEmail(env, { to, subject, html, attachments: [{ filename: fn, content: b64 }] });
-        if (res && res.ok !== false) {
-          await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind(new Date().toISOString(), tid, inv.id).run();
-        }
-      } catch {}
-    }
+    await forwardPendingInvoices(env, tid);
   } catch {}
 }
 
@@ -2308,6 +2344,15 @@ export async function handle(request, env, ctx, url, sess) {
     await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
     try { await env.JOB_FILES.delete(row.r2_key); } catch {}
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+
+  // ── Email the outstanding invoices to accounts NOW (admin) ───────────────
+  // The weekly cron normally does this on the set day/time; this forwards every
+  // not-yet-emailed invoice on demand (via Microsoft 365, Resend fallback).
+  if (sub === "/invoice/send-now" && method === "POST") {
+    if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
+    const r = await forwardPendingInvoices(env, tid);
+    return json({ ok: true, ...r }, {}, env, request);
   }
 
   // ── Fleet cross-check (AI verify entered hours vs telematics van data) ────
