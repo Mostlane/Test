@@ -55,6 +55,22 @@
     .pilllink .opendoc{font-size:11px;color:var(--brand);font-weight:700;}
     .pilllink:hover .opendoc{text-decoration:underline;}
     .viewtabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+    /* Compliance-chart look on phones: one tidy scroll row of tabs, then a tight
+       search + Filters toolbar, then the table — summary/chips fold away. */
+    @media(max-width:760px){
+      .viewtabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:3px;scrollbar-width:none;-ms-overflow-style:none;}
+      .viewtabs::-webkit-scrollbar{display:none;}
+      .viewtabs .viewtab{flex:0 0 auto;white-space:nowrap;padding:7px 12px;font-size:13.5px;}
+    }
+    details.aboutbox{margin-bottom:10px;}
+    details.aboutbox>summary{cursor:pointer;font-size:12.5px;color:#56708c;list-style:none;padding:3px 0;user-select:none;}
+    details.aboutbox>summary::-webkit-details-marker{display:none;}
+    details.aboutbox>summary::before{content:"\2139\FE0F  About this schedule \25B8";}
+    details.aboutbox[open]>summary::before{content:"\2139\FE0F  About this schedule \25BE";}
+    details.aboutbox .infobox{margin-top:6px;margin-bottom:0;}
+    .subtoolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+    #filtersToggle{display:inline-flex;align-items:center;gap:6px;}
+    #filtersBadge{color:var(--brand,#003366);font-weight:700;max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .viewtab{padding:8px 14px;border-radius:999px;border:1px solid #d7dee6;background:#fff;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;color:#5a6b80;}
     .viewtab.on{background:var(--brand,#003366);border-color:var(--brand,#003366);color:#fff;}
     .viewtab .n{opacity:.75;font-weight:600;}
@@ -294,35 +310,42 @@
   </div>
 
   <div class="wrap">
-    <div class="infobox">
-      The 5-Year EICR schedule for Southern&nbsp;Co-op sites on Concerto's PPM list — pick a year at the top, or <b>All years (whole list)</b> to see every site Concerto tracks. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
-    </div>
+    <details class="aboutbox"><summary></summary>
+      <div class="infobox">
+        The 5-Year EICR schedule for Southern&nbsp;Co-op sites on Concerto's PPM list — pick a year at the top, or <b>All years (whole list)</b> to see every site Concerto tracks. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
+      </div>
+    </details>
     <div class="viewtabs" id="viewtabs"></div>
-    <div class="sumrow" id="sumrow"></div>
-    <div id="audit"></div>
     <div class="toolbar" id="toolbar0">
       <input id="q" placeholder="Search store, site, engineer, order…">
       <label class="muted" id="engWrap" style="display:none;align-items:center;gap:6px;">Engineer
         <select id="engSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;"><option value="all">All engineers</option></select>
       </label>
-      <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
-        <select id="sortSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;">
-          <option value="code">Store number (Concerto order)</option>
-          <option value="due">Concerto due date</option>
-          <option value="mdue">Mostlane due date (cert runs out)</option>
-          <option value="stage">Stage</option>
-          <option value="doc">Certificate status (attention first)</option>
-          <option value="site">Site name</option>
-        </select>
-      </label>
-      <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
-      <button id="tlToggle" class="viewtab" title="Show a timeline of due dates vs today">📊 Timeline</button>
-      <button id="impJobs" class="viewtab" style="display:none" title="Drop in a Concerto 'Jobs' export (.xlsx/.csv) to set each site's status">⤵ Import Concerto jobs</button>
-      <input type="file" id="impJobsFile" accept=".xlsx,.csv" style="display:none">
-      <span class="saved" id="impJobsMsg"></span>
+      <button id="filtersToggle" class="viewtab" title="Show the summary tiles and stage filters"><span id="filtersChevron">▸</span> Filters &amp; summary<span id="filtersBadge" style="display:none"></span></button>
+    </div>
+    <div id="filtersWrap" style="display:none">
+      <div class="sumrow" id="sumrow"></div>
+      <div id="audit"></div>
+      <div class="subtoolbar">
+        <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
+          <select id="sortSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;">
+            <option value="code">Store number (Concerto order)</option>
+            <option value="due">Concerto due date</option>
+            <option value="mdue">Mostlane due date (cert runs out)</option>
+            <option value="stage">Stage</option>
+            <option value="doc">Certificate status (attention first)</option>
+            <option value="site">Site name</option>
+          </select>
+        </label>
+        <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
+        <button id="tlToggle" class="viewtab" title="Show a timeline of due dates vs today">📊 Timeline</button>
+        <button id="impJobs" class="viewtab" style="display:none" title="Drop in a Concerto 'Jobs' export (.xlsx/.csv) to set each site's status">⤵ Import Concerto jobs</button>
+        <input type="file" id="impJobsFile" accept=".xlsx,.csv" style="display:none">
+        <span class="saved" id="impJobsMsg"></span>
+      </div>
+      <div class="chips" id="chips"></div>
     </div>
     <div class="tlwrap" id="timeline" style="display:none"></div>
-    <div class="chips" id="chips"></div>
     <div class="tblwrap"><table id="tbl"><thead></thead><tbody><tr><td class="muted" style="padding:16px;">Loading…</td></tr></tbody></table></div>
   </div>
 
@@ -346,6 +369,24 @@
     let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active", LRATE = 0, ENG = "all";
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
     let TLON = (() => { try { return localStorage.getItem("mlFyrTimeline") === "1"; } catch { return false; } })();
+    // Filters & summary fold away by default on phones (like the compliance charts).
+    let FILTERS_OPEN = (() => { try { const v = localStorage.getItem("mlFyrFiltersOpen"); if (v==="1") return true; if (v==="0") return false; } catch {} return window.innerWidth >= 760; })();
+    function setFilters(open){
+      FILTERS_OPEN = open;
+      const w = g("filtersWrap"); if (w) w.style.display = open ? "" : "none";
+      const c = g("filtersChevron"); if (c) c.textContent = open ? "▾" : "▸";
+      try { localStorage.setItem("mlFyrFiltersOpen", open ? "1" : "0"); } catch {}
+    }
+    // While the filters are folded away, show on the toggle which ones are active.
+    function updateFiltersBadge(){
+      const b = g("filtersBadge"); if (!b) return;
+      const bits = [];
+      if (FILTER && FILTER!=="all") bits.push(FILTER==="archive" ? "Archive only" : (STAGE_LABEL[FILTER]||FILTER));
+      if (g("fFlag") && g("fFlag").checked) bits.push("🚩 Flagged");
+      if (VIEW==="mine" && ENG && ENG!=="all") bits.push(ENG);
+      if (bits.length) { b.textContent = " · " + bits.join(" · "); b.style.display = "inline"; }
+      else { b.textContent = ""; b.style.display = "none"; }
+    }
     let TODAY = new Date().toISOString().slice(0,10);
     const EXPANDED = new Set();
     // The current 5-year document status (server-computed) → label + light.
@@ -368,6 +409,8 @@
       g("impJobsFile").onchange = () => { const f = g("impJobsFile").files[0]; if (f) importConcertoJobs(f); g("impJobsFile").value = ""; };
       g("tlToggle").onclick = () => { TLON = !TLON; try { localStorage.setItem("mlFyrTimeline", TLON?"1":"0"); } catch {} render(); };
       window.addEventListener("resize", () => { if (TLON && g("timeline").style.display!=="none") renderTimeline(visible()); });
+      g("filtersToggle").onclick = () => setFilters(!FILTERS_OPEN);
+      setFilters(FILTERS_OPEN);
       g("sortSel").value = SORT;
       g("sortSel").onchange = () => { SORT = g("sortSel").value; try { localStorage.setItem("mlFyrSort", SORT); } catch {} render(); };
       g("alexBtn").onclick = openAlex;
@@ -612,7 +655,9 @@
       renderViewTabs();
       const qv = isQ();
       g("toolbar0") && (g("toolbar0").style.display = qv ? "none" : "");
+      g("filtersWrap") && (g("filtersWrap").style.display = qv ? "none" : (FILTERS_OPEN ? "" : "none"));
       if (qv) { g("chips").innerHTML = ""; g("timeline").style.display = "none"; renderQueue(); return; }
+      updateFiltersBadge();
       const rows = yearRows();
       // Summary tiles
       if (VIEW==="inactive") {
