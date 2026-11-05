@@ -4107,6 +4107,19 @@ these jobs.
     coherently (any remedials_* stage ⇒ unsatisfactory; complete_satisfactory ⇒ satisfactory)
     so the pipeline page stays consistent. `stats.pipeline.byStage12` + `stages12` feed the
     filter chips; buildSchedule adds `docStatus` per pipeline row.
+  - **Editable Mostlane due date per row (5 Nov 2026, Jamie: "edit the site information if
+    needed" → he picked just the due date):** the "Mostlane due" cell carries an inline ✏️
+    (shown when the row has a store code) → a `<input type="date">` + Save/✕ (`editDue`/
+    `saveDue` in five-year-remedials.html). Save POSTs the EXISTING **/compliance/store?scheme=coop**
+    `{code:<storeCode>, due:{fiveYear:<date>}}` — it MERGES/UPSERTS the coop compliance_stores
+    fiveYear due (creates the store row if missing), so the edit changes exactly what the chart
+    shows (`chartDue`) AND keeps the compliance chart (eicr-portal.html) in step — one source of
+    truth. An empty value clears it. The schedule LIST still comes from the Concerto Excel
+    (concerto_ppm), so a correction to the due date is never wiped by the next upload (it lives on
+    compliance_stores, not the imported rows). After a save the page calls `load()` so the
+    certificate-status pill + stage re-derive from the new due. Needs compliance EDIT access
+    (FullAccess always; an SLAAdmin-only viewer without it gets a clear 403 message). HTML-only —
+    no worker change, no `?v=`/SW bump (network-first + already in `_headers`).
   - Filter chips per stage (traffic-lit, counts) + 🚩-flagged toggle + search; each row
     expands to the read-only step strip + outcome + links (test job / ➕ raise test job /
     works job / certificate / compliance check / client orders / site folder / full case on
