@@ -485,6 +485,11 @@ g("cfgBtn").onclick=async()=>{
     <div style="flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px">
       <button type="button" id="sendNowBtn" onclick="sendInvoicesNow()" style="width:auto">📧 Send outstanding invoices now</button>
       <span id="sendNowState" class="muted" style="font-size:12px"></span></div>
+    <div style="flex:1;min-width:260px;display:flex;flex-direction:column;gap:4px">
+      <label style="font-size:13px">Email all invoices for a week
+        <input type="date" id="emailWeekDate" value="${(()=>{const d=new Date();const dow=(d.getDay()+6)%7;d.setDate(d.getDate()-dow-7);return d.toISOString().slice(0,10);})()}" style="width:160px"></label>
+      <button type="button" id="emailWeekBtn" onclick="emailWeekInvoices()" style="width:auto">📧 Email Now</button>
+      <span id="emailWeekState" class="muted" style="font-size:12px">Emails every invoice for that week (re-sends already-sent ones).</span></div>
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
@@ -640,6 +645,29 @@ async function sendInvoicesNow(){
   let msg=bits.join(" · ");
   if(r.failed&&r.errors&&r.errors.length)msg+=" — "+r.errors.slice(0,3).join("; ");
   if(st)st.textContent=(r.sent?"✓ ":"")+msg;
+}
+async function emailWeekInvoices(){
+  const btn=g("emailWeekBtn"),st=g("emailWeekState"),dt=g("emailWeekDate");
+  if(!btn)return;
+  const week=dt&&dt.value;
+  if(!week){if(st)st.textContent="Pick a date in the week first.";return;}
+  if(cfgDirty||cfgBusy)await doCfgSave();
+  const ok=window.MLUI?await MLUI.confirm("Email every invoice for the week of "+week+" to accounts? Invoices already sent will be re-sent.",{title:"Email invoices",okLabel:"Email them"}):confirm("Email every invoice for that week? Already-sent ones will be re-sent.");
+  if(!ok)return;
+  btn.disabled=true;if(st)st.textContent="Sending…";
+  const r=await authFetchTO("/ts/invoice/send-now",{method:"POST",body:JSON.stringify({week,force:true})}).then(x=>x.json()).catch(()=>null);
+  btn.disabled=false;
+  if(!r||!r.ok){if(st)st.textContent="⚠️ Couldn't send — try again.";return;}
+  if(r.disabled){if(st)st.textContent="Auto-email is switched off — turn it on above first.";return;}
+  const wk=r.week||week;
+  const bits=[];
+  if(r.sent)bits.push(r.sent+" emailed to "+(r.to||"accounts"));
+  if(r.skipped)bits.push(r.skipped+" skipped (PDF not ready)");
+  if(r.failed)bits.push(r.failed+" failed");
+  if(!r.sent&&!r.skipped&&!r.failed)bits.push("No invoices found for w/c "+wk+".");
+  let msg=bits.join(" · ");
+  if(r.failed&&r.errors&&r.errors.length)msg+=" — "+r.errors.slice(0,3).join("; ");
+  if(st)st.textContent=(r.sent?"✓ w/c "+wk+": ":"")+msg;
 }
 async function closeCfg(){
   if(cfgDirty||cfgBusy){clearTimeout(cfgTimer);await doCfgSave();}

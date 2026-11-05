@@ -3106,9 +3106,14 @@ take them to the correct week." Built ON the existing `engts:cfg:<tid>` config +
   them. Needs the Graph `GRAPH_*` secrets + Mail.Send (already live for subcontractor
   orders) and `sla:subconsender:<tid>` set. **Manual flush:** admins get a
   **📧 "Send outstanding invoices now"** button in the ⚙️ Settings modal →
-  **POST /ts/invoice/send-now** (TimesheetAdmin|FullAccess → `forwardPendingInvoices`,
-  returns `{sent,skipped,failed,to,errors}`), so you never wait for the weekly window.
-  Re-queue a falsely-stamped invoice by clearing its `eng_invoices.emailed_at` in D1.
+  **POST /ts/invoice/send-now** (TimesheetAdmin|FullAccess → `forwardPendingInvoices(env,
+  tid,opts)`, returns `{sent,skipped,failed,to,week,errors}`), so you never wait for the
+  weekly window. **Two modes:** no body = every invoice from the last ~5 weeks NOT yet
+  emailed; **`{week:<any day>, force:true}`** (the Settings **"Email Now" week date picker**)
+  = ALL invoices for that week (server `mondayOf`s the date), **re-sending already-sent ones**
+  — for a deliberate re-send of a chosen week (`force:false` limits a week send to un-sent).
+  Re-queue a falsely-stamped invoice by clearing its `eng_invoices.emailed_at` in D1, or
+  just pick its week in "Email Now".
 - **Settings UI (timesheets-admin.html ⚙️):** the deadline day/time (relabelled
   "timesheet / invoice"), a master reminders switch, the invoice-email switch +
   day/time + accounts address, and a per-row **Reminder** dropdown (Default / Off /

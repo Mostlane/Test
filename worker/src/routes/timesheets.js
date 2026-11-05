@@ -1446,12 +1446,17 @@ async function sendInvoiceMail(env, tid, opts) {
   }
 }
 
-// Forward every submitted self-employed invoice from the last ~5 weeks that hasn't
-// been emailed yet to the accounts inbox (PDF attached), and stamp emailed_at so
-// each is sent ONCE — a late one is caught on the next run. No time gate: the cron
-// wraps this behind the day/time window; the admin "Send now" button calls it
-// directly. Returns {sent, skipped, failed, to, errors[]}.
-export async function forwardPendingInvoices(env, tid = 1) {
+// Forward submitted self-employed invoices to the accounts inbox (PDF attached),
+// stamping emailed_at. Two modes:
+//   • default (no opts): every invoice from the last ~5 weeks NOT yet emailed —
+//     the weekly cron + the "Send outstanding invoices now" button; a late one is
+//     caught on the next run.
+//   • opts.week (YYYY-MM-DD, any day of the week): ALL invoices for that week,
+//     re-sending already-emailed ones too unless opts.force===false — the Settings
+//     "Email Now" button for a chosen week.
+// No time gate (the cron wraps this behind the day/time window). Returns
+// {sent, skipped, failed, to, week, errors[]}.
+export async function forwardPendingInvoices(env, tid = 1, opts = {}) {
   const out = { sent: 0, skipped: 0, failed: 0, to: "", errors: [] };
   await ensureTables(env);
   const cfg = await getCfg(env, tid);
@@ -1459,10 +1464,21 @@ export async function forwardPendingInvoices(env, tid = 1) {
   const to = String((cfg.defaults && cfg.defaults.invoiceEmail) || "accounts@mostlane.com").trim();
   out.to = to;
   if (!to) { out.errors.push("No accounts email address is set."); return out; }
-  const cutoff = new Date(Date.now() - 35 * 86400e3).toISOString();
+  const week = opts && opts.week && isDateStr(opts.week) ? mondayOf(opts.week) : null;
+  const force = opts && opts.force !== false;   // a week send re-sends by default
+  out.week = week;
   let rows = [];
   try {
-    const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+    let r;
+    if (week) {
+      // All invoices for the chosen week — re-send even already-emailed ones unless force is off.
+      const sql = "SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?"
+        + (force ? "" : " AND (emailed_at IS NULL OR emailed_at='')") + " ORDER BY at";
+      r = await env.DB.prepare(sql).bind(tid, week).all();
+    } else {
+      const cutoff = new Date(Date.now() - 35 * 86400e3).toISOString();
+      r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+    }
     rows = r.results || [];
   } catch (e) { out.errors.push("database: " + String(e && e.message || e)); return out; }
   if (!rows.length) return out;
@@ -2351,7 +2367,10 @@ export async function handle(request, env, ctx, url, sess) {
   // not-yet-emailed invoice on demand (via Microsoft 365, Resend fallback).
   if (sub === "/invoice/send-now" && method === "POST") {
     if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
-    const r = await forwardPendingInvoices(env, tid);
+    const b = await request.json().catch(() => ({}));
+    const opts = {};
+    if (b.week && isDateStr(b.week)) { opts.week = b.week; if (b.force === false) opts.force = false; }
+    const r = await forwardPendingInvoices(env, tid, opts);
     return json({ ok: true, ...r }, {}, env, request);
   }
 

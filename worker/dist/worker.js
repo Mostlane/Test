@@ -3969,7 +3969,7 @@ async function sendInvoiceMail(env, tid, opts) {
     }
   }
 }
-async function forwardPendingInvoices(env, tid = 1) {
+async function forwardPendingInvoices(env, tid = 1, opts = {}) {
   const out = { sent: 0, skipped: 0, failed: 0, to: "", errors: [] };
   await ensureTables(env);
   const cfg = await getCfg(env, tid);
@@ -3983,10 +3983,19 @@ async function forwardPendingInvoices(env, tid = 1) {
     out.errors.push("No accounts email address is set.");
     return out;
   }
-  const cutoff = new Date(Date.now() - 35 * 864e5).toISOString();
+  const week = opts && opts.week && isDateStr(opts.week) ? mondayOf(opts.week) : null;
+  const force = opts && opts.force !== false;
+  out.week = week;
   let rows = [];
   try {
-    const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+    let r;
+    if (week) {
+      const sql = "SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?" + (force ? "" : " AND (emailed_at IS NULL OR emailed_at='')") + " ORDER BY at";
+      r = await env.DB.prepare(sql).bind(tid, week).all();
+    } else {
+      const cutoff = new Date(Date.now() - 35 * 864e5).toISOString();
+      r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+    }
     rows = r.results || [];
   } catch (e) {
     out.errors.push("database: " + String(e && e.message || e));
@@ -4984,7 +4993,13 @@ async function handle3(request, env, ctx, url, sess) {
   }
   if (sub === "/invoice/send-now" && method === "POST") {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    const r = await forwardPendingInvoices(env, tid);
+    const b = await request.json().catch(() => ({}));
+    const opts = {};
+    if (b.week && isDateStr(b.week)) {
+      opts.week = b.week;
+      if (b.force === false) opts.force = false;
+    }
+    const r = await forwardPendingInvoices(env, tid, opts);
     return json({ ok: true, ...r }, {}, env, request);
   }
   if (sub === "/verify" && method === "POST") {
