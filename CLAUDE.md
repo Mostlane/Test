@@ -4180,6 +4180,26 @@ these jobs.
     Verified headless (scratchpad `fyr.cjs`): 4 mock rows (portal job / archive-only /
     filed cert / needs-booking) → exactly ONE 🗄 pill on the archive-only store, zebra
     on alternate rows, navy header, the chip isolates the archive row, 0 JS errors.
+  - **Mobile declutter — compliance-chart layout (5 Nov 2026, Jamie: "looks awful on
+    mobile and nothing like the compliance charts").** The top was a wall of controls
+    before the table (intro paragraph · 5 view tabs wrapping 3 lines · 6 summary tiles ·
+    2 audit cards · search · sort · flagged · Timeline · 10 stage chips). Now (front-end
+    only, no worker change): the intro folds into a small **`<details class="aboutbox">`**
+    ("ℹ️ About this schedule ▸"); the **view tabs are ONE horizontal scroll row** on phones
+    (`@media(max-width:760px)` `flex-wrap:nowrap;overflow-x:auto`); and the summary tiles
+    (`#sumrow`), audit cards (`#audit`), sort/flagged/Timeline/import (`.subtoolbar`) and the
+    stage chips (`#chips`) all move INTO one collapsible **`#filtersWrap`** toggled by a
+    **"▸ Filters & summary"** button (`#filtersToggle`) in the tight search toolbar —
+    **collapsed by default on phones** (`FILTERS_OPEN`, remembered in localStorage
+    `mlFyrFiltersOpen`, defaults open ≥760px). So the table sits right under the search bar,
+    like eicr-portal. All element ids are unchanged (sumrow/audit/sortSel/fFlag/tlToggle/
+    impJobs/chips/tbl) so every render path is untouched; `render()` sets `#filtersWrap`
+    display from `FILTERS_OPEN` (always hidden on the remq/certq queue views) and calls
+    **`updateFiltersBadge()`** → a "· <stage> · 🚩 Flagged · <engineer>" badge on the toggle
+    so an active filter is visible while folded. `#timeline` + the table stay OUTSIDE the
+    collapse. Verified headless at 390px (scratchpad `fyrmob.cjs`): filters collapsed by
+    default, table top ~250px, toggle opens it, badge reflects a set stage filter, 0 errors.
+    HTML-only — no `?v=`/SW bump (network-first + already in `_headers`).
   - **"👷 Engineer diary" button (14 Oct 2026, Jamie: "a button to view all the EICRs
     assigned to Daniel Walker with dates, day by day… so none will be missed; as jobs
     are added they add to the list").** A header button on five-year-remedials.html
