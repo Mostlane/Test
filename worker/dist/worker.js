@@ -3955,6 +3955,78 @@ async function sweepTimesheetReminders(env, tid = 1) {
   } catch {
   }
 }
+async function sendInvoiceMail(env, tid, opts) {
+  try {
+    const { sendSubconMail: sendSubconMail2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
+    const r = await sendSubconMail2(env, tid, opts);
+    if (r && r.ok) return r;
+    return r || { ok: false, error: "send failed" };
+  } catch (e) {
+    try {
+      return await sendEmail(env, opts);
+    } catch {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  }
+}
+async function forwardPendingInvoices(env, tid = 1) {
+  const out = { sent: 0, skipped: 0, failed: 0, to: "", errors: [] };
+  await ensureTables(env);
+  const cfg = await getCfg(env, tid);
+  if (cfg.defaults && cfg.defaults.emailInvoices === false) {
+    out.disabled = true;
+    return out;
+  }
+  const to = String(cfg.defaults && cfg.defaults.invoiceEmail || "accounts@mostlane.com").trim();
+  out.to = to;
+  if (!to) {
+    out.errors.push("No accounts email address is set.");
+    return out;
+  }
+  const cutoff = new Date(Date.now() - 35 * 864e5).toISOString();
+  let rows = [];
+  try {
+    const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+    rows = r.results || [];
+  } catch (e) {
+    out.errors.push("database: " + String(e && e.message || e));
+    return out;
+  }
+  if (!rows.length) return out;
+  const names = {};
+  try {
+    const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of r.results || []) names[u.username] = displayName(u);
+  } catch {
+  }
+  for (const inv of rows) {
+    const who = names[inv.username] || inv.username;
+    try {
+      const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
+      if (!obj) {
+        out.skipped++;
+        continue;
+      }
+      const b642 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
+      const wkTxt = (/* @__PURE__ */ new Date(inv.week + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+      const subject = "Invoice #" + inv.number + " \u2014 " + who + " \u2014 w/c " + wkTxt;
+      const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who) + "</b> for the week commencing " + escHtml(wkTxt) + ".</p><p>Total: <b>" + money(inv.total || 0) + '</b></p><p style="color:#667;font-size:12px">Sent automatically from the Mostlane portal timesheet system.</p>';
+      const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
+      const res = await sendInvoiceMail(env, tid, { to, subject, html, attachments: [{ filename: fn, content: b642, contentType: "application/pdf" }] });
+      if (res && res.ok) {
+        await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, inv.id).run();
+        out.sent++;
+      } else {
+        out.failed++;
+        out.errors.push("#" + inv.number + " (" + who + "): " + (res && (res.error || res.reason) || "send failed"));
+      }
+    } catch (e) {
+      out.failed++;
+      out.errors.push("#" + inv.number + " (" + who + "): " + String(e && e.message || e));
+    }
+  }
+  return out;
+}
 async function sweepTimesheetInvoiceEmails(env, tid = 1) {
   try {
     await ensureTables(env);
@@ -3966,38 +4038,7 @@ async function sweepTimesheetInvoiceEmails(env, tid = 1) {
     const wantDow = Number(cfg.defaults && cfg.defaults.emailDow != null ? cfg.defaults.emailDow : 3);
     const wantHour = parseInt(String(cfg.defaults && cfg.defaults.emailTime || "13:00").split(":")[0], 10) || 0;
     if (L2.dow !== wantDow || L2.hour !== wantHour) return;
-    const cutoff = new Date(Date.now() - 35 * 864e5).toISOString();
-    let rows = [];
-    try {
-      const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
-      rows = r.results || [];
-    } catch {
-      return;
-    }
-    if (!rows.length) return;
-    const names = {};
-    try {
-      const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
-      for (const u of r.results || []) names[u.username] = displayName(u);
-    } catch {
-    }
-    for (const inv of rows) {
-      try {
-        const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
-        if (!obj) continue;
-        const b642 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
-        const who = names[inv.username] || inv.username;
-        const wkTxt = (/* @__PURE__ */ new Date(inv.week + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-        const subject = "Invoice #" + inv.number + " \u2014 " + who + " \u2014 w/c " + wkTxt;
-        const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who) + "</b> for the week commencing " + escHtml(wkTxt) + ".</p><p>Total: <b>" + money(inv.total || 0) + '</b></p><p style="color:#667;font-size:12px">Sent automatically from the Mostlane portal timesheet system.</p>';
-        const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
-        const res = await sendEmail(env, { to, subject, html, attachments: [{ filename: fn, content: b642 }] });
-        if (res && res.ok !== false) {
-          await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, inv.id).run();
-        }
-      } catch {
-      }
-    }
+    await forwardPendingInvoices(env, tid);
   } catch {
   }
 }
@@ -4940,6 +4981,11 @@ async function handle3(request, env, ctx, url, sess) {
     } catch {
     }
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+  if (sub === "/invoice/send-now" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const r = await forwardPendingInvoices(env, tid);
+    return json({ ok: true, ...r }, {}, env, request);
   }
   if (sub === "/verify" && method === "POST") {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);

@@ -482,6 +482,9 @@ g("cfgBtn").onclick=async()=>{
       <input type="time" id="d-emailtime" value="${esc(r.defaults.emailTime||"13:00")}" step="300" style="width:110px"></label>
     <label style="flex:1;min-width:220px">Accounts email (where invoices are sent)
       <input type="email" id="d-accemail" value="${esc(r.defaults.invoiceEmail||"accounts@mostlane.com")}" style="width:100%"></label>
+    <div style="flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px">
+      <button type="button" id="sendNowBtn" onclick="sendInvoicesNow()" style="width:auto">📧 Send outstanding invoices now</button>
+      <span id="sendNowState" class="muted" style="font-size:12px"></span></div>
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
@@ -618,6 +621,25 @@ async function doCfgSave(){
     if(st)st.textContent="⚠️ Couldn't save — retrying…";
     cfgRetry=setTimeout(()=>doCfgSave(),8000);
   }
+}
+async function sendInvoicesNow(){
+  const btn=g("sendNowBtn"),st=g("sendNowState");
+  if(!btn)return;
+  // Save any pending settings first so the accounts address / on-switch are current.
+  if(cfgDirty||cfgBusy)await doCfgSave();
+  btn.disabled=true;if(st)st.textContent="Sending…";
+  const r=await authFetchTO("/ts/invoice/send-now",{method:"POST",body:"{}"}).then(x=>x.json()).catch(()=>null);
+  btn.disabled=false;
+  if(!r||!r.ok){if(st)st.textContent="⚠️ Couldn't send — try again.";return;}
+  if(r.disabled){if(st)st.textContent="Auto-email is switched off — turn it on above first.";return;}
+  const bits=[];
+  if(r.sent)bits.push(r.sent+" sent to "+(r.to||"accounts"));
+  if(r.skipped)bits.push(r.skipped+" skipped (PDF not ready)");
+  if(r.failed)bits.push(r.failed+" failed");
+  if(!r.sent&&!r.skipped&&!r.failed)bits.push("Nothing outstanding — all invoices already sent.");
+  let msg=bits.join(" · ");
+  if(r.failed&&r.errors&&r.errors.length)msg+=" — "+r.errors.slice(0,3).join("; ");
+  if(st)st.textContent=(r.sent?"✓ ":"")+msg;
 }
 async function closeCfg(){
   if(cfgDirty||cfgBusy){clearTimeout(cfgTimer);await doCfgSave();}
