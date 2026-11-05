@@ -753,6 +753,7 @@
       tb.querySelectorAll("[data-copyq]").forEach(b => b.onclick = () => copyQuote(b.dataset.copyq));
       tb.querySelectorAll("[data-copytext]").forEach(b => b.onclick = () => { try { copyStr(JSON.parse(b.dataset.copytext), b.dataset.sv); } catch {} });
       tb.querySelectorAll("[data-photos]").forEach(b => b.onclick = () => openPhotos(b.dataset.photos, b.dataset.line));
+      tb.querySelectorAll("[data-duecode]").forEach(b => b.onclick = () => editDue(b));
     }
 
     // Which remedial lines to act on: C1/C2/FI + uncoded always; C3 only when its tick is on.
@@ -850,6 +851,10 @@
           : '<div class="sub">in '+Math.round(d/30)+' months</div>';
         mdCell = '<b>'+esc(fmtD(r.chartDue))+'</b>'+hint;
       }
+      // Edit the Mostlane 5-year due date. Writes to the compliance chart (one source
+      // of truth) and survives the next Concerto Excel upload. Needs a store code to
+      // attach the date to; rows not mapped to a store show no edit affordance.
+      if (r.storeCode) mdCell += ' <button class="dueedit" data-duecode="'+esc(r.storeCode)+'" data-dueppm="'+esc(key)+'" data-duecur="'+esc(r.chartDue||"")+'" title="'+(r.chartDue?"Change the due date":"Set a due date")+'">✏️</button>';
       const detail = EXPANDED.has(key) ? '<tr class="detail"><td colspan="8">'+detailHtml(r)+'</td></tr>' : '';
       const archTag = isArchiveOnly(r) ? '<span class="arch-pill" title="This test is only in the imported Workever archive — it was never re-created as a portal job or filed as a certificate">🗄 Archive only</span>' : '';
       return '<tr'+zeb+'>'
@@ -1066,6 +1071,43 @@
         if (res && res.ok) { if (sv){ sv.textContent="Saved ✓"; setTimeout(()=>{sv.textContent="";},1500); } await load(); }
         else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the status."); if (el) el.disabled=false; }
       } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the status."); if (el) el.disabled=false; }
+    }
+
+    // Inline edit of the Mostlane 5-year due date, in the cell itself.
+    function editDue(btn){
+      const td = btn.closest("td"); if (!td) return;
+      const code = btn.dataset.duecode, ppm = btn.dataset.dueppm, cur = btn.dataset.duecur || "";
+      td.innerHTML = '<div class="dueedit-wrap" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">'
+        + '<input type="date" class="dueinput" value="'+esc(cur)+'" style="padding:4px 6px;font-size:13px">'
+        + '<button class="duesave" style="padding:4px 8px">Save</button>'
+        + '<button class="duecancel" title="Cancel" style="padding:4px 8px">✕</button>'
+        + '<span class="saved duesv"></span></div>';
+      const inp = td.querySelector(".dueinput");
+      try { inp.focus(); } catch {}
+      td.querySelector(".duecancel").onclick = () => renderTable();
+      td.querySelector(".duesave").onclick = () => saveDue(code, ppm, inp.value, td);
+      inp.onkeydown = e => { if (e.key==="Enter") saveDue(code, ppm, inp.value, td); if (e.key==="Escape") renderTable(); };
+    }
+    async function saveDue(code, ppm, val, td){
+      const sv = td && td.querySelector(".duesv"), save = td && td.querySelector(".duesave");
+      if (save) save.disabled = true;
+      if (sv) sv.textContent = "Saving…";
+      try {
+        // Empty value clears the date (the endpoint deletes the key). scheme=coop — the
+        // Concerto 5-year schedule is Southern Co-op; fiveYear is the type it maps to.
+        const res = await authFetch("/compliance/store?scheme=coop", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ code, due: { fiveYear: val || "" } }) }).then(r=>r.json());
+        if (res && res.ok) {
+          const row = ROWS.find(x => x.id===ppm); if (row) row.chartDue = val || null;
+          if (sv) sv.textContent = "Saved ✓";
+          await load();   // re-derive the certificate status / stage from the new due
+        } else {
+          if (save) save.disabled = false;
+          (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the due date. You may not have compliance edit access.");
+        }
+      } catch {
+        if (save) save.disabled = false;
+        (window.MLUI?MLUI.toast:alert)("Couldn't save the due date.");
+      }
     }
 
     async function saveNote(ppmId, ta, btn){
