@@ -3977,6 +3977,8 @@ export function sameSiteJob(a, b) {
 export async function findBlockingJob(env, tenantId, username, exceptId, exceptJob = null) {
   const uNorm = normId(username);
   const jobs = await listJobs(env, tenantId);
+  const doneNames = new Set((await getCategories(env, tenantId)).filter(c => c.done).map(c => String(c.name).toLowerCase()));
+  const isFinished = s => { const v = String(s || "").toLowerCase(); return DONE_STATES.has(v) || doneNames.has(v); };
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some(a => normId(a) === uNorm)) continue;
@@ -3984,16 +3986,23 @@ export async function findBlockingJob(env, tenantId, username, exceptId, exceptJ
     // ~3h battery drain-down and a PAT runs alongside, so one in progress must never
     // block the engineer starting another job.
     if (j.emTest || j.pat) continue;
+    // On a shared job, judge THIS engineer's own status — a co-worker being mid-job
+    // must never block them.
+    const st = effStatus(j, uNorm);
+    // A FINISHED job never blocks — not even a safety flag left open on it. An
+    // engineer can raise an RA "can't proceed safely" block, the office clears it
+    // (or they work through it), and they complete the job; if the raBlock is left
+    // state:"open" on the finished job, it must NOT bar their next job. Covers
+    // Complete/Closed/Invoiced/Cancelled and custom "done" categories, per this
+    // engineer's own slice. (This is what stranded Lionel: REM0197 Complete but
+    // raBlock still open, 6 Nov 2026.)
+    if (isFinished(st)) continue;
     // Jobs at the SAME SITE run together (one visit, several job numbers) — an
     // active job at this store never blocks starting another job at the store.
     // A pending on-hold / safety flag there still does.
     if (exceptJob && sameSiteJob(j, exceptJob)) {
-      const stHere = effStatus(j, uNorm);
-      if (stHere === "In Progress" || stHere === "Travelling") continue;
+      if (st === "In Progress" || st === "Travelling") continue;
     }
-    // On a shared job, judge THIS engineer's own status — a co-worker being mid-job
-    // must never block them.
-    const st = effStatus(j, uNorm);
     if (j.raBlock && j.raBlock.state === "open")
       return { id: j.id, ref: j.helpdeskRef || j.id, kind: "safety", why: "it's flagged 'can't proceed safely' — waiting for the office" };
     if (st === "In Progress" || st === "Travelling")
