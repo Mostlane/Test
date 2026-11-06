@@ -30,7 +30,8 @@ import { sendToUser } from "./push.js";
 const DEFAULT_MAILBOX = "jamie@mostlane.com";
 const LOOKBACK_DAYS   = 14;   // inbox window (spec: last 14 days)
 const SENT_DAYS       = 21;   // look a little further back for replies
-const MAX_AI          = 40;   // cap the per-run classify (cost guard)
+const MAX_AI          = 60;   // cap the per-run classify (cost guard)
+const AI_CHUNK        = 12;   // items per AI call — small so the tool output never truncates
 
 // ── Config / state ───────────────────────────────────────────────────────────
 async function cfgGet(env, tid) {
@@ -79,6 +80,12 @@ function inWindow(pt) {
 const normAddr = s => String(s || "").trim().toLowerCase();
 function fromAddr(m) { return normAddr(((m.from || {}).emailAddress || {}).address); }
 function fromName(m) { const ea = ((m.from || {}).emailAddress || {}); return String(ea.name || ea.address || "").trim(); }
+// Only a message with ME in the To line counts — if I'm merely CC'd (or on a
+// distribution list), it isn't addressed to me, so it isn't my task to reply to.
+function addressedToMe(m, me) {
+  const to = Array.isArray(m.toRecipients) ? m.toRecipients : [];
+  return to.some(r => normAddr(((r || {}).emailAddress || {}).address) === me);
+}
 function cleanSubject(s) {
   let t = String(s || "").trim();
   for (let i = 0; i < 6; i++) { const n = t.replace(/^\s*(re|fw|fwd|aw|wg|tr)\s*:\s*/i, ""); if (n === t) break; t = n; }
@@ -90,11 +97,15 @@ function looksAutomated(addr, subject) {
   const a = normAddr(addr);
   if (!a) return true;
   const local = a.split("@")[0] || "";
-  if (/(^|[._-])(no-?reply|do-?not-?reply|donotreply|noreply|mailer-?daemon|postmaster|bounce[sd]?|mailer|notif(y|ication)s?|automail|auto-?reply|alerts?|updates?|newsletters?|digest|mailings?)(\b|[._-]|$)/i.test(local)) return true;
-  if (/@(jotform\.com|mailchimp|sendgrid\.net|mcsv\.net|email\.concerto\.co\.uk|bounce|notifications?\.)/i.test(a)) return true;
-  if (a === "noreply@concerto.co.uk" || a.startsWith("noreply@") || a.startsWith("no-reply@")) return true;
+  // Clearly automated / transactional / marketing mailbox names.
+  if (/(^|[._-])(no-?reply|do-?not-?reply|donotreply|noreply|mailer-?daemon|postmaster|bounce[sd]?|mailer|notif(y|ication)s?|automail|auto-?reply|alerts?|updates?|newsletters?|news|digest|mailings?|confirmations?|booking|dispatch|despatch|marketing|promo|offers?|deals?|members?hip|survey|billing|receipts?|accounts?|orders?)(\b|[._-]|$)/i.test(local)) return true;
+  if (/@(jotform\.com|mailchimp|sendgrid\.net|mcsv\.net|email\.|engage\.|account\.|membershipmail\.|orders\.|mail\.|marketing|bounce|notifications?\.)/i.test(a)) return true;
+  if (a.startsWith("noreply@") || a.startsWith("no-reply@")) return true;
   const sub = String(subject || "").toLowerCase();
   if (/^\s*(undeliverable|automatic reply|auto(matic)? reply|out of office|read:|delivery (status|has failed)|mail delivery)/i.test(sub)) return true;
+  // Order / delivery / booking confirmations, dispatch, receipts, statements —
+  // transactional acknowledgements that never need a reply.
+  if (/(order (confirmation|acknowledgement|dispatch|despatch|shipped|received|placed)|confirmation of your order|your order (has|is|will)|order reference|your .*(delivery|order) (is|has|will)|delivery (confirmation|reminder|is booked)|your delivery|time slot (is )?confirmed|has been (shipped|dispatched|despatched)|order (dispatched|despatched|acknowledgement)|shipping confirmation|booking (confirmation|reminder)|is booked|remittance advice|statement of account)/i.test(sub)) return true;
   return false;
 }
 
@@ -141,9 +152,10 @@ async function aiClassify(env, items) {
       required: ["items"],
     },
   };
-  const prompt = "You triage the inbox of Jamie (Mostlane Construction). For each email below decide if it genuinely needs a REPLY from Jamie.\n"
-    + "needsReply = true ONLY when a real person asks a question, makes a request, or expects a response.\n"
-    + "needsReply = false for newsletters, marketing, notifications, receipts, invoices, statements, calendar invites, automated/no-reply mail, pure FYI, and plain acknowledgements ('thanks, that's fine').\n"
+  const prompt = "You triage the work inbox of Jamie Line (Mostlane Construction). For EACH email below decide if it genuinely needs a REPLY from Jamie.\n\n"
+    + "Set needsReply = TRUE ONLY when a real person is directly asking Jamie a question, requesting an action, chasing him, or clearly waiting on his response.\n\n"
+    + "Set needsReply = FALSE for everything else, including: order/delivery/booking confirmations, order acknowledgements, dispatch/shipping notices, receipts, invoices, statements, remittances; newsletters, marketing, promotions, sales/special offers, product announcements; cold sales outreach, unsolicited business proposals and surveys; membership renewals and account/billing notices; system notifications, calendar/reminder digests, 'memories', security/quarantine notices; anything automated or no-reply; pure FYI or being kept in the loop; and plain acknowledgements ('thanks, that's fine').\n"
+    + "When in doubt, choose FALSE — Jamie only wants emails that actually need him to reply.\n\n"
     + "Give a one-sentence summary of what each sender wants. Classify EVERY index.\n\n" + lines;
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -151,7 +163,7 @@ async function aiClassify(env, items) {
       headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: env.ANTHROPIC_MODEL || "claude-sonnet-5",
-        max_tokens: 1500,
+        max_tokens: 2000,
         tools: [tool],
         tool_choice: { type: "tool", name: "classify" },
         messages: [{ role: "user", content: prompt }],
@@ -166,6 +178,20 @@ async function aiClassify(env, items) {
     for (const it of arr) { const i = Number(it.i); if (i >= 0 && i < items.length) out[i] = { needsReply: !!it.needsReply, summary: String(it.summary || "").trim(), dueDate: /^\d{4}-\d{2}-\d{2}$/.test(it.dueDate || "") ? it.dueDate : "" }; }
     return out;
   } catch { return null; }
+}
+
+// Classify the whole batch in SMALL chunks (so a tool response never truncates).
+// Returns an array aligned to `batch`; an entry is null when AI couldn't classify
+// that item — the caller then SKIPS it (never floods the list on an AI failure).
+async function classifyAll(env, batch) {
+  const out = new Array(batch.length).fill(null);
+  if (!batch.length || !env.ANTHROPIC_API_KEY) return out;
+  for (let s = 0; s < batch.length; s += AI_CHUNK) {
+    const slice = batch.slice(s, s + AI_CHUNK);
+    const res = await aiClassify(env, slice.map(m => ({ fromName: fromName(m), fromAddr: fromAddr(m), subject: cleanSubject(m.subject), preview: m.bodyPreview })));
+    if (res) for (let k = 0; k < slice.length; k++) out[s + k] = res[k];
+  }
+  return out;
 }
 
 // ── The sweep ────────────────────────────────────────────────────────────────
@@ -188,7 +214,7 @@ export async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } 
   try {
     // 1) Read Inbox (candidates) + Sent (to tell what I've already replied to).
     const inbox = await readFolder(env, cfg.mailbox, "inbox",
-      { days: cfg.days, select: "id,subject,from,receivedDateTime,internetMessageId,conversationId,bodyPreview,webLink" });
+      { days: cfg.days, select: "id,subject,from,toRecipients,ccRecipients,receivedDateTime,internetMessageId,conversationId,bodyPreview,webLink" });
     const sent = await readFolder(env, cfg.mailbox, "sentitems",
       { days: Math.max(cfg.days, SENT_DAYS), select: "id,conversationId,sentDateTime" });
 
@@ -205,6 +231,7 @@ export async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } 
     for (const m of inbox) {
       const c = m.conversationId || m.internetMessageId || m.id; if (!c) continue;
       if (fromAddr(m) === me) continue;                 // skip my own messages that landed in Inbox
+      if (!addressedToMe(m, me)) continue;              // CC-only / list mail → not my task
       const t = Date.parse(m.receivedDateTime || 0) || 0;
       const cur = convs.get(c);
       if (!cur || t > cur._t) convs.set(c, { ...m, _conv: c, _t: t });
@@ -230,15 +257,18 @@ export async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } 
     // 3) Classify the survivors (oldest first) + raise/update tasks.
     candidates.sort((a, b) => a._t - b._t);
     const batch = candidates.slice(0, MAX_AI);
-    const ai = await aiClassify(env, batch.map(m => ({ fromName: fromName(m), fromAddr: fromAddr(m), subject: cleanSubject(m.subject), preview: m.bodyPreview })));
+    const verdicts = await classifyAll(env, batch);    // aligned; null = couldn't classify
 
-    let created = 0, updated = 0, skipped = 0;
+    let created = 0, updated = 0, skipped = 0, unclassified = 0;
     const createdTitles = [];
     for (let i = 0; i < batch.length; i++) {
       const m = batch[i];
-      const verdict = ai ? ai[i] : null;
-      if (ai && verdict && !verdict.needsReply) { skipped++; continue; }   // AI says no reply needed
-      const summary = (verdict && verdict.summary) || String(m.bodyPreview || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      const verdict = verdicts[i];
+      // Only raise a task the AI POSITIVELY says needs a reply. No verdict (AI
+      // unavailable / failed for this item) → SKIP, so a failure never floods.
+      if (!verdict) { unclassified++; continue; }
+      if (!verdict.needsReply) { skipped++; continue; }
+      const summary = verdict.summary || String(m.bodyPreview || "").replace(/\s+/g, " ").trim().slice(0, 200);
       const subject = cleanSubject(m.subject);
       const title = `Reply to ${fromName(m) || fromAddr(m)} — ${subject}`.slice(0, 150);
       const extKey = ("outlook:" + m._conv).slice(0, 200);
@@ -264,7 +294,7 @@ export async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } 
       if (r && r.ok) { if (r.created) { created++; createdTitles.push(title); } else updated++; }
     }
 
-    result = { closed, created, updated, skipped, candidates: candidates.length, aiUsed: !!ai, at: now.toISOString() };
+    result = { closed, created, updated, skipped, unclassified, candidates: candidates.length, aiUsed: verdicts.some(v => v), at: now.toISOString() };
 
     // 4) Report — only when something actually changed (stay silent otherwise).
     if ((created > 0 || closed > 0) && ctx && ctx.waitUntil) {
