@@ -4829,6 +4829,61 @@ assignee ticks it on my-tasks.html when they've replied. **Close the loop:** the
 same POST with **`{externalId, action:"done"}`** marks it complete (drops off the
 attention count, shows ticked) and **`{externalId, action:"delete"}`** removes it —
 so the bot clears a task once it sees a sent reply. No-match = success (idempotent).
+**The inbound create/close logic is now shared** — `tasks.js` exports
+**`upsertInboundTask(env,ctx,tid,body)`** + **`closeInboundTask(env,tid,extKey,{del})`**
+(the HTTP `/tasks/inbound` route is a thin wrapper over them), so an IN-PROCESS
+caller (the Outlook sweep below) gets the exact same dedupe/assignee/field rules with
+no self-HTTP and no token. **NB "done" lives in `admin_task_done`, not the task row**
+— so re-posting the SAME externalId of a COMPLETED task leaves it done (the old
+Grok-spec "create reopens a done task" bug does NOT exist here; no done-skip file is
+needed).
+
+## Outlook unreplied-email → portal task sync (routes/emailtasks.js — 6 Nov 2026)
+Reinstates the old Grok "emails I need to reply to" bot, but **server-side in
+mostlane-api** (Jamie: "via Claude and my existing systems"). The old setup kept
+breaking from a lost token + a fragile external cron; both are gone here — the task
+write is in-process (no token) and it hangs off the existing 5-minute cron (no
+external scheduler). **READ-ONLY against email** (never sends/moves/flags/deletes).
+- **Schedule:** `sweepUnrepliedEmails(env,ctx,tid)` runs on the every-tick cron and
+  self-gates to **Mon–Fri, Europe/London, on the hour + half-hour, 07:00→17:00
+  inclusive** (`inWindow`/`lonParts`); deduped per slot in `emailtasks:state:<tid>`.
+- **Reads** jamie@mostlane.com **Inbox + Sent** via Microsoft Graph (`graphJson`
+  GET `/users/<mbx>/mailFolders/{inbox|sentitems}/messages`) — the SAME Mail.Read
+  app permission the PO invoice sweep uses (no new Graph setup). Groups Inbox by
+  `conversationId` → latest message FROM SOMEONE ELSE; a thread counts as **replied**
+  when my latest Sent in that conversation is newer than their latest message.
+- **Needs a reply = rules + a little AI.** Deterministic first (in Inbox, last 14
+  days, latest is from someone else, `looksAutomated` drops no-reply/newsletters/
+  bounces/auto-replies), then ONE Claude tool-call (`aiClassify`, `claude-sonnet-5`,
+  cap 40/run, forced `classify` tool) judges "does a real person expect a reply" +
+  writes a one-line summary + any dueDate. No `ANTHROPIC_API_KEY` → rules-only
+  fallback (keeps all survivors with a bodyPreview summary).
+- **Tasks:** `externalId = "outlook:<conversationId>"` (ONE task per thread, stable
+  across its life). Replied threads → `closeInboundTask` (done, idempotent). Unreplied
+  survivors → `upsertInboundTask` `{title:"Reply to <name> — <subject>", detail:summary,
+  link:webLink, category:"Emails", date:<received> (→ ref_date = the portal's age pill +
+  >7-day ⚠), dueDate}`. No "Nd ·" prefix in the title — the portal owns the age via
+  `ref_date`. Assignee defaults to the owner.
+- **Re-engaged threads reopen; manual "done" sticks.** Before upserting, the sweep
+  clears a task's `admin_task_done` rows ONLY when a NEW inbound message arrived AFTER
+  the last done (`MAX(done_at) < latest inbound`). So a task Jamie ticked / that was
+  auto-closed with nothing newer stays done; a thread that gets a fresh message after
+  being answered comes back. (This is a CONDITIONAL reopen — not the Grok-era
+  unconditional one.)
+- **Report:** one owner push per run ONLY when something changed (created or closed);
+  silent otherwise. On a Graph read/auth failure it records the error + pushes the
+  owner ONCE per 12h ("Email-task sync paused — couldn't read the mailbox: …") rather
+  than failing every slot; self-heals when creds are fixed.
+- **Config** app_config `emailtasks:<tid>` = `{enabled (default ON), mailbox
+  (jamie@mostlane.com), days (14)}`. **Endpoints (FullAccess):** GET
+  **/email-tasks/status** (config + last-run result + graph/AI configured), POST
+  **/email-tasks/run** (manual catch-up = a forced slot), POST **/email-tasks/config**.
+- **GO-LIVE:** needs the Graph app's **Mail.Read** to cover **jamie@mostlane.com** (if
+  an Exchange ApplicationAccessPolicy scopes Graph read to only some mailboxes, add
+  jamie@; the status endpoint / the one-off "paused" push will say if a read is
+  refused). Nothing else to deploy — it's on by default and fires in the next working
+  -hours slot. **TODO/next:** a small page/card for the status + manual run (only the
+  API endpoints exist now); optional per-run summary in the notification feed.
 
 ## Notifications system
 - **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
