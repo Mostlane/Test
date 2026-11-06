@@ -38918,6 +38918,11 @@ async function sweepStaffRecordReminders(env) {
   if (londonHour < 8) return;
   const db = tenantDB(env, tid);
   try {
+    const sw = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, `staffrec:reminders:${tid}`).first();
+    if (sw && String(sw.value).trim().toLowerCase() === "off") return;
+  } catch {
+  }
+  try {
     await ensureTable3(db);
   } catch {
     return;

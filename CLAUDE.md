@@ -1334,7 +1334,11 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   PERMISSION_KEY + USER_AREAS `staffrecords`); any session may read its own.
   Cron **`sweepStaffRecordReminders`** (index.js daily block, self-gates ~08:00
   London, deduped per day in app_config `staffrec:reminded:<tid>`) pushes
-  FullAccess|StaffRecords a glanceable "N expired · N expiring" summary. Front-end
+  FullAccess|StaffRecords a glanceable "N expired · N expiring" summary.
+  **Kill switch (6 Nov 2026, Jamie "turn off the 8am records-need-updating alert"):**
+  app_config **`staffrec:reminders:<tid>` = "off"** makes `sweepStaffRecordReminders`
+  return early (no push); set it live (`staffrec:reminders:1`="off"). Remove the row
+  or set any other value to re-enable. Front-end
   **employees.html** (👷 Employees tile + sidebar "Time & HR", StaffRecords|
   FullAccess): staff list with expiring/expired chips → per-person view with the
   four sections, add/edit/delete records, expiry badges, doc view (docviewer).
@@ -5804,7 +5808,11 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   else the newest; 404 if we hold none). **NO task is raised and NO notification
   fires for a routine note (Jamie, Nov 2026 — "updating the job is enough")** — the
   `createIntakeTask` call was removed from this branch (that task-create was also
-  what fired the per-note "New task" push). **ONLY a note whose words read as urgent
+  what fired the per-note "New task" push). **The 15 historical "📝 Concerto note"
+  tasks that predated that removal were PURGED from `admin_tasks` on 6 Nov 2026**
+  (category "Concerto notes", shared @office — they drove the daily overdue-tasks
+  push with no value; Jamie "no need for them"); none are created going forward.
+  **ONLY a note whose words read as urgent
   / an escalation / a complaint / a safety issue (`isUrgentNote`, a keyword regex in
   emailjob.js) sends ONE office push** (`sendToPermission ["FullAccess","SLAAdmin"]`,
   officeOnly, tag `note-urgent:<jobId>`) — still never a task. A note with no live

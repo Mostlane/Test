@@ -691,6 +691,13 @@ export async function sweepStaffRecordReminders(env) {
   try { londonHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).format(new Date())); } catch {}
   if (londonHour < 8) return;
   const db = tenantDB(env, tid);
+  // Kill switch: app_config staffrec:reminders:<tid> = "off" silences this daily
+  // push entirely (Jamie, Nov 2026 — didn't want the 8am "records need updating"
+  // alert). Set the value back to "on"/remove it to re-enable.
+  try {
+    const sw = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, `staffrec:reminders:${tid}`).first();
+    if (sw && String(sw.value).trim().toLowerCase() === "off") return;
+  } catch {}
   try { await ensureTable(db); } catch { return; }
   const dayKey = todayISO();
   const cfgKey = `staffrec:reminded:${tid}`;
