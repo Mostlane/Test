@@ -25897,15 +25897,20 @@ function sameSiteJob(a, b) {
 async function findBlockingJob(env, tenantId, username, exceptId, exceptJob = null) {
   const uNorm = normId(username);
   const jobs = await listJobs(env, tenantId);
+  const doneNames = new Set((await getCategories(env, tenantId)).filter((c) => c.done).map((c) => String(c.name).toLowerCase()));
+  const isFinished = (s) => {
+    const v = String(s || "").toLowerCase();
+    return DONE_STATES.has(v) || doneNames.has(v);
+  };
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some((a) => normId(a) === uNorm)) continue;
     if (j.emTest || j.pat) continue;
-    if (exceptJob && sameSiteJob(j, exceptJob)) {
-      const stHere = effStatus(j, uNorm);
-      if (stHere === "In Progress" || stHere === "Travelling") continue;
-    }
     const st = effStatus(j, uNorm);
+    if (isFinished(st)) continue;
+    if (exceptJob && sameSiteJob(j, exceptJob)) {
+      if (st === "In Progress" || st === "Travelling") continue;
+    }
     if (j.raBlock && j.raBlock.state === "open")
       return { id: j.id, ref: j.helpdeskRef || j.id, kind: "safety", why: "it's flagged 'can't proceed safely' \u2014 waiting for the office" };
     if (st === "In Progress" || st === "Travelling")
