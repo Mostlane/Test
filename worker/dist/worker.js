@@ -1703,7 +1703,7 @@ async function handle2(request, env, ctx, url, sess) {
   if (!user) return text("Unauthorised", 401);
   const year = getYear(url);
   const isAdmin = ["Admin", "Director"].includes(role);
-  async function cfgGet2(key) {
+  async function cfgGet3(key) {
     const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
     return row ? JSON.parse(row.value) : null;
   }
@@ -1713,16 +1713,16 @@ async function handle2(request, env, ctx, url, sess) {
     ).bind(db.tenantId, key, JSON.stringify(val2)).run();
   }
   async function getYearConfig() {
-    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
+    return await cfgGet3(`holiday:config:${year}`) || { defaultAllowance: 28 };
   }
   async function getDefaultAllowance() {
     return Number((await getYearConfig()).defaultAllowance ?? 28);
   }
   async function getBankHolidays() {
-    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
+    return await cfgGet3(`holiday:bankholidays:${year}`) || [];
   }
   async function getShutdownDays() {
-    return await cfgGet2(`holiday:shutdown:${year}`) || [];
+    return await cfgGet3(`holiday:shutdown:${year}`) || [];
   }
   async function getUserAllowance(username) {
     const row = await db.prepare(
@@ -47962,6 +47962,108 @@ function shapeTask(t) {
     shared: !!t.shared
   };
 }
+async function closeInboundTask(env, tid, extKey, { del = false } = {}) {
+  await ensureTables8(env);
+  extKey = String(extKey || "").slice(0, 200);
+  if (!extKey) return { ok: false, error: "externalId is required to mark done / delete a task" };
+  const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first().catch(() => null);
+  if (!row) return { ok: true, found: false, note: "No task with that externalId (already removed, or never created)." };
+  if (del) {
+    await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
+    await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, row.id).run();
+    return { ok: true, found: true, removed: true, id: row.id };
+  }
+  let who = [];
+  try {
+    who = JSON.parse(row.assignees || "[]");
+  } catch {
+  }
+  const nowD = (/* @__PURE__ */ new Date()).toISOString();
+  for (const u of who) {
+    await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at").bind(tid, row.id, u, "once", nowD, "inbound").run();
+  }
+  return { ok: true, found: true, done: true, id: row.id };
+}
+async function upsertInboundTask(env, ctx, tid, b) {
+  await ensureTables8(env);
+  const title = String(b.title || "").trim().slice(0, 300);
+  if (!title) return { ok: false, error: "title is required", status: 400 };
+  const owner = String(env.OWNER_USERNAME || "Jamie Line");
+  let want = Array.isArray(b.assignees) ? b.assignees : b.assignee ? [b.assignee] : [];
+  want = want.map((s) => String(s || "").trim()).filter(Boolean);
+  const wantsOffice = b.office === true || want.some((w) => w.toLowerCase() === "@office");
+  const shared = b.shared === true || wantsOffice;
+  want = want.filter((w) => w.toLowerCase() !== "@office");
+  const assignees = [];
+  for (const w of want) {
+    let u = null;
+    try {
+      const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first();
+      u = r && r.username;
+    } catch {
+    }
+    assignees.push(u || w);
+  }
+  if (wantsOffice) {
+    for (const u of await officeUsernames2(env, tid)) if (!assignees.includes(u)) assignees.push(u);
+  }
+  if (!assignees.length) assignees.push(owner);
+  let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
+  const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
+  const link = String(b.link || urlInDetail || "").slice(0, 800);
+  const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(/* @__PURE__ */ new Date());
+  const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
+  const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+  const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
+  const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
+  const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  let id = null, created = true;
+  if (extKey) {
+    try {
+      const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first();
+      if (ex) {
+        id = ex.id;
+        created = false;
+      }
+    } catch {
+    }
+  }
+  if (!id) id = "email-" + crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO admin_tasks
+    (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link, shared)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
+      due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
+      category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link, shared=excluded.shared`).bind(
+    id,
+    tid,
+    title,
+    detail,
+    JSON.stringify(assignees),
+    "once",
+    dueTime,
+    null,
+    null,
+    null,
+    dueDate,
+    "",
+    "",
+    1,
+    "inbound",
+    now2,
+    now2,
+    String(b.source || "outlook").slice(0, 40),
+    extKey || null,
+    category,
+    refDate,
+    link || null,
+    shared ? 1 : 0
+  ).run();
+  if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
+  }))));
+  return { ok: true, id, created, assignees, dueDate };
+}
 async function handle38(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
@@ -47990,101 +48092,12 @@ async function handle38(request, env, ctx, url, sess) {
       const isDelete = action === "delete" || action === "remove" || b.delete === true;
       if (isDone || isDelete) {
         if (!extKey0) return json({ ok: false, error: "externalId is required to mark done / delete a task" }, { status: 400 }, env, request);
-        const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid2, extKey0).first().catch(() => null);
-        if (!row) return json({ ok: true, found: false, note: "No task with that externalId (already removed, or never created)." }, {}, env, request);
-        if (isDelete) {
-          await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid2, row.id).run();
-          await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid2, row.id).run();
-          return json({ ok: true, found: true, removed: true, id: row.id }, {}, env, request);
-        }
-        let who = [];
-        try {
-          who = JSON.parse(row.assignees || "[]");
-        } catch {
-        }
-        const nowD = (/* @__PURE__ */ new Date()).toISOString();
-        for (const u of who) {
-          await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at").bind(tid2, row.id, u, "once", nowD, "inbound").run();
-        }
-        return json({ ok: true, found: true, done: true, id: row.id }, {}, env, request);
+        const r2 = await closeInboundTask(env, tid2, extKey0, { del: isDelete });
+        return json(r2, {}, env, request);
       }
-      const title = String(b.title || "").trim().slice(0, 300);
-      if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
-      const owner = String(env.OWNER_USERNAME || "Jamie Line");
-      let want = Array.isArray(b.assignees) ? b.assignees : b.assignee ? [b.assignee] : [];
-      want = want.map((s) => String(s || "").trim()).filter(Boolean);
-      const wantsOffice = b.office === true || want.some((w) => w.toLowerCase() === "@office");
-      const shared = b.shared === true || wantsOffice;
-      want = want.filter((w) => w.toLowerCase() !== "@office");
-      const assignees = [];
-      for (const w of want) {
-        let u = null;
-        try {
-          const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid2, w, w, w).first();
-          u = r && r.username;
-        } catch {
-        }
-        assignees.push(u || w);
-      }
-      if (wantsOffice) {
-        for (const u of await officeUsernames2(env, tid2)) if (!assignees.includes(u)) assignees.push(u);
-      }
-      if (!assignees.length) assignees.push(owner);
-      let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
-      const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
-      const link = String(b.link || urlInDetail || "").slice(0, 800);
-      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(/* @__PURE__ */ new Date());
-      const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
-      const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
-      const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
-      const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
-      const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
-      const now2 = (/* @__PURE__ */ new Date()).toISOString();
-      let id = null, created = true;
-      if (extKey) {
-        try {
-          const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid2, extKey).first();
-          if (ex) {
-            id = ex.id;
-            created = false;
-          }
-        } catch {
-        }
-      }
-      if (!id) id = "email-" + crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link, shared)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
-          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
-          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link, shared=excluded.shared`).bind(
-        id,
-        tid2,
-        title,
-        detail,
-        JSON.stringify(assignees),
-        "once",
-        dueTime,
-        null,
-        null,
-        null,
-        dueDate,
-        "",
-        "",
-        1,
-        "inbound",
-        now2,
-        now2,
-        String(b.source || "outlook").slice(0, 40),
-        extKey || null,
-        category,
-        refDate,
-        link || null,
-        shared ? 1 : 0
-      ).run();
-      if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid2, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
-      }))));
-      return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
+      const r = await upsertInboundTask(env, ctx, tid2, b);
+      if (!r.ok && r.status) return json({ ok: false, error: r.error }, { status: r.status }, env, request);
+      return json(r, {}, env, request);
     }
   }
   if (!sess) return error("Not authenticated", 401, env, request);
@@ -48275,6 +48288,312 @@ async function sweepTaskReminders(env, now2 = /* @__PURE__ */ new Date()) {
     out.push({ tid, reminded: Object.keys(perUser).length });
   }
   return { ran: true, tenants: out };
+}
+
+// src/routes/emailtasks.js
+init_http();
+init_auth();
+init_graphmail();
+init_push();
+var DEFAULT_MAILBOX = "jamie@mostlane.com";
+var LOOKBACK_DAYS = 14;
+var SENT_DAYS = 21;
+var MAX_AI = 40;
+async function cfgGet2(env, tid) {
+  let cfg = {};
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, `emailtasks:${tid}`).first();
+    if (r && r.value) cfg = JSON.parse(r.value) || {};
+  } catch {
+  }
+  return {
+    enabled: cfg.enabled !== false,
+    // default ON (Jamie asked to reinstate it)
+    mailbox: String(cfg.mailbox || DEFAULT_MAILBOX).trim() || DEFAULT_MAILBOX,
+    days: Math.max(1, Math.min(60, Number(cfg.days) || LOOKBACK_DAYS))
+  };
+}
+async function cfgSet2(env, tid, patch) {
+  const cur = await cfgGet2(env, tid);
+  const next = { ...cur, ...patch };
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `emailtasks:${tid}`, JSON.stringify(next)).run();
+  return next;
+}
+async function stateGet(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, `emailtasks:state:${tid}`).first();
+    if (r && r.value) return JSON.parse(r.value) || {};
+  } catch {
+  }
+  return {};
+}
+async function stateSet(env, tid, st) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `emailtasks:state:${tid}`, JSON.stringify(st)).run();
+}
+function lonParts(d) {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d);
+  const get = (t) => (p.find((x) => x.type === t) || {}).value || "";
+  const wk = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[get("weekday")] ?? -1;
+  return { dow: wk, hour: Number(get("hour")) || 0, minute: Number(get("minute")) || 0, ymd: d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }) };
+}
+function inWindow(pt) {
+  if (pt.dow < 1 || pt.dow > 5) return false;
+  if (pt.minute !== 0 && pt.minute !== 30) return false;
+  if (pt.hour >= 7 && pt.hour <= 16) return true;
+  if (pt.hour === 17 && pt.minute === 0) return true;
+  return false;
+}
+var normAddr2 = (s) => String(s || "").trim().toLowerCase();
+function fromAddr(m) {
+  return normAddr2(((m.from || {}).emailAddress || {}).address);
+}
+function fromName(m) {
+  const ea = (m.from || {}).emailAddress || {};
+  return String(ea.name || ea.address || "").trim();
+}
+function cleanSubject(s) {
+  let t = String(s || "").trim();
+  for (let i = 0; i < 6; i++) {
+    const n = t.replace(/^\s*(re|fw|fwd|aw|wg|tr)\s*:\s*/i, "");
+    if (n === t) break;
+    t = n;
+  }
+  return t.trim() || "(no subject)";
+}
+function looksAutomated(addr, subject) {
+  const a = normAddr2(addr);
+  if (!a) return true;
+  const local = a.split("@")[0] || "";
+  if (/(^|[._-])(no-?reply|do-?not-?reply|donotreply|noreply|mailer-?daemon|postmaster|bounce[sd]?|mailer|notif(y|ication)s?|automail|auto-?reply|alerts?|updates?|newsletters?|digest|mailings?)(\b|[._-]|$)/i.test(local)) return true;
+  if (/@(jotform\.com|mailchimp|sendgrid\.net|mcsv\.net|email\.concerto\.co\.uk|bounce|notifications?\.)/i.test(a)) return true;
+  if (a === "noreply@concerto.co.uk" || a.startsWith("noreply@") || a.startsWith("no-reply@")) return true;
+  const sub = String(subject || "").toLowerCase();
+  if (/^\s*(undeliverable|automatic reply|auto(matic)? reply|out of office|read:|delivery (status|has failed)|mail delivery)/i.test(sub)) return true;
+  return false;
+}
+async function readFolder(env, mailbox, folder, { days, select, top = 150 }) {
+  const floor = new Date(Date.now() - days * 864e5).toISOString();
+  const tf = folder === "sentitems" ? "sentDateTime" : "receivedDateTime";
+  const path = `/users/${encodeURIComponent(mailbox)}/mailFolders/${folder}/messages?$select=${encodeURIComponent(select)}&$filter=${encodeURIComponent(`${tf} ge ${floor}`)}&$orderby=${encodeURIComponent(`${tf} desc`)}&$top=${top}`;
+  const j = await graphJson(env, "GET", path);
+  return j && j.value || [];
+}
+async function aiClassify(env, items) {
+  if (!items.length || !env.ANTHROPIC_API_KEY) return null;
+  const lines = items.map(
+    (it, i) => `[${i}] from: ${it.fromName} <${it.fromAddr}>
+subject: ${it.subject}
+preview: ${String(it.preview || "").replace(/\s+/g, " ").slice(0, 300)}`
+  ).join("\n\n");
+  const tool = {
+    name: "classify",
+    description: "Classify each email for whether Jamie needs to send a reply.",
+    input_schema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              i: { type: "integer", description: "the [index] of the email" },
+              needsReply: { type: "boolean", description: "true only if a real person is asking Jamie for something / expects a response" },
+              summary: { type: "string", description: "one short sentence: what they want (no greetings, no quotes)" },
+              dueDate: { type: "string", description: "YYYY-MM-DD if a clear deadline is stated, else empty" }
+            },
+            required: ["i", "needsReply", "summary"]
+          }
+        }
+      },
+      required: ["items"]
+    }
+  };
+  const prompt = "You triage the inbox of Jamie (Mostlane Construction). For each email below decide if it genuinely needs a REPLY from Jamie.\nneedsReply = true ONLY when a real person asks a question, makes a request, or expects a response.\nneedsReply = false for newsletters, marketing, notifications, receipts, invoices, statements, calendar invites, automated/no-reply mail, pure FYI, and plain acknowledgements ('thanks, that's fine').\nGive a one-sentence summary of what each sender wants. Classify EVERY index.\n\n" + lines;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: env.ANTHROPIC_MODEL || "claude-sonnet-5",
+        max_tokens: 1500,
+        tools: [tool],
+        tool_choice: { type: "tool", name: "classify" },
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const use = (j.content || []).find((c) => c.type === "tool_use");
+    const arr = use && use.input && Array.isArray(use.input.items) ? use.input.items : null;
+    if (!arr) return null;
+    const out = new Array(items.length).fill(null);
+    for (const it of arr) {
+      const i = Number(it.i);
+      if (i >= 0 && i < items.length) out[i] = { needsReply: !!it.needsReply, summary: String(it.summary || "").trim(), dueDate: /^\d{4}-\d{2}-\d{2}$/.test(it.dueDate || "") ? it.dueDate : "" };
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } = {}) {
+  const now2 = /* @__PURE__ */ new Date();
+  const pt = lonParts(now2);
+  const slot = `${pt.ymd} ${String(pt.hour).padStart(2, "0")}:${String(pt.minute).padStart(2, "0")}`;
+  const cfg = await cfgGet2(env, tid);
+  if (!cfg.enabled) return { ran: false, reason: "disabled" };
+  if (!force) {
+    if (!inWindow(pt)) return { ran: false, reason: "outside-window" };
+    const st = await stateGet(env, tid);
+    if (st.lastSlot === slot) return { ran: false, reason: "slot-done" };
+  }
+  if (!graphConfigured(env)) return { ran: false, reason: "graph-not-configured" };
+  const me = normAddr2(cfg.mailbox);
+  let result;
+  try {
+    const inbox = await readFolder(
+      env,
+      cfg.mailbox,
+      "inbox",
+      { days: cfg.days, select: "id,subject,from,receivedDateTime,internetMessageId,conversationId,bodyPreview,webLink" }
+    );
+    const sent = await readFolder(
+      env,
+      cfg.mailbox,
+      "sentitems",
+      { days: Math.max(cfg.days, SENT_DAYS), select: "id,conversationId,sentDateTime" }
+    );
+    const sentLatest = /* @__PURE__ */ new Map();
+    for (const m of sent) {
+      const c = m.conversationId;
+      if (!c) continue;
+      const t = Date.parse(m.sentDateTime || 0) || 0;
+      if (t > (sentLatest.get(c) || 0)) sentLatest.set(c, t);
+    }
+    const convs = /* @__PURE__ */ new Map();
+    for (const m of inbox) {
+      const c = m.conversationId || m.internetMessageId || m.id;
+      if (!c) continue;
+      if (fromAddr(m) === me) continue;
+      const t = Date.parse(m.receivedDateTime || 0) || 0;
+      const cur = convs.get(c);
+      if (!cur || t > cur._t) convs.set(c, { ...m, _conv: c, _t: t });
+    }
+    const toClose = [];
+    const candidates = [];
+    for (const [c, m] of convs) {
+      const replied = (sentLatest.get(c) || 0) > m._t;
+      if (replied) {
+        toClose.push(m);
+        continue;
+      }
+      if (looksAutomated(fromAddr(m), m.subject)) continue;
+      candidates.push(m);
+    }
+    let closed = 0;
+    for (const m of toClose) {
+      const extKey = ("outlook:" + (m._conv || m.conversationId || m.internetMessageId)).slice(0, 200);
+      const r = await closeInboundTask(env, tid, extKey).catch(() => null);
+      if (r && r.found && r.done) closed++;
+    }
+    candidates.sort((a, b) => a._t - b._t);
+    const batch = candidates.slice(0, MAX_AI);
+    const ai = await aiClassify(env, batch.map((m) => ({ fromName: fromName(m), fromAddr: fromAddr(m), subject: cleanSubject(m.subject), preview: m.bodyPreview })));
+    let created = 0, updated = 0, skipped = 0;
+    const createdTitles = [];
+    for (let i = 0; i < batch.length; i++) {
+      const m = batch[i];
+      const verdict = ai ? ai[i] : null;
+      if (ai && verdict && !verdict.needsReply) {
+        skipped++;
+        continue;
+      }
+      const summary = verdict && verdict.summary || String(m.bodyPreview || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      const subject = cleanSubject(m.subject);
+      const title = `Reply to ${fromName(m) || fromAddr(m)} \u2014 ${subject}`.slice(0, 150);
+      const extKey = ("outlook:" + m._conv).slice(0, 200);
+      const received = (m.receivedDateTime || "").slice(0, 10);
+      try {
+        const t = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first();
+        if (t) {
+          const d = await env.DB.prepare("SELECT MAX(done_at) m FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, t.id).first();
+          if (d && d.m && Date.parse(d.m) < m._t) {
+            await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, t.id).run();
+          }
+        }
+      } catch {
+      }
+      const r = await upsertInboundTask(env, ctx, tid, {
+        title,
+        detail: summary,
+        link: m.webLink || "",
+        externalId: extKey,
+        source: "outlook",
+        category: "Emails",
+        date: received,
+        dueDate: verdict && verdict.dueDate || received
+      }).catch(() => null);
+      if (r && r.ok) {
+        if (r.created) {
+          created++;
+          createdTitles.push(title);
+        } else updated++;
+      }
+    }
+    result = { closed, created, updated, skipped, candidates: candidates.length, aiUsed: !!ai, at: now2.toISOString() };
+    if ((created > 0 || closed > 0) && ctx && ctx.waitUntil) {
+      const bits = [];
+      if (created) bits.push(`${created} new`);
+      if (closed) bits.push(`${closed} done (replied)`);
+      if (updated) bits.push(`${updated} updated`);
+      const owner = String(env.OWNER_USERNAME || "Jamie Line");
+      const body = bits.join(" \xB7 ") + (createdTitles.length ? " \u2014 " + createdTitles.slice(0, 4).join("; ") : "");
+      ctx.waitUntil(sendToUser(env, tid, owner, { title: "\u{1F4E7} Email tasks", body, url: "/my-tasks.html", tag: "email-tasks" }).catch(() => {
+      }));
+    }
+    const st = await stateGet(env, tid);
+    await stateSet(env, tid, { ...st, lastSlot: slot, lastRunAt: now2.toISOString(), result, error: null });
+    return { ran: true, ...result };
+  } catch (e) {
+    const msg = String(e && e.message || e).slice(0, 300);
+    const st = await stateGet(env, tid);
+    const lastNote = Date.parse(st.errorNotifiedAt || 0) || 0;
+    const stale = Date.now() - lastNote > 12 * 36e5;
+    if (stale && ctx && ctx.waitUntil) {
+      const owner = String(env.OWNER_USERNAME || "Jamie Line");
+      ctx.waitUntil(sendToUser(env, tid, owner, { title: "\u{1F4E7} Email-task sync paused", body: "Couldn't read the mailbox: " + msg, url: "/my-tasks.html", tag: "email-tasks-error" }).catch(() => {
+      }));
+    }
+    await stateSet(env, tid, { ...st, lastSlot: force ? st.lastSlot : slot, lastRunAt: now2.toISOString(), error: msg, errorNotifiedAt: stale ? now2.toISOString() : st.errorNotifiedAt });
+    return { ran: false, reason: "error", error: msg };
+  }
+}
+async function handle39(request, env, ctx, url, sess) {
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/email-tasks(?=\/|$)/, "") || "/";
+  const isFull4 = (await permissionsFor(env, tid, sess.user.username)).FullAccess === "Yes";
+  if (!isFull4) return error("Forbidden", 403, env, request);
+  if (sub === "/status" && method === "GET") {
+    const cfg = await cfgGet2(env, tid);
+    const st = await stateGet(env, tid);
+    return json({ ok: true, config: cfg, state: st, graphConfigured: graphConfigured(env), aiConfigured: !!env.ANTHROPIC_API_KEY }, {}, env, request);
+  }
+  if (sub === "/config" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const patch = {};
+    if (typeof b.enabled === "boolean") patch.enabled = b.enabled;
+    if (b.mailbox != null) patch.mailbox = String(b.mailbox).trim();
+    if (b.days != null) patch.days = Number(b.days);
+    const cfg = await cfgSet2(env, tid, patch);
+    return json({ ok: true, config: cfg }, {}, env, request);
+  }
+  if (sub === "/run" && method === "POST") {
+    const r = await sweepUnrepliedEmails(env, ctx, tid, { force: true });
+    return json({ ok: true, run: r }, {}, env, request);
+  }
+  return error("Unknown email-tasks route", 404, env, request);
 }
 
 // src/index.js
@@ -48637,7 +48956,7 @@ async function seedIfEmpty(env, tid) {
     "sample"
   ).run();
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
@@ -49161,7 +49480,7 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
@@ -49511,7 +49830,7 @@ function buildProgrammePdf(data, meta = {}) {
   const headerBlockH = 89;
   const footerH = 18;
   const bodyH = PH2 - M8 - headerBlockH - HDR_H - footerH - M8;
-  const inWindow = (t, win) => {
+  const inWindow2 = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
     const to = Math.round((t._end - s0) / DAY);
@@ -49519,7 +49838,7 @@ function buildProgrammePdf(data, meta = {}) {
   };
   const pages = [];
   for (const win of windows) {
-    const winTasks = tasks.filter((t) => inWindow(t, win));
+    const winTasks = tasks.filter((t) => inWindow2(t, win));
     if (!winTasks.length) continue;
     let cur = [], curH = 0;
     for (const t of winTasks) {
@@ -49904,7 +50223,7 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle41(request, env, ctx, url) {
+async function handle42(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -50922,7 +51241,7 @@ function computeValuation(data) {
     perCol
   };
 }
-async function handle42(request, env, ctx, url) {
+async function handle43(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -51375,7 +51694,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle43(request, env, ctx, url, sess) {
+async function handle44(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -52488,7 +52807,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle44(request, env, ctx, url, sess) {
+async function handle45(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -52752,7 +53071,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle45(request, env, ctx, url, sess) {
+async function handle46(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -53108,7 +53427,7 @@ async function orgSites(env, tid, org) {
   sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
   return sites;
 }
-async function handle46(request, env, ctx, url, sess) {
+async function handle47(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -53337,7 +53656,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY3(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle47(request, env, ctx, url, sess) {
+async function handle48(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -53526,7 +53845,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle48(request, env, ctx, url, sess) {
+async function handle49(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -53845,7 +54164,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle49(request, env, ctx, url, sess) {
+async function handle50(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -53985,7 +54304,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle16],
   ["*", "/upload-asset-thumb", handle16],
   ["*", "/delete-asset-image", handle16],
-  ["*", "/sla/workever", handle48],
+  ["*", "/sla/workever", handle49],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle12],
   ["*", "/stats", handle25],
@@ -54064,6 +54383,8 @@ var ROUTES = [
   // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks", handle38],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
+  ["*", "/email-tasks", handle39],
+  // Outlook unreplied-email → portal task sync (status / manual run / config)
   ["*", "/fbc", handle19],
   // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
   ["*", "/concerto", handle9],
@@ -54076,29 +54397,29 @@ var ROUTES = [
   // SiteLog timesheet PDFs (FullAccess)
   ["*", "/sitelog-map", handleMap],
   // where a phone was for a sign-in/out (signed link, public)
-  ["*", "/cablecalc", handle40],
+  ["*", "/cablecalc", handle41],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/cpd", handle39],
+  ["*", "/cpd", handle40],
   // CPD training (electricians): read material + test → logged per user for the NICEIC audit
-  ["*", "/prog", handle41],
+  ["*", "/prog", handle42],
   // job programmes (builder, revisions, client share links)
-  ["*", "/val", handle42],
+  ["*", "/val", handle43],
   // valuation sheets (line-item applications for payment)
-  ["*", "/projects", handle43],
+  ["*", "/projects", handle44],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle43],
+  ["*", "/project", handle44],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle44],
+  ["*", "/health/", handle45],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle49],
+  ["*", "/comms", handle50],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle49],
+  ["*", "/customer", handle50],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle45],
+  ["*", "/tuya", handle46],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/client", handle46],
+  ["*", "/client", handle47],
   // external client portal (walled per-org: jobs, raise, compliance)
-  ["*", "/fra", handle47]
+  ["*", "/fra", handle48]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -54196,6 +54517,7 @@ var worker = {
     ctx.waitUntil(sweepTableFix(env, 1).catch((e) => console.error("scheduled co-op sheet table fix:", e)));
     ctx.waitUntil(sweepIntakeCheck(env, 1).catch((e) => console.error("scheduled intake check:", e)));
     ctx.waitUntil(sweepLiveIssues(env, 1).catch((e) => console.error("scheduled live intake issues:", e)));
+    ctx.waitUntil(sweepUnrepliedEmails(env, ctx, 1).catch((e) => console.error("scheduled email-task sync:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }

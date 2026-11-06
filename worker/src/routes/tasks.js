@@ -187,6 +187,85 @@ function shapeTask(t) {
   };
 }
 
+// ── Shared machine-to-machine intake helpers (used by the HTTP /tasks/inbound
+// route AND the in-process Outlook sweep in routes/emailtasks.js). Keeping ONE
+// implementation means the sweep gets the exact same dedupe/assignee/field rules
+// as an external caller, with no self-HTTP and no token handling. ──────────────
+
+// Close (mark done) or delete a task matched by its externalId. Idempotent — a
+// no-match is a success. Reopen note: "done" lives in admin_task_done, so a later
+// upsert of the same externalId leaves a completed task done (the sweep clears the
+// done rows itself only when genuinely newer mail arrives).
+export async function closeInboundTask(env, tid, extKey, { del = false } = {}) {
+  await ensureTables(env);
+  extKey = String(extKey || "").slice(0, 200);
+  if (!extKey) return { ok: false, error: "externalId is required to mark done / delete a task" };
+  const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first().catch(() => null);
+  if (!row) return { ok: true, found: false, note: "No task with that externalId (already removed, or never created)." };
+  if (del) {
+    await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
+    await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, row.id).run();
+    return { ok: true, found: true, removed: true, id: row.id };
+  }
+  let who = []; try { who = JSON.parse(row.assignees || "[]"); } catch {}
+  const nowD = new Date().toISOString();
+  for (const u of who) {
+    await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at")
+      .bind(tid, row.id, u, "once", nowD, "inbound").run();
+  }
+  return { ok: true, found: true, done: true, id: row.id };
+}
+
+// Create or update a one-off task (dedupe by externalId). Returns
+// {ok,id,created,assignees,dueDate} or {ok:false,error,status}.
+export async function upsertInboundTask(env, ctx, tid, b) {
+  await ensureTables(env);
+  const title = String(b.title || "").trim().slice(0, 300);
+  if (!title) return { ok: false, error: "title is required", status: 400 };
+  const owner = String(env.OWNER_USERNAME || "Jamie Line");
+  // `@office` (or `office:true`) = assign to everyone in the office. `shared` =
+  // collective completion (any one person's Done clears it for all).
+  let want = Array.isArray(b.assignees) ? b.assignees : (b.assignee ? [b.assignee] : []);
+  want = want.map(s => String(s || "").trim()).filter(Boolean);
+  const wantsOffice = b.office === true || want.some(w => w.toLowerCase() === "@office");
+  const shared = b.shared === true || wantsOffice;
+  want = want.filter(w => w.toLowerCase() !== "@office");
+  const assignees = [];
+  for (const w of want) {
+    let u = null;
+    try { const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first(); u = r && r.username; } catch {}
+    assignees.push(u || w);
+  }
+  if (wantsOffice) for (const u of await officeUsernames(env, tid)) if (!assignees.includes(u)) assignees.push(u);
+  if (!assignees.length) assignees.push(owner);
+  let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
+  const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
+  const link = String(b.link || urlInDetail || "").slice(0, 800);
+  const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(new Date());
+  const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
+  const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+  const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
+  const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
+  const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
+  const now = new Date().toISOString();
+  let id = null, created = true;
+  if (extKey) {
+    try { const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first(); if (ex) { id = ex.id; created = false; } } catch {}
+  }
+  if (!id) id = "email-" + crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO admin_tasks
+    (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link, shared)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
+      due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
+      category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link, shared=excluded.shared`)
+    .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
+      "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate, link || null, shared ? 1 : 0).run();
+  if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
+    sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
+  return { ok: true, id, created, assignees, dueDate };
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
@@ -222,77 +301,13 @@ export async function handle(request, env, ctx, url, sess) {
       const isDelete = action === "delete" || action === "remove" || b.delete === true;
       if (isDone || isDelete) {
         if (!extKey0) return json({ ok: false, error: "externalId is required to mark done / delete a task" }, { status: 400 }, env, request);
-        const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey0).first().catch(() => null);
-        if (!row) return json({ ok: true, found: false, note: "No task with that externalId (already removed, or never created)." }, {}, env, request);
-        if (isDelete) {
-          await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
-          await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, row.id).run();
-          return json({ ok: true, found: true, removed: true, id: row.id }, {}, env, request);
-        }
-        // Mark done for each assignee in the one-off ("once") period.
-        let who = []; try { who = JSON.parse(row.assignees || "[]"); } catch {}
-        const nowD = new Date().toISOString();
-        for (const u of who) {
-          await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at")
-            .bind(tid, row.id, u, "once", nowD, "inbound").run();
-        }
-        return json({ ok: true, found: true, done: true, id: row.id }, {}, env, request);
+        const r = await closeInboundTask(env, tid, extKey0, { del: isDelete });
+        return json(r, {}, env, request);
       }
 
-      const title = String(b.title || "").trim().slice(0, 300);
-      if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
-      const owner = String(env.OWNER_USERNAME || "Jamie Line");
-      // `@office` (or `office:true`) = assign to everyone in the office. `shared` =
-      // collective completion (any one person's Done clears it for all).
-      let want = Array.isArray(b.assignees) ? b.assignees : (b.assignee ? [b.assignee] : []);
-      want = want.map(s => String(s || "").trim()).filter(Boolean);
-      const wantsOffice = b.office === true || want.some(w => w.toLowerCase() === "@office");
-      const shared = b.shared === true || wantsOffice;
-      want = want.filter(w => w.toLowerCase() !== "@office");
-      // Resolve each named assignee to a real portal username (exact → case-insensitive →
-      // first name), so "jamie", "Jamie Line" etc. all land on the right person.
-      const assignees = [];
-      for (const w of want) {
-        let u = null;
-        try { const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first(); u = r && r.username; } catch {}
-        assignees.push(u || w);
-      }
-      if (wantsOffice) for (const u of await officeUsernames(env, tid)) if (!assignees.includes(u)) assignees.push(u);
-      if (!assignees.length) assignees.push(owner);
-      // Keep the detail clean — the email link is stored SEPARATELY (rendered as a
-      // tidy "Open email" button), never glued into the summary text. Strip any URL
-      // a bot pastes into the detail, and capture it as the link if none was given.
-      let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
-      const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
-      const link = String(b.link || urlInDetail || "").slice(0, 800);
-      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(new Date());
-      const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
-      const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
-      // Type for filtering (Emails / Compliance / …) — defaults to Emails for the
-      // email intake. `date` = the email's RECEIVED date, so the portal shows the
-      // real age + the >7-day warning (self-updating, not frozen in the title).
-      const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
-      const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
-      const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
-      const now = new Date().toISOString();
-      // Dedupe by external id — re-scanning the same email UPDATES the task, never
-      // creates a duplicate.
-      let id = null, created = true;
-      if (extKey) {
-        try { const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first(); if (ex) { id = ex.id; created = false; } } catch {}
-      }
-      if (!id) id = "email-" + crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link, shared)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
-          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
-          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link, shared=excluded.shared`)
-        .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
-          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate, link || null, shared ? 1 : 0).run();
-      if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
-        sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
-      return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
+      const r = await upsertInboundTask(env, ctx, tid, b);
+      if (!r.ok && r.status) return json({ ok: false, error: r.error }, { status: r.status }, env, request);
+      return json(r, {}, env, request);
     }
   }
 

@@ -54,6 +54,7 @@ import * as accounts from "./routes/accounts.js";  // DONE  (standalone Accounts
 import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: plain-English → job draft preview → create)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
+import * as emailtasks from "./routes/emailtasks.js"; // DONE  (Outlook unreplied-email → portal task sync, replaces the Grok bot)
 import * as concerto from "./routes/concerto.js"; // DONE  (Concerto PPM list: client's official EM/PAT/pump schedule, drop-in import + chart reconciliation)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
 import * as pump from "./routes/pump.js";          // DONE  (sump-pump monthly maintenance: per-store form + photo/video → office review → branded PDF)
@@ -139,6 +140,7 @@ const ROUTES = [
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => emailIntakeApi(req, env, ctx, url, sess, worker.fetch)], // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
+  ["*", "/email-tasks", emailtasks.handle], // Outlook unreplied-email → portal task sync (status / manual run / config)
   ["*", "/fbc",        fbc.handle],      // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
   ["*", "/concerto",   concerto.handle], // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
@@ -307,6 +309,9 @@ const worker = {
     ctx.waitUntil(coopsheet.sweepTableFix(env, 1).catch(e => console.error("scheduled co-op sheet table fix:", e)));
     ctx.waitUntil(intakecheck.sweepIntakeCheck(env, 1).catch(e => console.error("scheduled intake check:", e)));
     ctx.waitUntil(intakecheck.sweepLiveIssues(env, 1).catch(e => console.error("scheduled live intake issues:", e)));
+    // Outlook unreplied-email → portal task sync. Self-gates to Mon–Fri 07:00–17:00
+    // London on the hour + half-hour (every-tick call; it decides the slot itself).
+    ctx.waitUntil(emailtasks.sweepUnrepliedEmails(env, ctx, 1).catch(e => console.error("scheduled email-task sync:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
     if (new Date().getUTCMinutes() % 10 < 5) {
