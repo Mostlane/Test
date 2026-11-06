@@ -4852,12 +4852,22 @@ external scheduler). **READ-ONLY against email** (never sends/moves/flags/delete
   app permission the PO invoice sweep uses (no new Graph setup). Groups Inbox by
   `conversationId` → latest message FROM SOMEONE ELSE; a thread counts as **replied**
   when my latest Sent in that conversation is newer than their latest message.
-- **Needs a reply = rules + a little AI.** Deterministic first (in Inbox, last 14
-  days, latest is from someone else, `looksAutomated` drops no-reply/newsletters/
-  bounces/auto-replies), then ONE Claude tool-call (`aiClassify`, `claude-sonnet-5`,
-  cap 40/run, forced `classify` tool) judges "does a real person expect a reply" +
-  writes a one-line summary + any dueDate. No `ANTHROPIC_API_KEY` → rules-only
-  fallback (keeps all survivors with a bodyPreview summary).
+- **Addressed TO me only (6 Nov 2026, Jamie: "if I'm cc'd it doesn't need to be here").**
+  `addressedToMe` requires the mailbox to be in `toRecipients` — CC-only / distribution
+  -list mail is dropped (the inbox `$select` carries `toRecipients,ccRecipients`).
+- **Needs a reply = rules + a little AI (strict).** Deterministic first (in Inbox,
+  last 14 days, addressed to me, latest is from someone else, `looksAutomated` drops
+  no-reply/newsletters/marketing/bounces/auto-replies **and order/delivery/booking
+  confirmations · dispatch/shipping · receipts/statements** by sender local-part +
+  subject). Then Claude judges the survivors — **chunked `AI_CHUNK=12` per call** via
+  `classifyAll` (small so the forced-tool output never truncates; cap `MAX_AI=60`),
+  strict prompt: needsReply=TRUE only when a real person is directly asking/requesting/
+  chasing, FALSE for confirmations/notifications/marketing/cold-outreach/FYI/acks,
+  "when in doubt choose FALSE". **Safe fallback: a task is raised ONLY when AI
+  POSITIVELY returns needsReply — an item AI couldn't classify (call failed, or no
+  `ANTHROPIC_API_KEY`) is SKIPPED, never kept.** (The first run on 6 Nov flooded
+  because the old single 40-item call truncated → the then-fallback "keep all" let
+  marketing/confirmations through; both are fixed.)
 - **Tasks:** `externalId = "outlook:<conversationId>"` (ONE task per thread, stable
   across its life). Replied threads → `closeInboundTask` (done, idempotent). Unreplied
   survivors → `upsertInboundTask` `{title:"Reply to <name> — <subject>", detail:summary,

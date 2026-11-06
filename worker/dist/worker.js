@@ -48298,7 +48298,8 @@ init_push();
 var DEFAULT_MAILBOX = "jamie@mostlane.com";
 var LOOKBACK_DAYS = 14;
 var SENT_DAYS = 21;
-var MAX_AI = 40;
+var MAX_AI = 60;
+var AI_CHUNK = 12;
 async function cfgGet2(env, tid) {
   let cfg = {};
   try {
@@ -48351,6 +48352,10 @@ function fromName(m) {
   const ea = (m.from || {}).emailAddress || {};
   return String(ea.name || ea.address || "").trim();
 }
+function addressedToMe(m, me) {
+  const to = Array.isArray(m.toRecipients) ? m.toRecipients : [];
+  return to.some((r) => normAddr2(((r || {}).emailAddress || {}).address) === me);
+}
 function cleanSubject(s) {
   let t = String(s || "").trim();
   for (let i = 0; i < 6; i++) {
@@ -48364,11 +48369,12 @@ function looksAutomated(addr, subject) {
   const a = normAddr2(addr);
   if (!a) return true;
   const local = a.split("@")[0] || "";
-  if (/(^|[._-])(no-?reply|do-?not-?reply|donotreply|noreply|mailer-?daemon|postmaster|bounce[sd]?|mailer|notif(y|ication)s?|automail|auto-?reply|alerts?|updates?|newsletters?|digest|mailings?)(\b|[._-]|$)/i.test(local)) return true;
-  if (/@(jotform\.com|mailchimp|sendgrid\.net|mcsv\.net|email\.concerto\.co\.uk|bounce|notifications?\.)/i.test(a)) return true;
-  if (a === "noreply@concerto.co.uk" || a.startsWith("noreply@") || a.startsWith("no-reply@")) return true;
+  if (/(^|[._-])(no-?reply|do-?not-?reply|donotreply|noreply|mailer-?daemon|postmaster|bounce[sd]?|mailer|notif(y|ication)s?|automail|auto-?reply|alerts?|updates?|newsletters?|news|digest|mailings?|confirmations?|booking|dispatch|despatch|marketing|promo|offers?|deals?|members?hip|survey|billing|receipts?|accounts?|orders?)(\b|[._-]|$)/i.test(local)) return true;
+  if (/@(jotform\.com|mailchimp|sendgrid\.net|mcsv\.net|email\.|engage\.|account\.|membershipmail\.|orders\.|mail\.|marketing|bounce|notifications?\.)/i.test(a)) return true;
+  if (a.startsWith("noreply@") || a.startsWith("no-reply@")) return true;
   const sub = String(subject || "").toLowerCase();
   if (/^\s*(undeliverable|automatic reply|auto(matic)? reply|out of office|read:|delivery (status|has failed)|mail delivery)/i.test(sub)) return true;
+  if (/(order (confirmation|acknowledgement|dispatch|despatch|shipped|received|placed)|confirmation of your order|your order (has|is|will)|order reference|your .*(delivery|order) (is|has|will)|delivery (confirmation|reminder|is booked)|your delivery|time slot (is )?confirmed|has been (shipped|dispatched|despatched)|order (dispatched|despatched|acknowledgement)|shipping confirmation|booking (confirmation|reminder)|is booked|remittance advice|statement of account)/i.test(sub)) return true;
   return false;
 }
 async function readFolder(env, mailbox, folder, { days, select, top = 150 }) {
@@ -48408,14 +48414,14 @@ preview: ${String(it.preview || "").replace(/\s+/g, " ").slice(0, 300)}`
       required: ["items"]
     }
   };
-  const prompt = "You triage the inbox of Jamie (Mostlane Construction). For each email below decide if it genuinely needs a REPLY from Jamie.\nneedsReply = true ONLY when a real person asks a question, makes a request, or expects a response.\nneedsReply = false for newsletters, marketing, notifications, receipts, invoices, statements, calendar invites, automated/no-reply mail, pure FYI, and plain acknowledgements ('thanks, that's fine').\nGive a one-sentence summary of what each sender wants. Classify EVERY index.\n\n" + lines;
+  const prompt = "You triage the work inbox of Jamie Line (Mostlane Construction). For EACH email below decide if it genuinely needs a REPLY from Jamie.\n\nSet needsReply = TRUE ONLY when a real person is directly asking Jamie a question, requesting an action, chasing him, or clearly waiting on his response.\n\nSet needsReply = FALSE for everything else, including: order/delivery/booking confirmations, order acknowledgements, dispatch/shipping notices, receipts, invoices, statements, remittances; newsletters, marketing, promotions, sales/special offers, product announcements; cold sales outreach, unsolicited business proposals and surveys; membership renewals and account/billing notices; system notifications, calendar/reminder digests, 'memories', security/quarantine notices; anything automated or no-reply; pure FYI or being kept in the loop; and plain acknowledgements ('thanks, that's fine').\nWhen in doubt, choose FALSE \u2014 Jamie only wants emails that actually need him to reply.\n\nGive a one-sentence summary of what each sender wants. Classify EVERY index.\n\n" + lines;
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: env.ANTHROPIC_MODEL || "claude-sonnet-5",
-        max_tokens: 1500,
+        max_tokens: 2e3,
         tools: [tool],
         tool_choice: { type: "tool", name: "classify" },
         messages: [{ role: "user", content: prompt }]
@@ -48436,6 +48442,16 @@ preview: ${String(it.preview || "").replace(/\s+/g, " ").slice(0, 300)}`
     return null;
   }
 }
+async function classifyAll(env, batch) {
+  const out = new Array(batch.length).fill(null);
+  if (!batch.length || !env.ANTHROPIC_API_KEY) return out;
+  for (let s = 0; s < batch.length; s += AI_CHUNK) {
+    const slice = batch.slice(s, s + AI_CHUNK);
+    const res = await aiClassify(env, slice.map((m) => ({ fromName: fromName(m), fromAddr: fromAddr(m), subject: cleanSubject(m.subject), preview: m.bodyPreview })));
+    if (res) for (let k = 0; k < slice.length; k++) out[s + k] = res[k];
+  }
+  return out;
+}
 async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } = {}) {
   const now2 = /* @__PURE__ */ new Date();
   const pt = lonParts(now2);
@@ -48455,7 +48471,7 @@ async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } = {}) {
       env,
       cfg.mailbox,
       "inbox",
-      { days: cfg.days, select: "id,subject,from,receivedDateTime,internetMessageId,conversationId,bodyPreview,webLink" }
+      { days: cfg.days, select: "id,subject,from,toRecipients,ccRecipients,receivedDateTime,internetMessageId,conversationId,bodyPreview,webLink" }
     );
     const sent = await readFolder(
       env,
@@ -48475,6 +48491,7 @@ async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } = {}) {
       const c = m.conversationId || m.internetMessageId || m.id;
       if (!c) continue;
       if (fromAddr(m) === me) continue;
+      if (!addressedToMe(m, me)) continue;
       const t = Date.parse(m.receivedDateTime || 0) || 0;
       const cur = convs.get(c);
       if (!cur || t > cur._t) convs.set(c, { ...m, _conv: c, _t: t });
@@ -48498,17 +48515,21 @@ async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } = {}) {
     }
     candidates.sort((a, b) => a._t - b._t);
     const batch = candidates.slice(0, MAX_AI);
-    const ai = await aiClassify(env, batch.map((m) => ({ fromName: fromName(m), fromAddr: fromAddr(m), subject: cleanSubject(m.subject), preview: m.bodyPreview })));
-    let created = 0, updated = 0, skipped = 0;
+    const verdicts = await classifyAll(env, batch);
+    let created = 0, updated = 0, skipped = 0, unclassified = 0;
     const createdTitles = [];
     for (let i = 0; i < batch.length; i++) {
       const m = batch[i];
-      const verdict = ai ? ai[i] : null;
-      if (ai && verdict && !verdict.needsReply) {
+      const verdict = verdicts[i];
+      if (!verdict) {
+        unclassified++;
+        continue;
+      }
+      if (!verdict.needsReply) {
         skipped++;
         continue;
       }
-      const summary = verdict && verdict.summary || String(m.bodyPreview || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      const summary = verdict.summary || String(m.bodyPreview || "").replace(/\s+/g, " ").trim().slice(0, 200);
       const subject = cleanSubject(m.subject);
       const title = `Reply to ${fromName(m) || fromAddr(m)} \u2014 ${subject}`.slice(0, 150);
       const extKey = ("outlook:" + m._conv).slice(0, 200);
@@ -48540,7 +48561,7 @@ async function sweepUnrepliedEmails(env, ctx, tid = 1, { force = false } = {}) {
         } else updated++;
       }
     }
-    result = { closed, created, updated, skipped, candidates: candidates.length, aiUsed: !!ai, at: now2.toISOString() };
+    result = { closed, created, updated, skipped, unclassified, candidates: candidates.length, aiUsed: verdicts.some((v) => v), at: now2.toISOString() };
     if ((created > 0 || closed > 0) && ctx && ctx.waitUntil) {
       const bits = [];
       if (created) bits.push(`${created} new`);
