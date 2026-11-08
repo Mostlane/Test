@@ -7524,6 +7524,15 @@ files to this public repo.
   scratchpad `backsim.cjs` (reported loop, multi-parent round trip, same-job
   excursion collapse, cold start — all resolve, none loop). portal-config bumped to
   `?v=19` across all pages so the fix reaches phones; SW cache `mostlane-v83`.
+  **Auth pages are NEVER a Back target (8 Nov 2026).** login.html loads
+  portal-config.js too, so the back-trail IIFE recorded `/login.html`, and login
+  then PUSHES the user to their landing page (for an SLA-board landing pref, straight
+  to sla-main.html) — so the trail became `[…, /login.html, /sla-main.html]` and
+  **Back from the landing page bounced to the login screen** (Jamie, mobile). The
+  trail now never records auth/sign pages (`AUTH_PAGES` = login/onboard/confirmation/
+  forgot-/reset-/change-password/hash), prunes any already present, and `mlBack`
+  walks past any stale auth entry and never resolves one as its destination
+  (→ `/main.html`). portal-config `?v=48`, SW `mostlane-v151`.
 - **Schedule dates are YEAR-CHECKED, client + server (8 Sep 2026).** Daniel
   Walker's 16 Sep job "wasn't on the scheduler": the editor had saved it with
   `scheduledAt = 2006-09-16` (a mistyped year in the date box) and every dated
