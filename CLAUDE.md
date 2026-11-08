@@ -401,6 +401,18 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `askForLoginCode` shows the code box (autocomplete one-time-code). Test
   `node --no-warnings worker/tools/test-two-factor.mjs` (21); test-auth-sessions turns
   it off in its own env.
+  **The code email is sent in the BACKGROUND — never block the login response on it
+  (8 Nov 2026).** `/auth/login` used to `await sendLoginCode` (Microsoft 365, then
+  Resend fallback) BEFORE returning `{needCode}`. When 365 was slow the response hung
+  for many seconds; an **iOS PWA aborts a slow fetch and shows "Couldn't reach the
+  server"**, even though the code was emailed, the challenge stored and `code_sent`
+  logged — so every Full-Access user (a code on EVERY login) was stuck in a retry loop
+  (Jamie, locked out 8 Nov). Fix: the `login_codes` row is written first, then the send
+  fires via `ctx.waitUntil` and the response returns at once; a send failure no longer
+  returns 503 (a login endpoint must not hang on an email provider). **2FA is currently
+  TOGGLED OFF** (`auth:twofactor:1 = {"enabled":false}`, set 8 Nov to restore access)
+  — once the non-blocking build is confirmed live AND a code is confirmed to actually
+  reach jamie@mostlane.com, remove that row (or set `enabled:true`) to turn it back on.
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
   auto-upgraded on login. NEVER paste plaintext into D1 — it won't work.
 - **Sessions last 90 days** (SESSION_TTL_HOURS default 2160). login.html
