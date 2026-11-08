@@ -413,12 +413,27 @@
   // the .ml-back handler and the pages' own custom back buttons all call it.
   (function mlNavBack() {
     var KEY = "mlNavTrail";
+    // Auth / sign pages must NEVER be a back destination: login.html loads
+    // portal-config too, so without this it recorded itself in the trail and then
+    // PUSHED the user to their landing page (e.g. an SLA-board landing pref) — so
+    // Back from that page read login.html as the previous entry and bounced the
+    // user straight to the login screen (Jamie, mobile). We skip recording them AND
+    // skip over any that a stale trail still holds when walking back.
+    var AUTH_PAGES = ["login.html", "onboard.html", "confirmation.html",
+      "forgot-password.html", "reset-password.html", "change-password.html", "hash.html"];
+    function isAuthPath(p) {
+      var seg = String(p || "").split("?")[0].split("#")[0];
+      seg = seg.substring(seg.lastIndexOf("/") + 1);
+      return AUTH_PAGES.indexOf(seg) !== -1;
+    }
     function read() { try { return JSON.parse(sessionStorage.getItem(KEY) || "[]") || []; } catch (e) { return []; } }
     function write(a) { try { sessionStorage.setItem(KEY, JSON.stringify(a.slice(-60))); } catch (e) {} }
     // Record this page in the trail (runs on every load; no DOM needed).
     try {
       var here = location.pathname + location.search;
-      var trail = read();
+      // Never let an auth/sign page sit in the trail (it must not be a Back target).
+      if (isAuthPath(here)) { write(read().filter(function (p) { return !isAuthPath(p); })); throw 0; }
+      var trail = read().filter(function (p) { return !isAuthPath(p); });
       if (trail[trail.length - 1] === here) {
         // reload of the same page — leave the trail unchanged
       } else if (trail[trail.length - 2] === here) {
@@ -434,8 +449,14 @@
     // PWA launch / wiped sessionStorage) where we have no trail to walk.
     window.mlBack = function (fallback) {
       var t = read();
-      var prev = t.length >= 2 ? t[t.length - 2] : "";
+      // Walk back past the current page to the nearest NON-auth previous entry;
+      // never return to login/sign pages even if a stale trail still lists one.
+      var prev = "";
+      for (var i = t.length - 2; i >= 0; i--) {
+        if (!isAuthPath(t[i])) { prev = t[i]; break; }
+      }
       var dest = prev || fallback || "/main.html";
+      if (isAuthPath(dest)) dest = "/main.html";
       location.href = dest;
     };
     document.addEventListener("click", function (e) {
