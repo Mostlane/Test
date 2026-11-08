@@ -31095,12 +31095,8 @@ async function handle13(request, env, ctx, url, sess) {
       await env.DB.prepare("DELETE FROM login_codes WHERE expires_at < ? OR (tenant_id=? AND username=?)").bind(Date.now(), user.tenant_id, user.username).run().catch(() => {
       });
       await env.DB.prepare("INSERT INTO login_codes (id, tenant_id, username, code_hash, device_id, expires_at, tries, created_at) VALUES (?,?,?,?,?,?,0,?)").bind(id, user.tenant_id, user.username, await sha256Hex2(id + ":" + code), deviceId, Date.now() + CODE_TTL_MS, (/* @__PURE__ */ new Date()).toISOString()).run();
-      const sent = await sendLoginCode(env, user, code);
-      if (!sent || !sent.ok) {
-        await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {
-        });
-        return error("We couldn't send your sign-in code just now. Please try again in a minute, or call the office.", 503, env, request);
-      }
+      const sendP = sendLoginCode(env, user, code).catch(() => null);
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(sendP);
       await logLogin(env, tenantId, request, user.username, "code_sent");
       return json({ ok: false, needCode: true, challenge, sentTo: maskEmail(user.email) }, {}, env, request);
     }

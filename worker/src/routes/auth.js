@@ -151,11 +151,19 @@ export async function handle(request, env, ctx, url, sess) {
         .bind(Date.now(), user.tenant_id, user.username).run().catch(() => {});
       await env.DB.prepare("INSERT INTO login_codes (id, tenant_id, username, code_hash, device_id, expires_at, tries, created_at) VALUES (?,?,?,?,?,?,0,?)")
         .bind(id, user.tenant_id, user.username, await sha256Hex(id + ":" + code), deviceId, Date.now() + CODE_TTL_MS, new Date().toISOString()).run();
-      const sent = await sendLoginCode(env, user, code);
-      if (!sent || !sent.ok) {
-        await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {});
-        return error("We couldn't send your sign-in code just now. Please try again in a minute, or call the office.", 503, env, request);
-      }
+      // Send the code in the BACKGROUND — NEVER block the login response on the
+      // email provider. Awaiting the send held /auth/login open for many seconds
+      // whenever Microsoft 365 was slow (token fetch + sendMail, then the Resend
+      // fallback); an iOS PWA aborts a slow fetch and shows "Couldn't reach the
+      // server", even though the code was emailed, the challenge stored and
+      // code_sent logged — which locked every Full-Access user out on EVERY login
+      // (8 Nov 2026, Jamie couldn't sign in). The login_codes row is already
+      // written above, so returning before the email lands is safe: the user
+      // types the code when it arrives. A genuine send failure no longer returns
+      // 503 (a login endpoint must not hang on email) — they retry or call the
+      // office.
+      const sendP = sendLoginCode(env, user, code).catch(() => null);
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(sendP);
       await logLogin(env, tenantId, request, user.username, "code_sent");
       return json({ ok: false, needCode: true, challenge, sentTo: maskEmail(user.email) }, {}, env, request);
     }
