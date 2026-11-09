@@ -7328,38 +7328,45 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      /hs/docs?type=cpp. Compound map (Google Maps draw/route) + A&E route planner
      carried over unchanged (the DrawingManager draw/save fix is in). Mobile: the
      doc pane is hidden until the Review step. _headers + SW `mostlane-v114`.
-   - **PDF export pagination fix (9 Nov 2026, Jamie — CAB Havant: "footers halfway
-     up the page, paragraphs split across two pages").** The export is `window.print()`
-     (btnPrint) / the Preview window (btnPreview, which clones `#appstyle` CSS +
-     `docRoot.innerHTML`), NOT a vector builder. Each section was a fixed
-     `min-height:296mm` flex `.page` with the footer flex-pinned (`margin-top:auto`)
-     and `page-break-after:always`. That's fine while a section fits one sheet, but a
-     section with more content than a page (CAB Havant's long Arrangements/Directory/
-     RAMS) grew the box past 297mm → it overflowed onto the next physical sheet
-     (splitting a paragraph) and the pinned footer sat at the bottom of the OVER-tall
-     box = halfway up sheet 2. **Fix (CSS-only + a 1-line renderDoc concat):** in
-     `@media print` content `.page` now FLOWS — `min-height:0;display:block;
-     padding:0` (no forced height, no flex pin); the per-page in-flow
-     `.runhead`/`.footer-note` are hidden (`.doc .page .runhead,.doc .page .footer-note`)
-     and replaced by ONE **fixed running header + footer** (`.run-head-fixed`/
-     `.run-foot-fixed`, `position:fixed`, appended once inside `#docRoot` by renderDoc
-     so the Preview window gets them too; hidden on screen). **Space for them is reserved
-     by `@page{margin:24mm 14mm 15mm}` — NOT by padding on `.page`.** (First build used
-     `.page{padding:24mm 14mm 18mm}`; padding only pads the FIRST + LAST sheet, so the
-     2nd/3rd sheet of a long section ran its text UNDER the fixed bands and the saved PDF
-     cut it off — on-screen/Preview looked fine because `@page`/`position:fixed` don't
-     apply there. @page margins apply to EVERY sheet, so the content box is inset on all
-     of them and nothing collides. **Don't go back to per-page padding.**) The cover keeps
-     full-bleed via a **named page** — `.page.cover{page:cover}` + `@page cover{margin:0}`
-     — so it has no margin band and its z-index:5 still paints over the fixed pair.
-     `page-break-inside:avoid` on p/li/tr/figure/h2-4/.kv/.sub/.ms-fill/.route-meta/
-     .keygrid stops splits; a long TABLE breaks between rows (`tr` avoid, NOT the whole
-     table) with `thead{display:table-header-group}` repeating its header. **The cover**
-     stays full-bleed and header/footer-free: `.page.cover` is one sheet
-     (`min-height:297mm`) with `position:relative;z-index:5` so it paints OVER the
-     fixed pair (z-index:1) on page 1. HTML/CSS-only, network-first (no `?v=`/SW bump).
-     (The headless print check is blocked by the portal auth gate on localhost — the
-     fix is CSS; verify on a real print/Preview.)
+   - **PDF export pagination — running header/footer via a print TABLE (9 Nov 2026,
+     Jamie — CAB Havant: "footers halfway up the page, paragraphs split across two
+     pages", then three regressions).** The export is `window.print()` (btnPrint) / the
+     Preview window (btnPreview, which clones `#appstyle` CSS + `docRoot.innerHTML`), NOT
+     a vector builder. A section longer than one page must flow onto extra sheets, with
+     the company header at the top of EVERY sheet and the Mostlane footer at the bottom,
+     no split paragraph, no overlap. **TWO earlier approaches FAILED — do not reintroduce
+     either:** (1) **`position:fixed` running header/footer** — in Chromium's print path a
+     fixed element sits INSIDE the content box and does NOT reserve space, so the flowing
+     content runs up BEHIND the header (verified: text overlapping the header band, header
+     clipped). (2) **`@page{margin:Nmm}` to reserve a band** — the reserved band depends
+     on the print DIALOG's margin dropdown (bad for a non-dev who just clicks Save), still
+     collides with the fixed element, and per-page `.page{padding}` only pads the first +
+     last sheet (inner sheets cut off). **The working fix = a `<table class="pbody">`
+     whose `thead`/`tfoot` are `table-header-group`/`table-footer-group`:** the browser
+     repeats them on every printed sheet AND reserves their height, so content can never
+     overlap. `@page{margin:0}` keeps it independent of the print dialog; the horizontal
+     inset + the header/footer bands come from the table cells' own `padding` (`thead td`
+     `7mm 14mm 0`, `tfoot td` `0 14mm 6mm`, `tbody td` `0 14mm`). `.page+.page{page-break-
+     before:always}` starts each section on a new sheet; the per-page in-flow
+     `.runhead`/`.footer-note` are hidden in print (the table supplies the one repeating
+     pair); `page-break-inside:avoid` on p/li/tr/figure/h2-4/.kv/.sub/.ms-fill/.route-meta/
+     .keygrid stops splits, and a long TABLE breaks between rows (`tr` avoid + nested
+     `.doc thead` repeats its own column header). **The cover is a full-bleed sheet
+     OUTSIDE the table** (`.page.cover{min-height:297mm;page-break-after:always}`), so
+     page 1 carries no running header/footer. **On SCREEN the table collapses to blocks**
+     (base CSS `.pbody,.pbody>tbody,.pbody>tbody>tr,.pbody>tbody>tr>td{display:block}` +
+     `.pbody>thead,.pbody>tfoot{display:none}`), so the builder AND the Preview window are
+     UNCHANGED — each `.page` is still a normal A4 card with its own in-flow header/footer
+     (which show on screen, hide in print). **renderDoc:** `pageCover()` then ONE
+     `<table class="pbody"><thead><tr><td>runHead()</td></tr></thead><tfoot><tr><td>FOOT
+     </tr></tfoot><tbody><tr><td>` + every other section + `</td></tr></tbody></table>`.
+     **VERIFIED by rendering the real `#appstyle` through Chromium `page.pdf` to PNGs
+     (scratchpad gen2/render2):** cover full-bleed + blue retained, section start +
+     continuation (paras 9–12) with header/footer on each sheet and NO overlap/split, a
+     40-row table breaking between rows with BOTH the running header and the table's
+     column header repeating + zebra fills retained, and the on-screen render unchanged.
+     HTML/CSS + a renderDoc rewrite, network-first (no `?v=`/SW bump). **Keep the table —
+     never go back to position:fixed running elements or @page margins for this.**
    - **Two print follow-ups (9 Nov 2026, Jamie):** (1) printing the BUILDER directly
      (btnPrint `window.print()`) included the portal sidebar + chrome — portal-config.js
      injects `#pnav`/`#mlStatusCap`/`#mlBell`/`#mlVaBar`/`#mlRefresh`/`#mlP2R`/
@@ -7372,7 +7379,7 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      SAVING the PDF** though the on-screen Preview showed them — browsers drop
      `background` colours in print unless **`print-color-adjust:exact`** (`-webkit-`
      too) is set; added on `html,body` in `@media print` (inherited → covers the cover
-     band, the `h2` section bands, table header fills, the fixed header/footer). Borders
+     band, the `h2` section bands, table header fills, the running header/footer). Borders
      (the `.runhead` blue underline, sitecard top rule) always printed — only
      background-colour fills needed it. This rule is in `#appstyle`, so it fixes the
      Preview-window save too. Still CSS-only, network-first (no `?v=`/SW bump).
