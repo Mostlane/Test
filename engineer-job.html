@@ -379,9 +379,28 @@
 
   function jobName(){ try{ return (window.mlJobName? window.mlJobName(job): (job.siteName||job.helpdeskRef||job.id)); }catch(e){ return job.siteName||job.helpdeskRef||job.id; } }
 
+  // A reactive job carries the Concerto phone, but a job with none still has a
+  // number saved against its SITE in the register (The Oaks). Fetch it lazily
+  // (once, only when the job has no phone) via the legacy-host bridge, then re-render.
+  var sitePhoneTried=false;
+  async function ensureSitePhone(){
+    if(sitePhoneTried) return; sitePhoneTried=true;
+    var code=String((job&&job.siteCode)||"").replace(/\D/g,"");
+    if(!code) return;
+    try{
+      var r=await fetch("https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all",{cache:"no-store"});
+      var list=await r.json();
+      var hit=(Array.isArray(list)?list:[]).find(function(s){
+        return String(s.siteNumber||"").replace(/\D/g,"")===code || String(Number(String(s.siteNumber||"").replace(/\D/g,"")))===String(Number(code));
+      });
+      var ph=hit && String(hit.telephone||hit.phone||"").trim();
+      if(ph){ job.telephone=ph; render(); }
+    }catch(e){}
+  }
   function render(){
     var address=[job.address,(job.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(", ");
     var phone=job.telephone||"";
+    if(!phone && job && job.siteCode) ensureSitePhone();
     var dirDest = (job.lat!=null&&job.lon!=null)? (job.lat+","+job.lon) : (address||job.siteName||"");
     var urgent = /priority\s*1/i.test(job.priority||"");
     var h='';

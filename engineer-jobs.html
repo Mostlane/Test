@@ -107,6 +107,7 @@
     .job-actions{display:flex;gap:10px;margin-top:13px}
     .act{min-height:50px;border-radius:13px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);text-decoration:none;touch-action:manipulation}
     .act.dir{flex:0 0 auto;padding:0 16px;font-size:20px;color:var(--muted)}
+    .act.call{flex:0 0 auto;padding:0 16px;font-size:20px;color:#15803d;border-color:#bbf7d0;background:#f0fdf4}
     .act.open{flex:1;background:var(--accent);border-color:var(--accent);color:#fff}
     .act.open.is-done{background:var(--chip);border-color:var(--line);color:var(--muted);font-weight:650}
     /* Running order + times + soft "do this next" nudge (nothing hidden) */
@@ -451,6 +452,8 @@ function jobCardInner(job, slaInfo, target, opts){
   const addr = escH([...new Set([job.address, pc].map(x => String(x||"").trim()).filter(Boolean))]
     .filter(a => !String(siteRaw).includes(a)).join(" · "));
   const dir = dirUrl(job);
+  const phone = String(job.telephone||"").trim();
+  const telHref = phone ? "tel:"+phone.replace(/[^0-9+]/g,"") : "";
   const done = isDoneStatus(job.status);
   const statusTxt = escH(job.status || "Open");
   // Running order + scheduled time so engineers know the sequence at a glance.
@@ -483,6 +486,7 @@ function jobCardInner(job, slaInfo, target, opts){
         ${emReturnChip(job)}
       </div>
       <div class="job-actions">
+        ${telHref ? `<a class="act call" href="${escH(telHref)}" aria-label="Call the site" title="Call ${escH(phone)}">📞</a>` : ""}
         ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
         <a class="act open${done ? " is-done" : ""}" href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">${done ? "View job →" : "Open job →"}</a>
       </div>`;
