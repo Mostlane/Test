@@ -244,8 +244,17 @@
   /* ---------- Print ---------- */
   @page{size:A4;margin:0}
   @media print{
-    body{background:#fff}
-    .form-pane,.toolbar,.no-print,.modal-overlay{display:none !important}
+    /* Force the navy/blue bands to actually print — browsers drop background
+       colours when SAVING to PDF unless this is set (the on-screen Preview showed
+       them fine, the saved file lost them). Inherited, so it covers every block. */
+    html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fff}
+    /* The portal sidebar + chrome (injected by portal-config.js) must not print —
+       only the document. Also drop the sidebar's left padding + the watermark. */
+    body.pnav-on{padding-left:0 !important}
+    html::before{display:none !important}
+    .form-pane,.toolbar,.no-print,.modal-overlay,
+    #pnav,#mlStatusCap,#mlBell,#mlVaBar,#mlRefresh,#mlP2R,#mlVanScoreNote,
+    #mlIntakeWarn,#mlToastHost,#mlPalOv{display:none !important}
     .layout{display:block}
     .doc-pane{height:auto;overflow:visible;padding:0;background:#fff}
     /* Content pages FLOW: no forced full-page height and no flex-pinned footer

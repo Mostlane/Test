@@ -7353,6 +7353,22 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      fixed pair (z-index:1) on page 1. HTML/CSS-only, network-first (no `?v=`/SW bump).
      (The headless print check is blocked by the portal auth gate on localhost — the
      fix is CSS; verify on a real print/Preview.)
+   - **Two print follow-ups (9 Nov 2026, Jamie):** (1) printing the BUILDER directly
+     (btnPrint `window.print()`) included the portal sidebar + chrome — portal-config.js
+     injects `#pnav`/`#mlStatusCap`/`#mlBell`/`#mlVaBar`/`#mlRefresh`/`#mlP2R`/
+     `#mlVanScoreNote`/`#mlIntakeWarn`/`#mlToastHost`/`#mlPalOv` + the `html::before`
+     watermark and has NO `@media print` rule of its own. cpp-builder's `@media print`
+     now hides all of them, drops the `html::before` watermark, and zeroes
+     `body.pnav-on{padding-left:0}` (the 248px sidebar gutter) so the doc isn't shifted
+     right. (The Preview window was already clean — it's a fresh window with only
+     `#appstyle` + the doc, no portal-config.) (2) **The blue bands vanished when
+     SAVING the PDF** though the on-screen Preview showed them — browsers drop
+     `background` colours in print unless **`print-color-adjust:exact`** (`-webkit-`
+     too) is set; added on `html,body` in `@media print` (inherited → covers the cover
+     band, the `h2` section bands, table header fills, the fixed header/footer). Borders
+     (the `.runhead` blue underline, sitecard top rule) always printed — only
+     background-colour fills needed it. This rule is in `#appstyle`, so it fixes the
+     Preview-window save too. Still CSS-only, network-first (no `?v=`/SW bump).
    - **Old standalone app** (static /hs-plan/, worker `mostlane-hs-jobs` own D1 +
      APP_TOKEN, /hs-plan-config launch token) is now UNLINKED but kept as a
      fallback — do not delete /hs-plan/.
