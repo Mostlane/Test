@@ -50008,8 +50008,9 @@ function buildProgrammePdf(data, meta = {}) {
       for (let i = 0; i < win.days; i++) {
         const d = addDays4(winStart, i);
         const x = GRID_X + i * dayW;
-        const we = isWeekend(d), bh = !we && hs.has(ymd(d));
-        const bk = !we && !bh ? blockAt(d, blocks) : null;
+        const we = isWeekend(d);
+        const bk = !we ? blockAt(d, blocks) : null;
+        const bh = !we && !bk && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         if (bk) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: bk.work ? [0.957, 0.969, 0.98] : [0.929, 0.914, 0.98] });
@@ -50669,21 +50670,24 @@ async function handle42(request, env, ctx, url) {
       const wd = base.getUTCDay();
       base.setUTCDate(base.getUTCDate() + ((8 - wd) % 7 || 7));
     }
+    const holArr = await bankHolidayDates(db);
+    const holSet = new Set(holArr);
+    const ymd2 = (d) => d.toISOString().slice(0, 10);
     const isWknd = (d) => {
       const g = d.getUTCDay();
       return g === 0 || g === 6;
     };
+    const isOff = (d) => isWknd(d) || holSet.has(ymd2(d));
     const addWorkingDays = (from, n) => {
       let d = new Date(from);
       let left = Math.max(0, n | 0), guard = 0;
-      while (isWknd(d)) d.setUTCDate(d.getUTCDate() + 1);
+      while (isOff(d)) d.setUTCDate(d.getUTCDate() + 1);
       while (left > 0 && guard++ < 5e3) {
         d.setUTCDate(d.getUTCDate() + 1);
-        if (!isWknd(d)) left--;
+        if (!isOff(d)) left--;
       }
       return d;
     };
-    const ymd2 = (d) => d.toISOString().slice(0, 10);
     const tasks = [];
     for (const t of out.tasks) {
       const name = String(t?.name || "").trim().slice(0, 200);
@@ -50703,7 +50707,8 @@ async function handle42(request, env, ctx, url) {
       ref: "",
       notes: "",
       contractors,
-      tasks
+      tasks,
+      holidays: holArr
     };
     const id = newId2("PRG");
     const now2 = (/* @__PURE__ */ new Date()).toISOString();
@@ -50790,6 +50795,7 @@ async function handle42(request, env, ctx, url) {
     if (!tasks.length) return json4({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
     if (!contractors.length) contractors.push({ id: uid2(), name: "Mostlane", colour: PALETTE[0] });
     const data = { ...src, title: String(out.title || src.title || "").slice(0, 200) || "Programme of works", contractors, tasks };
+    if (!Array.isArray(data.holidays) || !data.holidays.length) data.holidays = await bankHolidayDates(db);
     return json4({ ok: true, data, taskCount: tasks.length });
   }
   if (method === "POST" && pathname === "/prog/delete") {

@@ -185,10 +185,12 @@
     let hDates = "", hDows = "";
     for (let i = 0; i < geo.days; i++) {
       const d = addDays(geo.gridStart, i);
-      const bh = !isWeekend(d) && hs.has(ymd(d));
-      const bk = (!isWeekend(d) && !bh) ? blockAt(d, blocks) : null;
-      const we = isWeekend(d) ? " mlp-we" : (bh ? " mlp-bh" : (bk ? " mlp-bk-col" : ""));
-      const tt = bh ? ' title="Bank holiday"' : (bk ? ` title="${esc(bk.name || "Blocked out")}"` : "");
+      // A shutdown (blockout) takes priority over a bank holiday on a day they
+      // overlap — only the shutdown shows, never "BH" too.
+      const bk = !isWeekend(d) ? blockAt(d, blocks) : null;
+      const bh = !isWeekend(d) && !bk && hs.has(ymd(d));
+      const we = isWeekend(d) ? " mlp-we" : (bk ? " mlp-bk-col" : (bh ? " mlp-bh" : ""));
+      const tt = bk ? ` title="${esc(bk.name || "Blocked out")}"` : (bh ? ' title="Bank holiday"' : "");
       hDates += `<th class="mlp-day${we}"${tt}>${fmtDM(d)}</th>`;
       hDows += `<th class="mlp-dow${we}"${tt}>${bh ? "BH" : DOW[d.getDay()]}</th>`;
     }
@@ -230,8 +232,7 @@
     for (let i = 0; i < geo.days; i++) {
       const d = addDays(geo.gridStart, i);
       if (isWeekend(d)) weBg += `<i class="mlp-webg" style="left:${i * DAYW}px"></i>`;
-      else if (hs.has(ymd(d))) weBg += `<i class="mlp-bhbg" style="left:${i * DAYW}px"></i>`;
-      else { const bk = blockAt(d, blocks); if (bk) weBg += `<i class="mlp-bkbg${bk.work ? " work" : ""}" style="left:${i * DAYW}px"></i>`; }
+      else { const bk = blockAt(d, blocks); if (bk) weBg += `<i class="mlp-bkbg${bk.work ? " work" : ""}" style="left:${i * DAYW}px"></i>`; else if (hs.has(ymd(d))) weBg += `<i class="mlp-bhbg" style="left:${i * DAYW}px"></i>`; }
     }
 
     let body = "";
@@ -310,7 +311,27 @@
     const offWarn = (geo.offGrid && geo.offGrid.length)
       ? `<div class="mlp-warn">⚠ ${geo.offGrid.length} task${geo.offGrid.length === 1 ? "" : "s"} sit${geo.offGrid.length === 1 ? "s" : ""} far outside this programme's dates and ${geo.offGrid.length === 1 ? "isn't" : "aren't"} drawn — check the date${geo.offGrid.length === 1 ? "" : "s"}: ${geo.offGrid.slice(0, 3).map(o => esc(o.name) + " (" + esc(o.start) + ")").join(", ")}${geo.offGrid.length > 3 ? "…" : ""}</div>`
       : "";
-    host.innerHTML = sumLine + keyLine + offWarn +
+    // Bank-holiday "in the way" flag — only while BUILDING (editable). Lists each
+    // task whose span crosses a UK bank holiday that isn't already inside a
+    // shutdown: it either works through it (Wknd) or runs across it (bar splits).
+    let bhWarn = "";
+    if (editable && hs.size) {
+      const hits = [];
+      for (const t of tasks) {
+        const s = parse(t.start), e = endOf(t, hs, bs);
+        if (!s || !e) continue;
+        const dts = [];
+        for (let d = new Date(s); d <= e; d = addDays(d, 1)) {
+          if (!isWeekend(d) && hs.has(ymd(d)) && !blockAt(d, blocks)) dts.push(fmtDM(d));
+        }
+        if (dts.length) hits.push({ name: t.name || "(unnamed)", wknd: !!t.wknd, dts });
+      }
+      if (hits.length) {
+        const one = hits.length === 1;
+        bhWarn = `<div class="mlp-bhwarn">📅 ${hits.length} task${one ? "" : "s"} cross a UK bank holiday — ${one ? "it skips" : "they skip"} it unless set to work through: ${hits.slice(0, 4).map(h => esc(h.name) + " (" + h.dts.join(", ") + (h.wknd ? " — works through" : "") + ")").join("; ")}${hits.length > 4 ? "…" : ""}</div>`;
+      }
+    }
+    host.innerHTML = sumLine + keyLine + offWarn + bhWarn +
       `<div class="mlp-scroll"><table class="mlp-table${hasBand ? " mlp-hasband" : ""}" style="--maw:${worksW}px"><thead>${head}</thead><tbody>${body}</tbody></table></div>` +
       (opts.watermark ? `<div class="mlp-wm">${esc(opts.watermark)}</div>` : "");
 
@@ -423,6 +444,7 @@
   const css = `
   .mlp-sum{font:600 13px 'Segoe UI',system-ui,sans-serif;color:#003366;background:#ddebf7;border:1px solid #9dc3e6;border-radius:9px;padding:7px 12px;margin-bottom:8px;display:inline-block;}
   .mlp-warn{font:600 12.5px 'Segoe UI',system-ui,sans-serif;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:9px;padding:7px 12px;margin:0 0 8px 8px;display:inline-block;}
+  .mlp-bhwarn{font:600 12.5px 'Segoe UI',system-ui,sans-serif;color:#b45309;background:#fdeeda;border:1px solid #f0b775;border-radius:9px;padding:7px 12px;margin:0 0 8px 8px;display:inline-block;}
   .mlp-scroll{overflow-x:auto;border:1px solid #e3e8ee;border-radius:12px;background:#fff;}
   .mlp-table{border-collapse:separate;border-spacing:0;font:13px 'Segoe UI',system-ui,sans-serif;color:#1f2a37;width:max-content;table-layout:fixed;}
   .mlp-table th,.mlp-table td{box-sizing:border-box;}

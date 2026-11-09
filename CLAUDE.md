@@ -2724,6 +2724,24 @@ gantt/export `?v=` were bumped 8→9 / 3→4 together). `migrate` defensively se
 `data.blockouts=[]`. The shared skip logic is verified (Xmas-shutdown case: a
 10-working-day task from 21 Dec ends 13 Jan with the block, 6 Jan with work:true,
 30 Dec with Wknd). AI draft/edit + diff are untouched (blockouts pass through).
+**Bank-holiday refinements (9 Nov 2026, Jamie):** (1) **a shutdown takes PRIORITY
+over a bank holiday** where they overlap — the "BH" shading/label is suppressed on a
+day a blockout covers; only the shutdown band/shading shows. Done by computing `bk`
+BEFORE `bh` (`bh = …&& !bk && …`) in the gantt header + background loops AND in
+`lib/progpdf.js` (the "BH" marker is `else if (bh …)`, now false under a block) AND
+`programme-export.js` (BLK tag + blockStyle win over BH). (2) **Bank-holiday "in the
+way" flag** (`mlp-bhwarn`, programme-gantt.js) — BUILDER ONLY (`editable`): an amber
+line listing each task whose span crosses a UK bank holiday NOT inside a shutdown
+("📅 N tasks cross a UK bank holiday — they skip it unless set to work through:
+Groundworks (31/08) …"; " — works through" when Wknd ticked). The permanent amber BH
+columns STAY (Jamie chose "keep shading + add the flag"); the flag is hidden on the
+read-only client view + PDF. (3) **AI/document builds respect bank holidays** — the
+`/prog/ai-draft` offset→date maths now skips bank holidays as well as weekends
+(`isOff` = weekend OR `bankHolidayDates(db)`), so an AI-built task never STARTS or
+runs on a BH, and the new draft is stamped with `data.holidays` (the GOV.UK list) so
+the chart/exports skip + flag them; `/prog/ai-edit` keeps `src.holidays` (spread) and
+back-fills them if the source draft lacked them. gantt `?v=10`, export `?v=5` (bumped
+together). dist rebuilt.
 **Concurrent-edit
 protection:** job_programmes gained `updated_by` (self-migrating); every
 /prog/save carries **`baseVersion`** (the updated_at the builder last saw) and a
