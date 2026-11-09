@@ -3366,6 +3366,13 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   muted 3-line-clamped **`.descsum`** so it's present "but not overpowering". The mobile
   card mirrors it (composed title + summary, address line dropped). `.shell` widened
   1280→1380px to fit the description. HTML-only, network-first (no `?v=`/SW bump).
+  **job-view.html header title matches the board (9 Nov 2026):** the `#jobTitle` H1
+  now reads `<incident/job number> - <site number> - <site name>` too (was mlJobName =
+  number + name, missing the site code). Composed inline in `renderJob` — number from
+  the id prefix / CHAP id / ref (never a UUID), then `job.siteCode`, then the stripped
+  site name — deduped so a code equal to the number or the name never repeats (a
+  project reads "P0710 - Goodwood Farm VPU"). The Reference/Site fields below are
+  unchanged.
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
   reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT
