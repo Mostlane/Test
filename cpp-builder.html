@@ -206,6 +206,8 @@
     font-family:var(--head);font-size:9.5px;letter-spacing:.04em;color:var(--muted);
     border-top:1px solid var(--line);padding-top:6px;display:flex;align-items:center;gap:7px}
   .doc .footer-note img{max-height:18px}
+  /* Fixed running header/footer — PRINT ONLY (see @media print). */
+  .run-head-fixed,.run-foot-fixed{display:none}
   .doc .appendix-tab{font-family:var(--head);font-size:46px;font-weight:700;color:#b4c6d8;
     text-align:right;margin:0;line-height:1;letter-spacing:.04em}
   .doc .appendix-tab b{color:var(--brand)}
@@ -246,13 +248,31 @@
     .form-pane,.toolbar,.no-print,.modal-overlay{display:none !important}
     .layout{display:block}
     .doc-pane{height:auto;overflow:visible;padding:0;background:#fff}
+    /* Content pages FLOW: no forced full-page height and no flex-pinned footer
+       (that pinned the footer to the bottom of an OVER-tall box, which on a long
+       section landed it halfway up the next sheet and split paragraphs). Each
+       section still starts on a fresh page; top/bottom padding reserves room for
+       the fixed running header + footer below. */
     .page{
-      box-shadow:none;margin:0;width:auto;min-height:296mm;padding:13mm 14mm;
+      box-shadow:none;margin:0;width:auto;min-height:0;display:block;
+      padding:24mm 14mm 18mm;
       page-break-after:always;
     }
-    .page.cover{padding:0}
     .page:last-child{page-break-after:auto}
-    .doc figure, .doc table, .doc h2{page-break-inside:avoid}
+    /* The in-flow per-page header/footer are replaced by the single fixed pair. */
+    .doc .page .runhead,.doc .page .footer-note{display:none !important}
+    .run-head-fixed{display:block;position:fixed;top:0;left:0;right:0;z-index:1;background:#fff;padding:9mm 14mm 0}
+    .run-foot-fixed{display:block;position:fixed;bottom:0;left:0;right:0;z-index:1;background:#fff;padding:0 14mm 7mm}
+    .run-head-fixed .runhead{margin-bottom:6px}
+    .run-foot-fixed .footer-note{margin-top:0}
+    /* The cover is its own full sheet and paints OVER the fixed header/footer so
+       page 1 carries neither (z-index above the running pair). */
+    .page.cover{padding:0;min-height:297mm;position:relative;z-index:5;background:#fff;display:flex;flex-direction:column}
+    /* Keep blocks whole across the page break; a long table breaks between ROWS
+       (never avoid the whole table, or one too tall for a page would overflow). */
+    .doc p,.doc li,.doc tr,.doc figure,.doc h2,.doc h3,.doc h4,
+    .doc .kv,.doc .sub,.doc .ms-fill,.doc .route-meta,.doc .keygrid{page-break-inside:avoid}
+    .doc thead{display:table-header-group}
   }
 </style>
 </head>
@@ -1224,7 +1244,13 @@ function renderDoc(){
     pageRamsPPE(),
     pageMethod(),
     pageAppendixCDE(),
-  ].join("");
+  ].join("")
+  // Single running header + footer for PRINT ONLY (hidden on screen). Fixed to
+  // every physical sheet so a long section that flows onto extra pages still
+  // carries the company header + Mostlane footer — the per-page in-flow copies
+  // are hidden in print. Lives inside #docRoot so the Preview window (which
+  // clones docRoot.innerHTML) gets them too.
+  + `<div class="run-head-fixed">${runHead()}</div><div class="run-foot-fixed">${FOOT}</div>`;
 }
 
 function pageCover(){

@@ -7328,6 +7328,31 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      /hs/docs?type=cpp. Compound map (Google Maps draw/route) + A&E route planner
      carried over unchanged (the DrawingManager draw/save fix is in). Mobile: the
      doc pane is hidden until the Review step. _headers + SW `mostlane-v114`.
+   - **PDF export pagination fix (9 Nov 2026, Jamie — CAB Havant: "footers halfway
+     up the page, paragraphs split across two pages").** The export is `window.print()`
+     (btnPrint) / the Preview window (btnPreview, which clones `#appstyle` CSS +
+     `docRoot.innerHTML`), NOT a vector builder. Each section was a fixed
+     `min-height:296mm` flex `.page` with the footer flex-pinned (`margin-top:auto`)
+     and `page-break-after:always`. That's fine while a section fits one sheet, but a
+     section with more content than a page (CAB Havant's long Arrangements/Directory/
+     RAMS) grew the box past 297mm → it overflowed onto the next physical sheet
+     (splitting a paragraph) and the pinned footer sat at the bottom of the OVER-tall
+     box = halfway up sheet 2. **Fix (CSS-only + a 1-line renderDoc concat):** in
+     `@media print` content `.page` now FLOWS — `min-height:0;display:block;
+     padding:24mm 14mm 18mm` (no forced height, no flex pin); the per-page in-flow
+     `.runhead`/`.footer-note` are hidden (`.doc .page .runhead,.doc .page .footer-note`)
+     and replaced by ONE **fixed running header + footer** (`.run-head-fixed`/
+     `.run-foot-fixed`, `position:fixed`, appended once inside `#docRoot` by renderDoc
+     so the Preview window gets them too; hidden on screen). The 24/18mm page padding
+     reserves room for them, so they repeat on every physical sheet of a long section.
+     `page-break-inside:avoid` on p/li/tr/figure/h2-4/.kv/.sub/.ms-fill/.route-meta/
+     .keygrid stops splits; a long TABLE breaks between rows (`tr` avoid, NOT the whole
+     table) with `thead{display:table-header-group}` repeating its header. **The cover**
+     stays full-bleed and header/footer-free: `.page.cover` is one sheet
+     (`min-height:297mm`) with `position:relative;z-index:5` so it paints OVER the
+     fixed pair (z-index:1) on page 1. HTML/CSS-only, network-first (no `?v=`/SW bump).
+     (The headless print check is blocked by the portal auth gate on localhost — the
+     fix is CSS; verify on a real print/Preview.)
    - **Old standalone app** (static /hs-plan/, worker `mostlane-hs-jobs` own D1 +
      APP_TOKEN, /hs-plan-config launch token) is now UNLINKED but kept as a
      fallback — do not delete /hs-plan/.
