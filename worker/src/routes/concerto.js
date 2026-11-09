@@ -1136,16 +1136,21 @@ export async function handle(request, env, ctx, url, sess) {
     const byCode = new Map();
     for (const r of byId.values()) { const k = r.storeCode || r.id; const cur = byCode.get(k); if (!cur || (String(cur.id).startsWith("MYS:") && !String(r.id).startsWith("MYS:"))) byCode.set(k, r); }
     const slim = r => ({ id: r.id, storeCode: r.storeCode, siteName: r.siteName, inactive: !!r.inactive, chartDue: r.chartDue || null, docStatus: r.docStatus || null, onConcerto: !String(r.id).startsWith("MYS:"), case: r.case });
-    const toComplete = [], certs = [];
+    const toComplete = [], certs = [], toQuote = [];
     for (const r of byCode.values()) {
       const st = r.case.stage12;
       if (st === "orders_received" || st === "remedials_scheduled") toComplete.push(slim(r));
       else if (st === "remedials_complete") certs.push(slim(r));
+      // "Awaiting order": the remedials are found and the quote is with the client
+      // (or ready to send), but no order has come in yet. Copy the quote, send it,
+      // and when the client's order email lands the case auto-advances to
+      // "orders_received" (→ Remedials to complete) with no manual step.
+      else if (st === "remedials_to_quote" || st === "remedials_quoted") toQuote.push(slim(r));
     }
     const cmp = (a, b) => String(a.storeCode).localeCompare(String(b.storeCode), undefined, { numeric: true });
-    toComplete.sort(cmp); certs.sort(cmp);
+    toComplete.sort(cmp); certs.sort(cmp); toQuote.sort(cmp);
     let labourRate = 0; try { const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first(); labourRate = rr ? Number(rr.value) || 0 : 0; } catch {}
-    return json({ ok: true, money, labourRate, toComplete, certs, stages12: FY_STAGES }, {}, env, request);
+    return json({ ok: true, money, labourRate, toComplete, certs, toQuote, stages12: FY_STAGES }, {}, env, request);
   }
   // POST /concerto/create-works {ppmId, itemIds?, items?, engineers?, scheduledAt?,
   // scheduledEnd?, durationMinutes?} — raise the remedial WORKS job for a site from

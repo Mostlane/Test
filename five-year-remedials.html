@@ -365,7 +365,7 @@
 
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
     let QUEUE = null, DATA_MINE = false;      // QUEUE = /concerto/remedial-queue {toComplete, certs}
-    const isQ = () => VIEW==="remq" || VIEW==="certq";
+    const isQ = () => VIEW==="remq" || VIEW==="certq" || VIEW==="toquote";
     let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active", LRATE = 0, ENG = "all";
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
     let TLON = (() => { try { return localStorage.getItem("mlFyrTimeline") === "1"; } catch { return false; } })();
@@ -613,10 +613,10 @@
       const inact = ROWS.filter(r => r.inactive).length;
       const mineN = VIEW==="mine" ? ROWS.length : null;
       const t = (v,label,n) => '<button class="viewtab'+(VIEW===v?" on":"")+'" data-v="'+v+'">'+esc(label)+(n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
-      const qn = k => QUEUE ? QUEUE[k].length : null;
+      const qn = k => QUEUE && QUEUE[k] ? QUEUE[k].length : null;
       const qt = (v,label,n) => '<button class="viewtab qtab'+(VIEW===v?" on":(n?" hot":""))+'" data-v="'+v+'">'+esc(label)+(n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
       g("viewtabs").innerHTML = t("active","⚡ Schedule",null) + t("mine","📋 My schedule", mineN) + t("inactive","🚫 Inactive sites", inact)
-        + qt("remq","🔧 Remedials to complete", qn("toComplete")) + qt("certq","📄 Certs to update", qn("certs"));
+        + qt("toquote","💬 Awaiting order", qn("toQuote")) + qt("remq","🔧 Remedials to complete", qn("toComplete")) + qt("certq","📄 Certs to update", qn("certs"));
       g("impJobs").style.display = VIEW==="mine" ? "inline-block" : "none";
       g("viewtabs").querySelectorAll(".viewtab").forEach(b => b.onclick = () => {
         if(VIEW===b.dataset.v) return;
@@ -1223,14 +1223,14 @@
       try {
         const d = await authFetch("/concerto/remedial-queue").then(r=>r.json());
         if (d && d.ok) {
-          QUEUE = { toComplete: d.toComplete || [], certs: d.certs || [] };
+          QUEUE = { toComplete: d.toComplete || [], certs: d.certs || [], toQuote: d.toQuote || [] };
           if (d.money != null) MONEY = !!d.money;
           if (!STAGES.length && d.stages12) { STAGES = d.stages12; STAGES.forEach(x => { STAGE_LABEL[x.key] = x.label; STAGE_LIGHT[x.key] = x.light; }); }
-        } else if (isQ()) QUEUE = QUEUE || { toComplete: [], certs: [], error: (d && d.error) || "Couldn't load" };
-      } catch { if (isQ()) QUEUE = QUEUE || { toComplete: [], certs: [], error: "Couldn't load — check your signal" }; }
+        } else if (isQ()) QUEUE = QUEUE || { toComplete: [], certs: [], toQuote: [], error: (d && d.error) || "Couldn't load" };
+      } catch { if (isQ()) QUEUE = QUEUE || { toComplete: [], certs: [], toQuote: [], error: "Couldn't load — check your signal" }; }
       if (isQ()) render(); else renderViewTabs();
     }
-    const qRow = id => QUEUE ? [...QUEUE.toComplete, ...QUEUE.certs].find(x => x.id === id) : null;
+    const qRow = id => QUEUE ? [...QUEUE.toComplete, ...QUEUE.certs, ...(QUEUE.toQuote||[])].find(x => x.id === id) : null;
     const stepAt = (c, k) => { const st = (c.steps || []).find(x => x.key === k && x.done); return st ? st.at : null; };
     function worksCell(c){
       const w = c.worksJob;
@@ -1252,10 +1252,15 @@
     function renderQueue(){
       const tb = g("tbl").querySelector("tbody"), th = g("tbl").querySelector("thead");
       if (!QUEUE) { g("sumrow").innerHTML = ""; th.innerHTML = ""; tb.innerHTML = '<tr><td class="muted" style="padding:16px;">Loading…</td></tr>'; return; }
-      const certs = VIEW==="certq", list = certs ? QUEUE.certs : QUEUE.toComplete;
+      const certs = VIEW==="certq", toquote = VIEW==="toquote";
+      const list = certs ? QUEUE.certs : toquote ? (QUEUE.toQuote||[]) : QUEUE.toComplete;
       if (certs) {
         g("sumrow").innerHTML = '<div class="qnote" style="flex:1 1 100%">📄 <b>Certs to update</b> — the remedial works are done (the engineer completed the works job, or the status was set to <i>Remedials complete</i>). Upload the updated certificate here and the site moves on to <i>Certificate updated</i>.</div>';
         th.innerHTML = '<tr><th>Store</th><th>Works finished</th><th>Works job</th><th>Certificate on file</th><th></th></tr>';
+      } else if (toquote) {
+        g("sumrow").innerHTML = '<div class="qnote" style="flex:1 1 100%">💬 <b>Awaiting order</b> — remedials found and quoted (or ready to quote), waiting on the client\'s order. Tap <b>📋 Copy quote</b> to send it; when the order email arrives the site moves to <b>🔧 Remedials to complete</b> on its own.</div>'
+          + stat(list.length, "Awaiting order", "");
+        th.innerHTML = '<tr><th>Store</th><th>Remedials</th><th>Status</th><th></th></tr>';
       } else {
         const noJob = list.filter(r => !r.case.worksJob).length, unassigned = list.filter(r => r.case.worksJob && !(r.case.worksJob.engineers||[]).length).length;
         g("sumrow").innerHTML = '<div class="qnote" style="flex:1 1 100%">🔧 <b>Remedials to complete</b> — sites with a remedial order received. Raise the works job (built as a site-audit checklist from the remedials the engineer logged on the EICR test) and assign it. When the engineer completes it the site moves to <b>Certs to update</b> on its own.</div>'
@@ -1263,7 +1268,7 @@
         th.innerHTML = '<tr><th>Store</th><th>Order</th><th>Remedials</th><th>Works job</th><th></th></tr>';
       }
       if (QUEUE.error) { tb.innerHTML = '<tr><td colspan="5" style="padding:16px;color:#b00020">'+esc(QUEUE.error)+'</td></tr>'; return; }
-      if (!list.length) { tb.innerHTML = '<tr><td colspan="5" class="muted" style="padding:16px;">'+(certs ? "No certificates waiting to be updated. ✓" : "No remedial orders waiting. ✓")+'</td></tr>'; return; }
+      if (!list.length) { tb.innerHTML = '<tr><td colspan="5" class="muted" style="padding:16px;">'+(certs ? "No certificates waiting to be updated. ✓" : toquote ? "Nothing awaiting an order. ✓" : "No remedial orders waiting. ✓")+'</td></tr>'; return; }
       tb.innerHTML = list.map((r,i) => {
         const c = r.case, key = esc(r.id);
         const store = '<td class="store"><b>'+esc(r.storeCode)+'</b> '+esc(r.siteName||"")
@@ -1282,6 +1287,15 @@
             + '<button class="qbtn alt" data-qdone="'+key+'">✓ Certificate updated</button>'
             + '<span class="saved" id="qsv-'+key+'"></span></div></td></tr>';
         }
+        if (toquote) {
+          const stg = STAGE_LABEL[c.stage12] || c.stage12 || "";
+          return '<tr class="'+(i%2?"zeb":"")+'">'+store+'<td>'+remCell(c)+'</td>'
+            + '<td style="font-size:12px;color:#7a5a00">'+esc(stg)+'</td>'
+            + '<td><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">'
+            + '<button class="qbtn" data-copyqq="'+key+'">📋 Copy quote</button>'
+            + '<label class="c3lab" style="font-size:12px"><input type="checkbox" id="qc3-'+key+'"> Include C3</label>'
+            + '<span class="saved" id="qqsv-'+key+'"></span></div></td></tr>';
+        }
         const o = c.order;
         const order = o ? esc(o.number||"Order")+(o.at?'<div class="muted" style="font-size:12px">'+fmtD(String(o.at).slice(0,10))+'</div>':'')+(MONEY&&o.value!=null?'<div style="font-size:12px">£'+Number(o.value).toFixed(2)+'</div>':'')
           : '<span class="muted">'+(c.stage12Source==="manual"?"set by hand":"—")+'</span>';
@@ -1295,6 +1309,20 @@
       tb.querySelectorAll("[data-qup]").forEach(b => b.onclick = () => uploadCert(b.dataset.qup, b));
       tb.querySelectorAll("[data-qdone]").forEach(b => b.onclick = () => markCertUpdated(b.dataset.qdone, b));
       tb.querySelectorAll("[data-qcert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.qcert); });
+      tb.querySelectorAll("[data-copyqq]").forEach(b => b.onclick = () => copyQuoteQ(b.dataset.copyqq));
+    }
+    // Copy the quote text for an "Awaiting order" row (reads the queue row's case,
+    // not the main schedule ROWS). C1/C2/FI + uncoded always; C3 only when ticked.
+    function copyQuoteQ(id){
+      const r = qRow(id); if (!r) return;
+      const cb = g("qc3-"+id), withC3 = !!(cb && cb.checked);
+      const lines = ((r.case && r.case.remedialLines) || []).filter(x => withC3 || String(x.code||"").toUpperCase() !== "C3");
+      const text = lines.map(x => { const code=String(x.code||"").toUpperCase(); const d=String(x.description||"").trim(); return d ? (code ? code+" — "+d : d) : ""; }).filter(Boolean).join("\n");
+      const sv = g("qqsv-"+id);
+      if (!text){ (window.MLUI?MLUI.toast:alert)("No observations to copy."); return; }
+      const n = text.split("\n").length;
+      const done = () => { if (sv){ sv.textContent="Copied "+n+" ✓"; setTimeout(()=>{sv.textContent="";},1800); } };
+      try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done)); else fallbackCopy(text, done); } catch { fallbackCopy(text, done); }
     }
 
     // The create / assign dialog. Create = POST /concerto/create-works (site-audit job from

@@ -17391,22 +17391,24 @@ async function handle9(request, env, ctx, url, sess) {
       if (!cur || String(cur.id).startsWith("MYS:") && !String(r.id).startsWith("MYS:")) byCode.set(k, r);
     }
     const slim = (r) => ({ id: r.id, storeCode: r.storeCode, siteName: r.siteName, inactive: !!r.inactive, chartDue: r.chartDue || null, docStatus: r.docStatus || null, onConcerto: !String(r.id).startsWith("MYS:"), case: r.case });
-    const toComplete = [], certs = [];
+    const toComplete = [], certs = [], toQuote = [];
     for (const r of byCode.values()) {
       const st = r.case.stage12;
       if (st === "orders_received" || st === "remedials_scheduled") toComplete.push(slim(r));
       else if (st === "remedials_complete") certs.push(slim(r));
+      else if (st === "remedials_to_quote" || st === "remedials_quoted") toQuote.push(slim(r));
     }
     const cmp = (a, b) => String(a.storeCode).localeCompare(String(b.storeCode), void 0, { numeric: true });
     toComplete.sort(cmp);
     certs.sort(cmp);
+    toQuote.sort(cmp);
     let labourRate = 0;
     try {
       const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first();
       labourRate = rr ? Number(rr.value) || 0 : 0;
     } catch {
     }
-    return json({ ok: true, money: money3, labourRate, toComplete, certs, stages12: FY_STAGES }, {}, env, request);
+    return json({ ok: true, money: money3, labourRate, toComplete, certs, toQuote, stages12: FY_STAGES }, {}, env, request);
   }
   if (path === "/concerto/create-works" && method === "POST") {
     const b = await body();
@@ -21074,6 +21076,23 @@ PAT: Import certificate number ${num5}-${yr}`;
     const rows = (results || []).map(shapeOrder);
     const all = await listJobs(env, tid);
     const byId = new Map(all.map((j) => [j.id, j]));
+    try {
+      const fixIds = rows.filter((o) => o.matchedKind === "em" && !o.matchedCertId && o.matchedJobId && byId.get(o.matchedJobId) && byId.get(o.matchedJobId).elecTest).map((o) => o.id);
+      if (fixIds.length) {
+        const nowf = (/* @__PURE__ */ new Date()).toISOString();
+        for (let i = 0; i < fixIds.length; i += 20) {
+          const ch = fixIds.slice(i, i + 20);
+          await env.DB.prepare(`UPDATE client_orders SET matched_kind='elec', matched_cert_id=NULL, status=CASE WHEN status='linked' THEN 'matched' ELSE status END, updated_at=? WHERE tenant_id=? AND id IN (${ch.map(() => "?").join(",")})`).bind(nowf, tid, ...ch).run();
+        }
+        const fix = new Set(fixIds);
+        for (const o of rows) if (fix.has(o.id)) {
+          o.matchedKind = "elec";
+          o.matchedCertId = "";
+          if (o.status === "linked") o.status = "matched";
+        }
+      }
+    } catch {
+    }
     let doneNames = /* @__PURE__ */ new Set();
     try {
       const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();

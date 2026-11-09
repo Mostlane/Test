@@ -4386,6 +4386,43 @@ these jobs.
     remedial path; (4) the re-issued cert was only detected by its doc date (a no-date upload
     read as 1 Jan) — now a cert with no doc date counts by its upload day. Tests in
     test-concerto.mjs ("Remedials to complete" block).
+  - **💬 Awaiting order tab + "elec order buried as EM" self-heal (9 Nov 2026, Jamie:
+    "all remedial works not yet ordered in a section of their own — click them, copy the
+    quote text, and when the order email arrives it's detected ready to assign as a site
+    audit job").** A THIRD queue tab on five-year-remedials.html (`?view=toquote`) beside
+    remq/certq: **GET /concerto/remedial-queue** now returns a **`toQuote`** bucket (cases
+    at stage12 `remedials_to_quote` / `remedials_quoted` = we've found remedials and the
+    quote is with the client, or ready to send, but NO order yet). Each row shows the
+    remedials + a **📋 Copy quote** button (with an Include-C3 tick) via the page's own
+    `copyQuoteQ()` (reads the queue row's `case.remedialLines`, not the schedule's ROWS).
+    When the client's order email lands, the client-orders intake matches it → the case
+    auto-advances to `orders_received` → it leaves "Awaiting order" and appears in
+    "🔧 Remedials to complete" (→ Create & assign) with no manual step — the detection +
+    assign flow Jamie asked for ALREADY existed; this just gives the pre-order stage its own
+    visible home. HTML-only front-end + the one `toQuote` bucket; no `?v=`/SW bump.
+    - **Root-cause fix — an electrical (R/REM) remedial order could be buried as "EM".**
+      Before the 4-Nov "EM-only auto-link" build, the Concerto email intake hard-tagged an
+      ELECTRICAL-test match as `matched_kind:"em"` and linked it to the completed TEST job
+      (stamping the order value on it). Both surfaces that list orders EXCLUDE "em" — the
+      Client Orders board (`em` without a cert reads as "done") AND the 5-year remedial
+      queue (concerto.js `deriveCase` line ~669 drops `matched_kind:"em"` orders) — so the
+      order was invisible and un-allocatable. Eight live Co-op EICR orders (R32986–R32993,
+      4 Nov) were stuck this way, their finished test jobs polluted with a phantom order
+      value (false costing profit). The inbound is ALREADY correct now (only an EM match
+      with a cert auto-links; an elec match stays `matched`/`elec`). Added a **self-heal in
+      GET /certs/orders**: any straggler (`matched_kind:"em"` + NO `matched_cert_id` +
+      `matched_job_id` → an `elecTest` job) is corrected to `elec` on read, using the jobs
+      already loaded for the board (no extra query, no-op once healed). The 8 + R32814 were
+      also repaired in D1 by hand (elec/matched, test-job order stamps cleared); the two
+      works jobs for **R32987 (Windsor, 0176) + R32986 (Staines, 0394) were created and
+      assigned to Lionel Ponsonby for 10 Nov 2026** (08:00–10:00 / 10:00–12:00) directly in
+      D1, mirroring `createWorksJobFromRemedials` output (single-engineer → no engStatus;
+      refPhotos reference the existing test-job remedial photo keys since the connector
+      can't copy R2 objects). A D1-inserted job gets NO assignment push — the engineer sees
+      it in their list but no phone notification fires. **When hand-creating a works job,
+      use `createOrUpdateJobFromPayload`'s field set (saveJob denormalises helpdesk_ref/
+      description/priority/status/assigned_to/site_code/raised_at/target_at/scheduled_at/
+      created_at/updated_at/closed_at alongside the `data` JSON — populate those columns too).**
   - **"📋 My schedule" tab (29 Sep 2026, Jamie: "a new page in the 5-year remedial
     area — my full schedule this year, current status of each site from
     compliance/remedials, with clear notes + a clear status on each, reflected
