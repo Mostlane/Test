@@ -3385,6 +3385,18 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   (e.g. **The Oaks**) never loaded — it now looks the site up to fill ANY missing field
   (phone/lat/sharepoint), not only when both address AND phone are blank. HTML-only,
   network-first (no `?v=`/SW bump).
+  **Extended to the scheduler + field app (9 Nov 2026):** **sla-scheduler.html** block
+  hover tooltips (`jobInfoLines`, day blocks + week chips) add a "📞 <number>" line —
+  `siteMeta` (already loaded once from `/get-sites`) now also carries each site's `phone`,
+  and the tooltip reads the job's `telephone` else `siteFor(job).phone` (tooltip, not a
+  clickable chip — the blocks are tiny and draggable). **engineer-jobs.html** (field job
+  list) gains a green **📞 call** action on each card (`.act.call`, a `tel:` link) when the
+  job carries a `telephone` — the field list stays lean and does NOT load `/get-sites`, so
+  it shows the job's own number only (the common Concerto case). **engineer-job.html** (the
+  field job page) already showed `job.telephone` as a ☎️ `tel:` link on the Site card; it
+  now ALSO lazily fetches the site's register phone (`ensureSitePhone`, once, only when the
+  job has no `telephone`) via the legacy-host bridge and re-renders — so a site-only phone
+  (The Oaks) shows there too, like job-view. All HTML-only, network-first (no `?v=`/SW bump).
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
   reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT

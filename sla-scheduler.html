@@ -914,6 +914,8 @@ function jobInfoLines(job){
   const siteLine = [num, nm].filter(Boolean).join(" — ") || String(job.site || "").trim();
   const lines = [];
   if(siteLine) lines.push("📍 " + siteLine);
+  const phone = String(job.telephone || "").trim() || ((typeof siteFor === "function" && siteFor(job)) || {}).phone || "";
+  if(phone) lines.push("📞 " + phone);
   if(job.ref) lines.push("Incident " + job.ref);
   const desc = String(job.title || "").trim();
   if(desc) lines.push("", desc.length > 500 ? desc.slice(0, 500) + "…" : desc);
@@ -2866,7 +2868,8 @@ async function loadSiteMeta(){
       siteMeta[String(Number(key))] = {
         pc: String(s.postcode || "").replace(/\*+$/,"").trim(),
         lat: isFinite(lat) ? lat : null,
-        lon: isFinite(lon) ? lon : null
+        lon: isFinite(lon) ? lon : null,
+        phone: String(s.telephone || s.phone || "").trim()
       };
     });
   }catch(e){ /* jobs with their own coords still plot */ }
