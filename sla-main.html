@@ -129,6 +129,10 @@
     tbody tr:hover{background:#f8fafc;}
     .ref{font-family:monospace;font-size:13.5px;background:#f3f4f6;padding:2px 7px;border-radius:6px;display:inline-block;}
     .ref.jobtitle{font-family:inherit;font-weight:600;color:#1d4ed8;background:#eef2ff;cursor:pointer;white-space:normal;}
+    .phone-wrap{white-space:nowrap;}
+    .phone-chip{border:1px solid #d7dee6;background:#fff;border-radius:999px;padding:0 7px;cursor:pointer;font-size:13px;line-height:1.6;vertical-align:middle;}
+    .phone-chip:hover{background:#eef2ff;}
+    .phone-num{margin-left:6px;color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap;}
     /* Description summary — present but not overpowering: muted, small, clamped to ~3 lines. */
     .descsum{color:#475569;font-size:13px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
     .mjob .descsum{margin:2px 0 2px;}
@@ -719,6 +723,7 @@ const subKeyOf = n => String(n||"").toLowerCase().replace(/[^a-z0-9]+/g, "");
 let chipsExpanded = false;
 let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
 let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register
+let sitePhoneByCode = {};       // siteCode (leading-zeros stripped) → saved site phone number, from the sites register
 let selected = new Set();
 let currentUpdateId = null, currentPdfJobId = null;
 let countdownTimerId = null;
@@ -759,6 +764,25 @@ function jobSummary(desc){
   const CAP = 180;
   if (s.length > CAP) s = s.slice(0, CAP).replace(/\s+\S*$/, "").trim() + "…";
   return s;
+}
+// The site phone for a job: the job's own telephone (Concerto intake), else the
+// number saved against the site in the register (sitePhoneByCode, filled by
+// ensureSites). The Oaks etc. only have the number on the site record.
+function phoneForJob(j){
+  let p = String((j && j.telephone) || "").trim();
+  if(!p){
+    const code = String((j && j.siteCode) || "").replace(/^0+/,"");
+    if(code && sitePhoneByCode[code]) p = String(sitePhoneByCode[code]).trim();
+  }
+  return p;
+}
+// A small 📞 shown on a job when a phone number is known; tap it to reveal the
+// number (a tappable tel: link). Nothing shows when no number is saved.
+function phoneTag(j){
+  const p = phoneForJob(j);
+  if(!p) return "";
+  const tel = "tel:" + p.replace(/\s+/g,"");
+  return ` <span class="phone-wrap"><button type="button" class="phone-chip" data-action="phone" title="Show the site phone number" aria-expanded="false">📞</button><a class="phone-num" href="${esc(tel)}" style="display:none">${esc(p)}</a></span>`;
 }
 // Priority 1 (emergency) jobs read bold red on the board — ref, site + P1 label.
 function isP1(j){ return !isProjectJob(j) && /1/.test(String((j&&j.priority)||"")); }
@@ -1220,7 +1244,7 @@ const visitTag = j => (j.visitCount > 1)
     const row = `<tr data-job-id="${esc(j.id)}"${trCls.trim() ? ` class="${trCls.trim()}"` : ""}>
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        <span class="ref viewlink jobtitle" data-action="view">${jobTitle}</span>${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
+        <span class="ref viewlink jobtitle" data-action="view">${jobTitle}</span>${phoneTag(j)}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${estTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
@@ -1245,7 +1269,7 @@ const visitTag = j => (j.visitCount > 1)
         ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}${clientTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap pri">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
-      <div class="mjob-title" data-action="view">${jobTitle}</div>
+      <div class="mjob-title" data-action="view">${jobTitle}${phoneTag(j)}</div>
       ${descFull ? `<div class="descsum" title="${esc(descFull)}">${descSum}</div>` : ""}
       <div class="mjob-meta">
         <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${estTag(j)}
@@ -1432,12 +1456,14 @@ async function ensureSites(){
     // jobs that carry only a site code (email-intake / archive jobs). Key is the
     // code with leading zeros stripped, matching clientBucketOf's normalisation.
     siteClientByCode = {};
+    sitePhoneByCode = {};
     sitesList.forEach(s => {
       const code = String(s.code||"").replace(/^0+/,"");
       // Use the site's CLIENT (retail/els/els_private/cobra/fbc/chapplins/…) —
       // the taxonomy bucket — NOT storeType, which is a physical descriptor
       // ("coffee", "convenience") that doesn't map to a client.
       if(code && s.client) siteClientByCode[code] = s.client;
+      if(code && s.telephone) sitePhoneByCode[code] = s.telephone;
     });
   }catch(e){ sitesList = []; }
 }
@@ -1819,6 +1845,12 @@ function onAction(e){
   const btn = e.target.closest("[data-action]");
   if(!btn) return;
   const a = btn.dataset.action;
+  if(a === "phone"){
+    e.preventDefault(); e.stopPropagation();
+    const num = btn.parentElement && btn.parentElement.querySelector(".phone-num");
+    if(num){ const show = num.style.display === "none" || !num.style.display; num.style.display = show ? "inline" : "none"; btn.setAttribute("aria-expanded", show ? "true" : "false"); }
+    return;
+  }
   if(a === "archive-view"){
     const row = e.target.closest("[data-archref]");
     if(row) location.href = "job-archive.html?q=" + encodeURIComponent(row.dataset.archref);

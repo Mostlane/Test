@@ -1570,13 +1570,16 @@ async function renderSite(){
     address: job.address || "", phone: job.telephone || "",
     lat: job.lat, lon: job.lon, sharepoint: job.sharepointURL || ""
   };
-  if(!info.address && !info.phone){
+  // Look the site up to fill in ANY missing piece — not only when BOTH address and
+  // phone are blank. A Concerto job carries an address but usually no phone, so the
+  // site's saved number (e.g. The Oaks) was never fetched and never showed.
+  if(!info.address || !info.phone || info.lat == null || !info.sharepoint){
     const s = await lookupSite(job.siteCode);
     if(s){
-      info.address = [s.address1 || s.street || "", s.town || "", s.county || "", (s.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(", ");
-      info.phone = s.telephone || s.phone || "";
-      info.lat = s.lat; info.lon = s.lon;
-      info.sharepoint = s.sharepointURL || s.sharepoint || "";
+      if(!info.address) info.address = [s.address1 || s.street || "", s.town || "", s.county || "", (s.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(", ");
+      if(!info.phone) info.phone = s.telephone || s.phone || "";
+      if(info.lat == null){ info.lat = s.lat; info.lon = s.lon; }
+      if(!info.sharepoint) info.sharepoint = s.sharepointURL || s.sharepoint || "";
     }
   }
   const scode = (job.siteCode || "").toString();
