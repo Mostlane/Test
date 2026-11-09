@@ -3339,6 +3339,19 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   instant-paint path** (paint from cache first, fetch after).
 
 ## Board ↔ scheduler hand-offs (9 Sep 2026)
+- **Board order = newest ARRIVAL at the top (9 Nov 2026, Jamie: "a job just came in
+  from Chapplins, why isn't it at the top?").** sla-main.html's `filteredJobs` sorted
+  by `raisedAt` DESC, but the Chapplins email intake stamps `raisedAt` to **09:00 of
+  the "Date Job Entered"** (`emailtemplates.js ukDate` — "the job's raised time is
+  unknown"), so every Chapplins job on a day shares `09:00` and a fresh afternoon one
+  sat BELOW anything raised later that morning — it never floated up. Fix (HTML-only,
+  network-first, no `?v=`/SW bump): the board now sorts by the cached `_rms` = **the
+  LATER of `raisedAt` and `createdAt`** (arrival), so any just-arrived job surfaces at
+  the top whatever its coarse raised date — general, not Chapplins-specific (covers FBC
+  / any date-only intake). `createdAt` is already on every board job (the "created"
+  column). Co-op jobs are unaffected (their Concerto `raisedAt` is a real timestamp ≈
+  arrival). NB this did NOT change the intake's stored `raisedAt` (the "Raised" column
+  still shows the client's entered date) — only the sort key.
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
   reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT
