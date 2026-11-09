@@ -872,7 +872,13 @@ function normaliseJob(j){
     ref: j.helpdeskRef || "",
     title: j.description || ("Job " + j.id),
     site: j.siteName || j.siteCode || "",
+    siteName: j.siteName || "",
     siteCode: j.siteCode || "",
+    // Latest few office/engineer notes (job.events type="note"), newest first,
+    // so they can be read on hover without opening the job.
+    notes: (Array.isArray(j.events) ? j.events : [])
+      .filter(e => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined")
+      .map(e => e.note.trim()).slice(-4).reverse(),
     postcode: (j.postcode || "").replace(/\*+$/,"").trim(),
     address: [j.address, j.postcode].filter(Boolean).join(", "),
     priority: j.priority || "",
@@ -899,6 +905,23 @@ function normaliseJob(j){
     subcontract: j.subcontract || null,
     releaseView: j.releaseView || null
   };
+}
+// The core facts shown on a block's hover tooltip so the office can read a job
+// without opening it: site number + name, incident number, description, notes.
+function jobInfoLines(job){
+  const num = String(job.siteCode || "").trim();
+  const nm = String(job.siteName || "").trim();
+  const siteLine = [num, nm].filter(Boolean).join(" — ") || String(job.site || "").trim();
+  const lines = [];
+  if(siteLine) lines.push("📍 " + siteLine);
+  if(job.ref) lines.push("Incident " + job.ref);
+  const desc = String(job.title || "").trim();
+  if(desc) lines.push("", desc.length > 500 ? desc.slice(0, 500) + "…" : desc);
+  if(job.notes && job.notes.length){
+    lines.push("", "📝 Notes:");
+    job.notes.forEach(n => lines.push("• " + (n.length > 160 ? n.slice(0, 160) + "…" : n)));
+  }
+  return lines;
 }
 function hiddenFromEng(job){
   const rv = job && job.releaseView; if(!rv) return false;
@@ -1246,15 +1269,19 @@ function renderDayView(container){
       el.querySelector(".day-job-ref").textContent = (hid ? "🙈 " : "") + (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "") + (retClk ? " 🔦" : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
-      el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
-                 (ghost ? "Closed — kept here faintly so you can see what " + engineer.name + " had on  " : "") +
-                 (shifted ? "Scheduled " + schedLabel : timeLabel) + "  " +
-                 (job.ref ? job.ref + "  " : "") + job.title +
-                 (job.site ? "  ·  " + job.site : "") +
-                 (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "") +
-                 (holD ? "  ·  ⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day" : "") +
-                 (hid ? "  ·  🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "") : "") +
-                 (retClk ? "  ·  🔦 Return for the 3-hour light check ~" + retClk : "");
+      // Hover tooltip: a compact status/time line, then the facts the office wants
+      // to read without opening the job (site no.+name, incident, description, notes).
+      const ctxBits = [];
+      if(done) ctxBits.push("✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : ""));
+      else if(ghost) ctxBits.push("Closed (kept here as history)");
+      ctxBits.push(shifted ? "Scheduled " + schedLabel + " → worked " + timeLabel : timeLabel);
+      if(job.priority) ctxBits.push(job.priority);
+      if(job.assignedEngineers.length > 1) ctxBits.push(job.assignedEngineers.length + " engineers");
+      const extra = [];
+      if(holD) extra.push("⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day");
+      if(hid) extra.push("🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : ""));
+      if(retClk) extra.push("🔦 Return for the 3-hour light check ~" + retClk);
+      el.title = [ctxBits.join("  ·  "), ...jobInfoLines(job), ...(extra.length ? ["", ...extra] : [])].join("\n");
 
       // Completed + closed jobs are locked (not draggable) — they still open on click.
       if(!done && !ghost) attachPointerDrag(el, job, false);
@@ -1352,8 +1379,11 @@ function renderWeekView(container){
           chip.style.borderColor = colour;
           const hid = hiddenFromEng(job);
           chip.textContent = (hid ? "🙈 " : "") + (hol ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
-          if(hol) chip.title = "⚠ " + engineer.name + " is on " + (hol.half ? hol.half + " leave" : "holiday") + " this day";
-          else if(hid) chip.title = "🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "");
+          const wkExtra = [];
+          if(hol) wkExtra.push("⚠ " + engineer.name + " is on " + (hol.half ? hol.half + " leave" : "holiday") + " this day");
+          if(hid) wkExtra.push("🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : ""));
+          chip.title = [(done ? "✓ Complete" : ghost ? "Closed (history)" : job.status) + (job.priority ? "  ·  " + job.priority : ""),
+                        ...jobInfoLines(job), ...(wkExtra.length ? ["", ...wkExtra] : [])].join("\n");
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });

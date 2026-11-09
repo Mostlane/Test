@@ -709,6 +709,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   auto-day / fill-in / backfill / nearby paths (every one of those already filters
   `["Closed Jobs","Invoiced"]` by status, so keeping them in `jobs` is safe) — they
   are visible history only. HTML-only, network-first (no `?v=`/SW bump).
+  **Rich hover tooltip on EVERY scheduler block (9 Nov 2026, Jamie: "I don't want
+  to open the job every time"):** day blocks + week chips now hover-show the facts —
+  `jobInfoLines(job)` builds 📍 site number — name · Incident <ref> · the full
+  description (capped 500) · 📝 latest notes (up to 4, newest first, each capped
+  160), led by a compact status/time/priority line (and holiday/🙈/🔦 extras).
+  normaliseJob now carries `siteName` + `notes` (from `job.events` type="note",
+  which GET /sla/jobs sends in full via decorateJobWithLiveSla's `{...job}` spread).
+  Native `title` attribute (multi-line via \n). HTML-only.
   **Overlapping jobs STACK in the day view (Aug 2026):** overlapping blocks used
   to sit on top of each other (top:6px each — hard to tap the right one). Day view
   now packs an engineer's jobs into **sub-lanes** (greedy interval packing sorted
