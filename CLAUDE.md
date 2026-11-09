@@ -2696,7 +2696,35 @@ snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 programmes.js, returned by /prog/one) into **`data.holidays`** — so issued
 revisions keep the dates they were planned with and the PUBLIC client page needs
 no extra endpoint. End dates skip weekends AND bank holidays (Wknd ticked = works
-through both); BH columns are amber-shaded and labelled "BH". **Concurrent-edit
+through both); BH columns are amber-shaded and labelled "BH".
+**Blocked-out dates — shutdowns (9 Nov 2026, Jamie: "block out dates such as a
+Christmas shutdown, the date bar shows text like 'Xmas Shutdown'; tasks move
+around it by default, with a toggle to let work carry on").** `data.blockouts =
+[{id,name,start,end,work}]` — named date ranges. **By DEFAULT (work falsy) a
+block's days count as non-working, EXACTLY like a bank holiday** — end dates push
+past it and bars split around it (`blockSkipSet` merged into `nonWork`); a task's
+**Wknd flag works through weekends, BH AND blocks**. **Per-block `work:true`** is
+the "turn it off" lever Jamie asked for — the range becomes a visual marker only
+and every task runs straight through it. Rendered in all three outputs: the
+on-screen gantt (`programme-gantt.js?v=9`) gets a THIRD header "band" row (left
+cols `rowspan` 3, table class `mlp-hasband` bumps the date/dow sticky `top`) that
+labels each range across its own columns + purple column/row shading
+(`normBlockouts`/`blockAt`); the **PDF** (`lib/progpdf.js`) shades the columns
+purple, prints the range label on the month tier (suppressing the month name on
+those days) + a "Blocked out" legend key; the **Excel** (`programme-export.js?v=4`)
+shades the header columns (new `blockStyle` fill, appended AFTER the contractor
+fills/xfs so their `7+i` indices don't shift), tags the DOW row "BLK", and writes
+a "Blocked out: <name> (dd/mm–dd/mm)[, work allowed]; …" summary row (still 0
+formulas, openpyxl-validated). Editor UI: a "Blocked-out dates" section on
+**programme-edit.html** (name · start → end · "allow work during this time" tick ·
+remove · ＋ Add), autosaving via queueSave + drawGantt; `renderBlockouts()` runs
+in dataToMeta/undoEdit/askAiEdit. Blocks ride the `data` JSON (no schema/worker-
+route change, no SW bump — the two builder pages are HTML/network-first and the
+gantt/export `?v=` were bumped 8→9 / 3→4 together). `migrate` defensively seeds
+`data.blockouts=[]`. The shared skip logic is verified (Xmas-shutdown case: a
+10-working-day task from 21 Dec ends 13 Jan with the block, 6 Jan with work:true,
+30 Dec with Wknd). AI draft/edit + diff are untouched (blockouts pass through).
+**Concurrent-edit
 protection:** job_programmes gained `updated_by` (self-migrating); every
 /prog/save carries **`baseVersion`** (the updated_at the builder last saw) and a
 mismatch returns **409 {conflict, updatedAt, updatedBy}** → the builder pauses

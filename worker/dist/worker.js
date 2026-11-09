@@ -49765,16 +49765,46 @@ function hex2rgb(hex) {
   const n = parseInt(m[1], 16);
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
 }
-var nonWork = (d, hs) => isWeekend(d) || hs.has(ymd(d));
-function endOf(t, hs) {
+var nonWork = (d, hs, bs) => isWeekend(d) || hs.has(ymd(d)) || bs && bs.has(ymd(d));
+function normBlockouts(data) {
+  const out = [];
+  for (const b of data && data.blockouts || []) {
+    if (!b) continue;
+    const a = parse(b.start), z = parse(b.end || b.start);
+    if (!a || !z) continue;
+    const s = a <= z ? a : z, e = a <= z ? z : a;
+    out.push({ name: String(b.name || "").slice(0, 60), work: !!b.work, s, e });
+  }
+  return out;
+}
+function blockSkipSet(blocks) {
+  const m = /* @__PURE__ */ new Set();
+  for (const b of blocks) {
+    if (b.work) continue;
+    let d = b.s, g = 0;
+    while (d <= b.e && g++ < 1200) {
+      m.add(ymd(d));
+      d = addDays4(d, 1);
+    }
+  }
+  return m;
+}
+var blockAt = (d, blocks) => {
+  const y = ymd(d);
+  for (const b of blocks) {
+    if (ymd(b.s) <= y && y <= ymd(b.e)) return b;
+  }
+  return null;
+};
+function endOf(t, hs, bs) {
   const s = parse(t.start);
   if (!s) return null;
   const days = Math.min(730, Math.max(1, Number(t.days) || 1));
   if (t.wknd) return addDays4(s, days - 1);
   let d = s, left = days - 1, guard = 0;
-  while (left > 0 && guard++ < 4e3) {
+  while (left > 0 && guard++ < 4600) {
     d = addDays4(d, 1);
-    if (!nonWork(d, hs)) left--;
+    if (!nonWork(d, hs, bs)) left--;
   }
   return d;
 }
@@ -49822,10 +49852,12 @@ function buildProgrammePdf(data, meta = {}) {
   const byC = {};
   for (const c of contractors) byC[c.id] = c;
   const hs = new Set((data.holidays || []).map(String));
+  const blocks = normBlockouts(data);
+  const bs = blockSkipSet(blocks);
   const tasks = (Array.isArray(data.tasks) ? data.tasks : []).map((t) => ({
     ...t,
     _start: parse(t.start),
-    _end: endOf(t, hs),
+    _end: endOf(t, hs, bs),
     _c: byC[t.contractor] || null
   }));
   for (const t of tasks) {
@@ -49949,6 +49981,18 @@ function buildProgrammePdf(data, meta = {}) {
         doc.text(lx + 11, ly, "Extra works", { size: 8.5, color: [0.55, 0.28, 0.05] });
         lx += w;
       }
+      if (blocks.length) {
+        const w = 11 + textWidth("Blocked out", 8.5) + 14;
+        const right = line2 === 0 ? legendRightL1 : PW2 - M8;
+        if (lx + w > right && line2 === 0) {
+          line2 = 1;
+          lx = M8;
+        }
+        const ly = y + line2 * LEG_LINE_H;
+        doc.rect(lx, ly - 7, 8, 8, { fill: [0.86, 0.83, 0.96] });
+        doc.text(lx + 11, ly, "Blocked out", { size: 8.5, color: [0.42, 0.25, 0.6] });
+        lx += w;
+      }
       if (dropped) doc.text(lx, y + line2 * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M8 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
@@ -49965,10 +50009,12 @@ function buildProgrammePdf(data, meta = {}) {
         const d = addDays4(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
+        const bk = !we && !bh ? blockAt(d, blocks) : null;
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
+        if (bk) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: bk.work ? [0.957, 0.969, 0.98] : [0.929, 0.914, 0.98] });
         const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1;
-        if (i === 0 || first2) {
+        if ((i === 0 || first2) && !bk) {
           const full = MONTHS4[d.getUTCMonth()] + " " + d.getUTCFullYear();
           const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS4[d.getUTCMonth()];
           if (x + 1 >= lastMonR + 3 && x + 1 + textWidth(lbl, 6) <= rightEdge) {
@@ -49984,6 +50030,22 @@ function buildProgrammePdf(data, meta = {}) {
             doc.text(x + 1, gridTop + 17.5, num5, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
         }
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
+      }
+      {
+        let bi = 0;
+        while (bi < win.days) {
+          const b = blockAt(addDays4(winStart, bi), blocks);
+          if (!b) {
+            bi++;
+            continue;
+          }
+          let bj = bi;
+          while (bj + 1 < win.days && blockAt(addDays4(winStart, bj + 1), blocks) === b) bj++;
+          const x0 = GRID_X + bi * dayW, spanW = (bj - bi + 1) * dayW;
+          const lbl = fitText(b.name || (b.work ? "Work allowed" : "Blocked out"), spanW - 2, 5.6);
+          doc.text(x0 + 1, gridTop + 8, lbl, { size: 5.6, bold: true, color: b.work ? [0.4, 0.45, 0.52] : [0.42, 0.25, 0.6] });
+          bi = bj + 1;
+        }
       }
       doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
       doc.line(M8, gridTop, M8 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
@@ -50004,7 +50066,7 @@ function buildProgrammePdf(data, meta = {}) {
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays4(d, 1)) {
-            if (!t.wknd && nonWork(d, hs)) continue;
+            if (!t.wknd && nonWork(d, hs, bs)) continue;
             const off = Math.round((d - winStart) / DAY);
             if (off >= 0 && off < win.days) marked.push(off);
           }
