@@ -28,7 +28,7 @@
       font-size:16px;
       line-height:1.45;
     }
-    .shell{max-width:1280px;margin:20px auto 32px;padding:0 14px;}
+    .shell{max-width:1380px;margin:20px auto 32px;padding:0 14px;}
     .card{
       background:var(--panel);
       border-radius:14px;
@@ -128,6 +128,10 @@
     .sitename{font-weight:600;color:#0f172a;}
     tbody tr:hover{background:#f8fafc;}
     .ref{font-family:monospace;font-size:13.5px;background:#f3f4f6;padding:2px 7px;border-radius:6px;display:inline-block;}
+    .ref.jobtitle{font-family:inherit;font-weight:600;color:#1d4ed8;background:#eef2ff;cursor:pointer;white-space:normal;}
+    /* Description summary — present but not overpowering: muted, small, clamped to ~3 lines. */
+    .descsum{color:#475569;font-size:13px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+    .mjob .descsum{margin:2px 0 2px;}
     .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;font-size:16px;}
     .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex:0 0 auto;}
     .statusline{display:flex;align-items:center;font-size:14px;color:#4b5563;margin-top:4px;}
@@ -421,12 +425,12 @@
         <thead>
         <tr>
           <th style="width:26px;"><input type="checkbox" id="checkAll"></th>
-          <th>Job</th>
-          <th>Priority</th>
-          <th>Site</th>
-          <th>Due date</th>
-          <th>Scheduled</th>
-          <th>Assigned to</th>
+          <th style="width:280px;">Job</th>
+          <th style="width:60px;">Priority</th>
+          <th>Description</th>
+          <th style="width:104px;">Due date</th>
+          <th style="width:126px;">Scheduled</th>
+          <th style="width:150px;">Assigned to</th>
           <th style="width:150px;"></th>
         </tr>
         </thead>
@@ -739,6 +743,23 @@ function fmtSched(job){
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
+// A short, readable summary of a job's description for the board. Strips a
+// leading greeting ("Good morning,"), collapses whitespace/newlines, drops the
+// auto EM/PAT day-plan + office-only "🚨 change status…" lines, and caps length
+// (the full text stays in the cell's title=). Deliberately plain — not overpowering.
+function jobSummary(desc){
+  let s = String(desc || "").replace(/\r/g, "");
+  // drop auto-appended plan/instruction blocks + office-only lines
+  s = s.replace(/^\s*(⚡|🔧)[^\n]*$/gim, "");
+  s = s.replace(/^\s*🚨[^\n]*$/gim, "");
+  s = s.replace(/^\s*↩[^\n]*$/gim, "");
+  s = s.replace(/\s*[-–—]{2,}\s*Original job\b[\s\S]*$/i, "");
+  s = s.replace(/^\s*(good\s+(morning|afternoon|evening)|hi|hello|dear)[,!.\s].*$/im, "");
+  s = s.replace(/\s+/g, " ").trim();
+  const CAP = 180;
+  if (s.length > CAP) s = s.slice(0, CAP).replace(/\s+\S*$/, "").trim() + "…";
+  return s;
+}
 // Priority 1 (emergency) jobs read bold red on the board — ref, site + P1 label.
 function isP1(j){ return !isProjectJob(j) && /1/.test(String((j&&j.priority)||"")); }
 // Projects carry no priority level and no SLA — blank both on the board.
@@ -1182,19 +1203,28 @@ const visitTag = j => (j.visitCount > 1)
     const sla = slaBadge(j);
     const site = esc(j.siteName || j.siteCode || "");
     const addr = esc([j.address, j.postcode].filter(Boolean).join(", "));
+    // Job title = "<incident/job number> - <site number> - <site name>" (blanks
+    // dropped). The number is a numeric helpdesk ref, else pulled off the id
+    // (Co-op "00031330"; Chapplins "CHAP-260730176" → 260730176); a project /
+    // manual job with no number just shows "<site number> - <site name>".
+    let jobNum = "";
+    if (/^\d/.test(rawRef)) jobNum = (rawRef.match(/^[\d/]+/) || [""])[0];
+    else if (/^CHAP-\d/i.test(idStr)) jobNum = idStr.replace(/^CHAP-/i, "");
+    else if (/^\d/.test(idStr) && !UUID.test(idStr)) jobNum = (idStr.match(/^\d+/) || [""])[0];
+    const nameRaw = (window.mlJobName && window.mlJobName(j)) || j.siteName || j.siteCode || "";
+    const jobTitle = esc([jobNum, j.siteCode, nameRaw].map(x => String(x || "").trim()).filter(Boolean).join(" - ")) || "Open";
+    const descFull = String(j.description || "").trim();
+    const descSum = esc(jobSummary(descFull));
 
     const trCls = (isP1(j) ? "p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
     const row = `<tr data-job-id="${esc(j.id)}"${trCls.trim() ? ` class="${trCls.trim()}"` : ""}>
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
+        <span class="ref viewlink jobtitle" data-action="view">${jobTitle}</span>${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${estTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
-      <td>
-        <div class="sitename">${name || site}</div>
-        <div class="small muted">${addr}</div>
-      </td>
+      <td>${descFull ? `<div class="descsum" title="${esc(descFull)}">${descSum}</div>` : "<span class='muted'>—</span>"}</td>
       <td class="nowrap small">
         ${isProjectJob(j) ? "<span class='muted'>—</span>" : fmtShort(parseDate(j.targetAt))}
         ${sla.text ? `<div><span class="${sla.cls}">${sla.text}</span></div>` : ""}
@@ -1215,8 +1245,8 @@ const visitTag = j => (j.visitCount > 1)
         ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}${clientTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap pri">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
-      <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
-      ${addr ? `<div class="small muted">${addr}</div>` : ""}
+      <div class="mjob-title" data-action="view">${jobTitle}</div>
+      ${descFull ? `<div class="descsum" title="${esc(descFull)}">${descSum}</div>` : ""}
       <div class="mjob-meta">
         <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${estTag(j)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}

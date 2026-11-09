@@ -3352,6 +3352,20 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   column). Co-op jobs are unaffected (their Concerto `raisedAt` is a real timestamp ≈
   arrival). NB this did NOT change the intake's stored `raisedAt` (the "Raised" column
   still shows the client's entered date) — only the sort key.
+- **Board table columns (9 Nov 2026, Jamie: "ensure I see everything I need").**
+  sla-main.html's table is now **Job · Priority · Description · Due date · Scheduled ·
+  Assigned to · (actions)** — the old **Site** column was REPLACED by the job
+  **Description** (Jamie: "Site isn't really needed, this can be the description"). The
+  **Job** cell reads `[incident/job number] - [site number] - [site name]` (blanks
+  dropped) via `jobTitle` in `liveParts`: the number is a leading-numeric `helpdeskRef`,
+  else pulled off the id (`CHAP-<n>` → `<n>`; a leading-digit non-UUID id); a project /
+  manual job (UUID id, P-number) shows just `<site code> - <site name>` — never UUID
+  digits. The Description cell uses **`jobSummary(desc)`** (strips a leading greeting +
+  the auto EM/PAT ⚡/🔧 plan + office-only 🚨/↩/"— Original job" lines, collapses
+  whitespace, caps ~180 chars with "…"; full text in the cell `title=`) rendered in a
+  muted 3-line-clamped **`.descsum`** so it's present "but not overpowering". The mobile
+  card mirrors it (composed title + summary, address line dropped). `.shell` widened
+  1280→1380px to fit the description. HTML-only, network-first (no `?v=`/SW bump).
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
   reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT
