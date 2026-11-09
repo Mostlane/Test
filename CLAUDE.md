@@ -699,6 +699,16 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the original scheduled slot and the hover shows "Scheduled HH:MM (worked HH:MM)".
   Falls back to the scheduled slot when there are no actual times (office-marked
   complete) or the work wasn't on the shown day. Week view just greens the chip.
+  **Closed jobs are now GHOSTED on the board, not dropped (9 Nov 2026, Jamie):** a
+  "Closed Jobs" job used to vanish from the scheduler, losing the record of what
+  each person had on. `loadJobs` now keeps Closed Jobs (still drops Invoiced +
+  Cancelled); `isGhostStatus(s)` = "Closed Jobs"; day + week render them with a
+  `.ghost` class (dashed, grayscale, ~40% opacity, hover lifts to .9), positioned
+  at their actual worked window like a done job, and LOCKED (not draggable).
+  They're excluded from the "Needs scheduling" tray and never enter the optimiser /
+  auto-day / fill-in / backfill / nearby paths (every one of those already filters
+  `["Closed Jobs","Invoiced"]` by status, so keeping them in `jobs` is safe) — they
+  are visible history only. HTML-only, network-first (no `?v=`/SW bump).
   **Overlapping jobs STACK in the day view (Aug 2026):** overlapping blocks used
   to sit on top of each other (top:6px each — hard to tap the right one). Day view
   now packs an engineer's jobs into **sub-lanes** (greedy interval packing sorted
