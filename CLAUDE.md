@@ -3373,6 +3373,18 @@ hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/
   site name — deduped so a code equal to the number or the name never repeats (a
   project reads "P0710 - Goodwood Farm VPU"). The Reference/Site fields below are
   unchanged.
+  **📞 Site phone, board + job card (9 Nov 2026, Jamie).** A small **📞** shows beside
+  the job title on **sla-main.html** (table row + mobile card) and beside the address on
+  **job-view.html** Site card whenever a phone number is known for the site; tapping it
+  reveals the number as a tappable `tel:` link (`.phone-chip`/`.phone-num`, toggled by a
+  `data-action="phone"` handler on the board). **Phone source:** the job's own `telephone`
+  (Concerto intake) first, else the number saved against the site in the register. On the
+  board that's `sitePhoneByCode` (built in `ensureSites` from `/get-sites`, which already
+  loads on board init + re-renders). On job-view the Site-card lookup bug was fixed: it
+  skipped the site lookup whenever the job already had an address, so a site-only phone
+  (e.g. **The Oaks**) never loaded — it now looks the site up to fill ANY missing field
+  (phone/lat/sharepoint), not only when both address AND phone are blank. HTML-only,
+  network-first (no `?v=`/SW bump).
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
   reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT
