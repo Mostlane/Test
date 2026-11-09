@@ -343,19 +343,30 @@ export function buildProgrammePdf(data, meta = {}) {
         // Vertical gridline: every day when roomy, else Mondays / month starts.
         if (dayW >= 15 || isMon || first) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
-      // Blocked-out range labels — one per contiguous run across its own columns.
+      // Blocked-out range labels — one per contiguous run, written across its
+      // own columns. A short range may spill its label into the free header
+      // space to its right so the text stays readable, but never past the next
+      // block or the next month name (both drawn on this same tier).
       {
+        const runs = [];
         let bi = 0;
         while (bi < win.days) {
           const b = blockAt(addDays(winStart, bi), blocks);
           if (!b) { bi++; continue; }
           let bj = bi;
           while (bj + 1 < win.days && blockAt(addDays(winStart, bj + 1), blocks) === b) bj++;
-          const x0 = GRID_X + bi * dayW, spanW = (bj - bi + 1) * dayW;
-          const lbl = fitText(b.name || (b.work ? "Work allowed" : "Blocked out"), spanW - 2, 5.6);
-          doc.text(x0 + 1, gridTop + 8, lbl, { size: 5.6, bold: true, color: b.work ? [0.4, 0.45, 0.52] : [0.42, 0.25, 0.6] });
+          runs.push({ b, from: bi, to: bj });
           bi = bj + 1;
         }
+        runs.forEach((run, ri) => {
+          const x0 = GRID_X + run.from * dayW;
+          // cap at the next block's first column, else the next month start, else grid edge
+          let capCol = ri + 1 < runs.length ? runs[ri + 1].from : win.days;
+          for (let k = run.to + 1; k < capCol; k++) { if (addDays(winStart, k).getUTCDate() === 1) { capCol = k; break; } }
+          const availW = Math.max((run.to - run.from + 1) * dayW, (capCol - run.from) * dayW) - 2;
+          const lbl = fitText(run.b.name || (run.b.work ? "Work allowed" : "Blocked out"), availW, 5.6);
+          doc.text(x0 + 1, gridTop + 8, lbl, { size: 5.6, bold: true, color: run.b.work ? [0.4, 0.45, 0.52] : [0.42, 0.25, 0.6] });
+        });
       }
       // Faint divider between the month tier and the day-number tier.
       doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
