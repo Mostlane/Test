@@ -29409,11 +29409,16 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : job.priority || "Job";
   const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}${incident ? ` [${incident}]` : ""}`;
   const code = String(job.siteCode || "").trim();
-  const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
-  let addr = String(job.address || job.siteName || "").trim();
+  const codePart = /^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code;
   const addrPrefix = opts.addrPrefix ? String(opts.addrPrefix).trim() : "";
+  const norm2 = (s) => String(s).toLowerCase().replace(/[\s'’,.]/g, "");
+  const siteNameRaw = String(job.siteName || "").trim();
+  let siteNameShown = siteNameRaw;
+  if (addrPrefix && !norm2(siteNameRaw).includes(norm2(addrPrefix)))
+    siteNameShown = siteNameRaw ? addrPrefix + " \u2014 " + siteNameRaw : addrPrefix;
+  const site = [codePart, siteNameShown].filter(Boolean).join(" ");
+  let addr = String(job.address || job.siteName || "").trim();
   if (addrPrefix) {
-    const norm2 = (s) => String(s).toLowerCase().replace(/[\s'’,.]/g, "");
     if (!norm2(addr).startsWith(norm2(addrPrefix))) addr = addr ? addrPrefix + ", " + addr : addrPrefix;
   }
   if (pc && !addr.toUpperCase().replace(/\s/g, "").includes(pc.replace(/\s/g, ""))) addr = addr ? addr + ", " + pc : pc;
