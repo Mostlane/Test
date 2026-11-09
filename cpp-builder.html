@@ -206,13 +206,20 @@
     font-family:var(--head);font-size:9.5px;letter-spacing:.04em;color:var(--muted);
     border-top:1px solid var(--line);padding-top:6px;display:flex;align-items:center;gap:7px}
   .doc .footer-note img{max-height:18px}
-  /* The print running-header/footer table: BLOCK on screen so the builder and the
-     Preview window look unchanged (each .page is its own A4 card with its own
-     in-flow header/footer). It becomes a real <table> only in @media print, where
-     thead/tfoot repeat on every sheet AND reserve their height, so content can
-     never overlap them (position:fixed could not reserve space). */
-  .pbody,.pbody>tbody,.pbody>tbody>tr,.pbody>tbody>tr>td{display:block}
-  .pbody>thead,.pbody>tfoot{display:none}
+  /* The print running-header/footer table: a pure layout scaffold. On screen it
+     collapses to blocks so the builder + Preview window look unchanged (each .page
+     is its own A4 card with its own in-flow header/footer); it becomes a real
+     <table> only in @media print, where thead/tfoot repeat on every sheet AND
+     reserve their height so content never overlaps (position:fixed could not).
+     Strip the .doc table/cell styling (the 1px #c4cedb cell BORDERS, the table
+     margin + 10.8px font) that is meant for real content tables — otherwise stray
+     light-blue lines appear around the running header/footer and the page block.
+     The intended header underline + footer rule live on the .runhead/.footer-note
+     divs, not the cells, so they are untouched. */
+  .doc table.pbody{display:block;width:100%;margin:0;border:0;font-size:inherit}
+  .doc table.pbody>tbody,.doc table.pbody>tbody>tr,.doc table.pbody>tbody>tr>td{display:block}
+  .doc table.pbody>thead,.doc table.pbody>tfoot{display:none}
+  .doc table.pbody>thead>tr>td,.doc table.pbody>tfoot>tr>td,.doc table.pbody>tbody>tr>td{border:0;background:none;padding:0}
   .doc .appendix-tab{font-family:var(--head);font-size:46px;font-weight:700;color:#b4c6d8;
     text-align:right;margin:0;line-height:1;letter-spacing:.04em}
   .doc .appendix-tab b{color:var(--brand)}
@@ -274,17 +281,19 @@
     .page.cover{box-shadow:none;margin:0;width:auto;min-height:297mm;padding:0;
       page-break-after:always;display:flex;flex-direction:column}
     /* The running-header/footer table: thead repeats at the top of every sheet,
-       tfoot at the bottom, and both their heights are reserved automatically. */
-    .pbody{display:table;width:100%;border-collapse:collapse}
-    .pbody>thead{display:table-header-group}
-    .pbody>tfoot{display:table-footer-group}
-    .pbody>tbody{display:table-row-group}
-    .pbody>tbody>tr{display:table-row}
-    .pbody>tbody>tr>td{display:table-cell;padding:0 14mm}   /* content horizontal inset */
-    .pbody>thead>tr>td{padding:7mm 14mm 0}                  /* top (header) band */
-    .pbody>tfoot>tr>td{padding:0 14mm 6mm}                  /* bottom (footer) band */
-    .pbody .runhead{margin-bottom:8px}
-    .pbody .footer-note{margin-top:6px}
+       tfoot at the bottom, and both their heights are reserved automatically.
+       (.doc table.pbody prefix so these beat the base reset above — same
+       specificity, later source — re-adding the cell paddings in print only.) */
+    .doc table.pbody{display:table;width:100%;border-collapse:collapse}
+    .doc table.pbody>thead{display:table-header-group}
+    .doc table.pbody>tfoot{display:table-footer-group}
+    .doc table.pbody>tbody{display:table-row-group}
+    .doc table.pbody>tbody>tr{display:table-row}
+    .doc table.pbody>tbody>tr>td{display:table-cell;padding:0 14mm}   /* content horizontal inset */
+    .doc table.pbody>thead>tr>td{display:table-cell;padding:7mm 14mm 0}  /* top (header) band */
+    .doc table.pbody>tfoot>tr>td{display:table-cell;padding:0 14mm 6mm}  /* bottom (footer) band */
+    .doc table.pbody .runhead{margin-bottom:8px}
+    .doc table.pbody .footer-note{margin-top:6px}
     /* Content pages flow; each section starts a new sheet; their own in-flow
        header/footer are hidden (the table supplies the one repeating pair). */
     .page{box-shadow:none;margin:0;width:auto;min-height:0;display:block;padding:0}
