@@ -206,8 +206,13 @@
     font-family:var(--head);font-size:9.5px;letter-spacing:.04em;color:var(--muted);
     border-top:1px solid var(--line);padding-top:6px;display:flex;align-items:center;gap:7px}
   .doc .footer-note img{max-height:18px}
-  /* Fixed running header/footer — PRINT ONLY (see @media print). */
-  .run-head-fixed,.run-foot-fixed{display:none}
+  /* The print running-header/footer table: BLOCK on screen so the builder and the
+     Preview window look unchanged (each .page is its own A4 card with its own
+     in-flow header/footer). It becomes a real <table> only in @media print, where
+     thead/tfoot repeat on every sheet AND reserve their height, so content can
+     never overlap them (position:fixed could not reserve space). */
+  .pbody,.pbody>tbody,.pbody>tbody>tr,.pbody>tbody>tr>td{display:block}
+  .pbody>thead,.pbody>tfoot{display:none}
   .doc .appendix-tab{font-family:var(--head);font-size:46px;font-weight:700;color:#b4c6d8;
     text-align:right;margin:0;line-height:1;letter-spacing:.04em}
   .doc .appendix-tab b{color:var(--brand)}
@@ -242,16 +247,19 @@
   .modal .rinfo{font-family:var(--head);color:var(--brand-dark);font-weight:600}
 
   /* ---------- Print ----------
-     Reserve the running header/footer band with @page MARGINS (they apply to
-     EVERY sheet) — NOT with padding on .page (that only pads the first/last
-     sheet, so inner sheets of a long section ran under the fixed header/footer
-     and got cut off). The cover keeps margin:0 (full-bleed) via a named page. */
-  @page{size:A4;margin:24mm 14mm 15mm}
-  @page cover{margin:0}
+     The running header + footer repeat on EVERY sheet via a <table> whose
+     thead/tfoot are table-header-group / table-footer-group: the browser repeats
+     them on each printed page AND reserves their height, so content can never
+     overlap them. (position:fixed could NOT reserve space — content ran up behind
+     the header; and @page MARGINS depend on the print dialog's margin dropdown —
+     both of those earlier approaches failed.) @page margin:0 keeps the result
+     independent of the print dialog; the horizontal inset and the header/footer
+     bands come from the table cells' own padding. The cover is a full-bleed sheet
+     OUTSIDE the table, so page 1 carries no running header/footer. */
+  @page{size:A4;margin:0}
   @media print{
     /* Force the navy/blue bands to actually print — browsers drop background
-       colours when SAVING to PDF unless this is set (the on-screen Preview showed
-       them fine, the saved file lost them). Inherited, so it covers every block. */
+       colours when SAVING to PDF unless this is set. Inherited → covers every block. */
     html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fff}
     /* The portal sidebar + chrome (injected by portal-config.js) must not print —
        only the document. Also drop the sidebar's left padding + the watermark. */
@@ -262,27 +270,27 @@
     #mlIntakeWarn,#mlToastHost,#mlPalOv{display:none !important}
     .layout{display:block}
     .doc-pane{height:auto;overflow:visible;padding:0;background:#fff}
-    /* Content pages FLOW: no forced full-page height, no flex-pinned footer, and
-       NO per-page padding (the @page top/bottom margin reserves the header/footer
-       band on EVERY sheet — padding here would only pad the first + last sheet,
-       which is what ran inner sheets under the fixed bands and cut text off). */
-    .page{
-      box-shadow:none;margin:0;width:auto;min-height:0;display:block;
-      padding:0;
-      page-break-after:always;
-    }
-    .page:last-child{page-break-after:auto}
-    /* The in-flow per-page header/footer are replaced by the single fixed pair,
-       which sits in the @page margin band (top:0/bottom:0 = the sheet edge). */
+    /* Cover = full-bleed sheet, on its own, outside the running-header table. */
+    .page.cover{box-shadow:none;margin:0;width:auto;min-height:297mm;padding:0;
+      page-break-after:always;display:flex;flex-direction:column}
+    /* The running-header/footer table: thead repeats at the top of every sheet,
+       tfoot at the bottom, and both their heights are reserved automatically. */
+    .pbody{display:table;width:100%;border-collapse:collapse}
+    .pbody>thead{display:table-header-group}
+    .pbody>tfoot{display:table-footer-group}
+    .pbody>tbody{display:table-row-group}
+    .pbody>tbody>tr{display:table-row}
+    .pbody>tbody>tr>td{display:table-cell;padding:0 14mm}   /* content horizontal inset */
+    .pbody>thead>tr>td{padding:7mm 14mm 0}                  /* top (header) band */
+    .pbody>tfoot>tr>td{padding:0 14mm 6mm}                  /* bottom (footer) band */
+    .pbody .runhead{margin-bottom:8px}
+    .pbody .footer-note{margin-top:6px}
+    /* Content pages flow; each section starts a new sheet; their own in-flow
+       header/footer are hidden (the table supplies the one repeating pair). */
+    .page{box-shadow:none;margin:0;width:auto;min-height:0;display:block;padding:0}
+    .page+.page{page-break-before:always}
     .doc .page .runhead,.doc .page .footer-note{display:none !important}
-    .run-head-fixed{display:block;position:fixed;top:0;left:0;right:0;z-index:1;background:#fff;padding:6mm 14mm 0}
-    .run-foot-fixed{display:block;position:fixed;bottom:0;left:0;right:0;z-index:1;background:#fff;padding:0 14mm 5mm}
-    .run-head-fixed .runhead{margin-bottom:6px}
-    .run-foot-fixed .footer-note{margin-top:0}
-    /* The cover is a full-bleed sheet (its own margin:0 named page) and paints
-       OVER the fixed header/footer so page 1 carries neither (z-index above). */
-    .page.cover{page:cover;padding:0;min-height:297mm;position:relative;z-index:5;background:#fff;display:flex;flex-direction:column}
-    /* Keep blocks whole across the page break; a long table breaks between ROWS
+    /* Keep blocks whole across a page break; a long table breaks between ROWS
        (never avoid the whole table, or one too tall for a page would overflow). */
     .doc p,.doc li,.doc tr,.doc figure,.doc h2,.doc h3,.doc h4,
     .doc .kv,.doc .sub,.doc .ms-fill,.doc .route-meta,.doc .keygrid{page-break-inside:avoid}
@@ -1239,8 +1247,14 @@ function renderDoc(){
   const root=document.getElementById("docRoot");
   const cmPer=Math.ceil(RAMS_CONTROLS.length/3);
   const cmSlices=[RAMS_CONTROLS.slice(0,cmPer),RAMS_CONTROLS.slice(cmPer,cmPer*2),RAMS_CONTROLS.slice(cmPer*2)];
-  root.innerHTML = [
-    pageCover(),
+  // The cover is a full-bleed sheet on its own. Every other section goes inside ONE
+  // <table class="pbody">: in print its thead/tfoot repeat the company header and
+  // the Mostlane footer on EVERY sheet and reserve their space (so a long section
+  // that flows onto extra sheets always carries them, with nothing overlapping). On
+  // screen the table collapses to blocks (CSS), so the builder + the Preview window
+  // show each .page as a normal A4 card with its own in-flow header/footer. Lives
+  // inside #docRoot so the Preview window (which clones docRoot.innerHTML) gets it.
+  const bodyPages = [
     pageIndex(),
     pageDescription(),
     pageManagement(),
@@ -1258,13 +1272,11 @@ function renderDoc(){
     pageRamsPPE(),
     pageMethod(),
     pageAppendixCDE(),
-  ].join("")
-  // Single running header + footer for PRINT ONLY (hidden on screen). Fixed to
-  // every physical sheet so a long section that flows onto extra pages still
-  // carries the company header + Mostlane footer — the per-page in-flow copies
-  // are hidden in print. Lives inside #docRoot so the Preview window (which
-  // clones docRoot.innerHTML) gets them too.
-  + `<div class="run-head-fixed">${runHead()}</div><div class="run-foot-fixed">${FOOT}</div>`;
+  ].join("");
+  root.innerHTML = pageCover()
+    + `<table class="pbody"><thead><tr><td>${runHead()}</td></tr></thead>`
+    + `<tfoot><tr><td>${FOOT}</td></tr></tfoot>`
+    + `<tbody><tr><td>${bodyPages}</td></tr></tbody></table>`;
 }
 
 function pageCover(){
