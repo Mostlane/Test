@@ -7546,14 +7546,22 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : (job.priority || "Job");
   const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}${incident ? ` [${incident}]` : ""}`;
   const code = String(job.siteCode || "").trim();
-  const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
+  const codePart = /^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code;
+  // Brand prefix by site type (Jamie's spec) — e.g. "Starbucks" for a Cobra site.
+  // Shown on BOTH the Site line and the Address; skipped where the text already has it.
+  const addrPrefix = opts.addrPrefix ? String(opts.addrPrefix).trim() : "";
+  const norm = s => String(s).toLowerCase().replace(/[\s'’,.]/g, "");
+  // Site line: "<code> <Brand> — <name>" (e.g. "9639 Starbucks — Taunton DTU"), or just
+  // "<code> <name>" when the name already carries the brand ("Starbucks Wincanton").
+  const siteNameRaw = String(job.siteName || "").trim();
+  let siteNameShown = siteNameRaw;
+  if (addrPrefix && !norm(siteNameRaw).includes(norm(addrPrefix)))
+    siteNameShown = siteNameRaw ? addrPrefix + " — " + siteNameRaw : addrPrefix;
+  const site = [codePart, siteNameShown].filter(Boolean).join(" ");
   // The address box always carries the postcode (it used to be in the subject only).
   let addr = String(job.address || job.siteName || "").trim();
-  // Brand prefix by site type (Jamie's spec) — e.g. "The Southern co-op, <address>".
-  // Skipped when the address already leads with it (don't double-prefix).
-  const addrPrefix = opts.addrPrefix ? String(opts.addrPrefix).trim() : "";
+  // Skipped when the address already leads with the brand (don't double-prefix).
   if (addrPrefix) {
-    const norm = s => String(s).toLowerCase().replace(/[\s'’,.]/g, "");
     if (!norm(addr).startsWith(norm(addrPrefix))) addr = addr ? addrPrefix + ", " + addr : addrPrefix;
   }
   if (pc && !addr.toUpperCase().replace(/\s/g, "").includes(pc.replace(/\s/g, ""))) addr = addr ? addr + ", " + pc : pc;
