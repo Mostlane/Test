@@ -123,6 +123,12 @@
     .day-job.done{cursor:pointer;border-color:#65a30d;}
     .day-job.done .day-job-ref{color:#3f6212;}
     .week-job-chip.done{background:#f0fdf4;}
+    /* Closed jobs stay on the board but GHOSTED (faint), so you can still see what
+       each person had on that day; locked (not draggable), tap to open. */
+    .day-job.ghost{opacity:.4;border-style:dashed;cursor:pointer;filter:grayscale(.35);}
+    .day-job.ghost:hover{opacity:.9;}
+    .week-job-chip.ghost{opacity:.45;border-style:dashed;filter:grayscale(.35);}
+    .week-job-chip.ghost:hover{opacity:.9;}
     /* Faint tick marking a completed job's ORIGINAL scheduled slot (it moved to
        the time it was actually worked). */
     .sched-marker{position:absolute;top:3px;bottom:3px;width:0;border-left:2px dashed #94a3b8;opacity:.75;z-index:1;}
@@ -698,6 +704,9 @@ const MAP_STATUSES = ["Pending","Scheduled","In Progress","On Hold"];
 // A finished job that stays on the board (green + locked). Closed/Invoiced are
 // filtered out earlier; "Complete" is the one we keep showing.
 function isDoneStatus(s){ return s === "Complete"; }
+// A CLOSED job stays on the board but GHOSTED (faint + locked) so the day still
+// shows what each person had on. Invoiced/Cancelled are still dropped entirely.
+function isGhostStatus(s){ return s === "Closed Jobs"; }
 // Match the server's engineer id normalisation (spaces → dots), so we can pick
 // this engineer's own entries out of a multi-engineer job's status history.
 const schedNormId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
@@ -900,13 +909,13 @@ function hiddenFromEng(job){
 async function loadJobs(){
   const res = await authFetch("/sla/jobs?t=" + Date.now());
   const data = await res.json();
-  // Keep COMPLETE jobs on the board (they render green + locked) so the day
-  // still shows what's been done. Closed/Invoiced are downstream accounting
-  // states applied later — those stay off the board. CANCELLED jobs are dropped
-  // too, so they never appear in a lane, the "Needs scheduling" tray, the
-  // fill-in / backfill suggestions or the auto-day pool.
+  // Keep COMPLETE jobs on the board (green + locked) AND CLOSED jobs (ghosted +
+  // locked — faint, so the day still shows what each person had on). Invoiced is a
+  // downstream accounting state, and CANCELLED jobs are dropped — neither appears
+  // in a lane, the "Needs scheduling" tray, the fill-in / backfill suggestions or
+  // the auto-day pool (those paths all exclude Closed Jobs by status too).
   jobs = (Array.isArray(data) ? data : []).map(normaliseJob)
-    .filter(j => !["Closed Jobs","Invoiced","Cancelled"].includes(j.status))
+    .filter(j => !["Invoiced","Cancelled"].includes(j.status))
     // 🚿 a job sent to Metro Rod is theirs — keep it out of the tray + suggestions
     // unless one of our engineers is still on it.
     .filter(j => !(j.subcontract && j.subcontract.sentAt && (j.subcontract.status || "open") !== "returned" && !(j.assignedEngineers || []).length));
@@ -1029,8 +1038,9 @@ function saveTrayHidden(set){ try{ localStorage.setItem(TRAY_HIDE_KEY, JSON.stri
 function renderTray(){
   const host = $("trayJobs");
   host.innerHTML = "";
-  // Jobs with no schedule OR no engineer belong in the tray.
-  const waiting = jobs.filter(j => !j.scheduledAt || !j.assignedEngineers.length);
+  // Jobs with no schedule OR no engineer belong in the tray (never a finished or
+  // closed/ghosted job — those are done, not waiting to be booked).
+  const waiting = jobs.filter(j => (!j.scheduledAt || !j.assignedEngineers.length) && !isDoneStatus(j.status) && !isGhostStatus(j.status));
   const waitingIds = new Set(waiting.map(j => String(j.id)));
 
   // Prune hidden ids that are no longer waiting, so a job that leaves and
@@ -1151,10 +1161,11 @@ function renderDayView(container){
     const placements = jobsForEngineer.map(job => {
       const mySched = engSchedFor(job, engineer.username);
       const done = isDoneStatus(job.status);
+      const ghost = isGhostStatus(job.status);
       const schedStartMins = clamp(minsSinceMidnight(new Date(mySched.scheduledAt)), dayStartMins, dayEndMins - 15);
       let myDur = job.durationMinutes;
       if(mySched.scheduledAt && mySched.scheduledEnd){ const d = (new Date(mySched.scheduledEnd) - new Date(mySched.scheduledAt))/60000; if(d>=15 && d<=24*60) myDur = Math.round(d); }
-      const actRaw = done ? actualWindow(job, engineer.username) : null;
+      const actRaw = (done || ghost) ? actualWindow(job, engineer.username) : null;
       const act = (actRaw && sameDay(actRaw.start, dayDate)) ? actRaw : null;
       let startMins, endMins;
       if(act){
@@ -1165,7 +1176,7 @@ function renderDayView(container){
         startMins = schedStartMins;
         endMins = clamp(startMins + myDur, startMins + 15, dayEndMins);
       }
-      return { job, done, schedStartMins, startMins, endMins, shifted: act && Math.abs(startMins - schedStartMins) >= 5 };
+      return { job, done, ghost, schedStartMins, startMins, endMins, shifted: act && Math.abs(startMins - schedStartMins) >= 5 };
     });
 
     // Pass 2: stack overlapping jobs into sub-lanes (greedy interval packing) so
@@ -1204,7 +1215,7 @@ function renderDayView(container){
     });
 
     placements.forEach(p => {
-      const { job, done, schedStartMins, startMins, endMins, shifted, lane } = p;
+      const { job, done, ghost, schedStartMins, startMins, endMins, shifted, lane } = p;
       // Faint dashed tick at the original scheduled slot when the block moved.
       if(shifted){
         const mk = document.createElement("div");
@@ -1215,7 +1226,7 @@ function renderDayView(container){
       }
 
       const el = document.createElement("div");
-      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "") + (holD ? " leave-clash" : "");
+      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "") + (ghost ? " ghost" : "") + (holD ? " leave-clash" : "");
       el.dataset.jobId = job.id;
       el.dataset.engineer = engineer.username;
       el.style.left = ((startMins - dayStartMins) * pxPerMin) + "px";
@@ -1236,6 +1247,7 @@ function renderDayView(container){
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
+                 (ghost ? "Closed — kept here faintly so you can see what " + engineer.name + " had on  " : "") +
                  (shifted ? "Scheduled " + schedLabel : timeLabel) + "  " +
                  (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
@@ -1244,8 +1256,8 @@ function renderDayView(container){
                  (hid ? "  ·  🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "") : "") +
                  (retClk ? "  ·  🔦 Return for the 3-hour light check ~" + retClk : "");
 
-      // Completed jobs are locked (not draggable) — they still open on click.
-      if(!done) attachPointerDrag(el, job, false);
+      // Completed + closed jobs are locked (not draggable) — they still open on click.
+      if(!done && !ghost) attachPointerDrag(el, job, false);
       el.addEventListener("click", () => { if(!dragState.active && !dragState.moved) openJobModal(job.id); });
       track.appendChild(el);
     });
@@ -1333,8 +1345,9 @@ function renderWeekView(container){
         .filter(j => { const s = engSchedFor(j, engineer.username).scheduledAt; return s && sameDay(new Date(s), date); })
         .forEach(job => {
           const done = isDoneStatus(job.status);
+          const ghost = isGhostStatus(job.status);
           const chip = document.createElement("div");
-          chip.className = "week-job-chip" + (done ? " done" : "") + (hol ? " leave-clash" : "");
+          chip.className = "week-job-chip" + (done ? " done" : "") + (ghost ? " ghost" : "") + (hol ? " leave-clash" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
           const hid = hiddenFromEng(job);
