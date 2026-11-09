@@ -966,7 +966,25 @@ function renderJob(){
   // Title = the clean Job name ("Gatwick Road - 25886/1"); shared helper from
   // sla-jobedit.js (window.mlJobName), with a plain fallback if it's not loaded.
   const name = (window.mlJobName && window.mlJobName(job)) || site;
-  $("jobTitle").textContent = name || (shortRef ? `Job ${shortRef}` : "Job");
+  // Header title = "<incident/job number> - <site number> - <site name>" to match
+  // the SLA board. Number: id prefix "<num>-…", else a CHAP id, else the ref's
+  // leading number (never a raw UUID). Dedupe so a siteCode equal to the number or
+  // the name never repeats; a project job (P-number code, no number) reads
+  // "P0710 - Goodwood Farm VPU".
+  const UUIDre = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const idStr = String(job.id || "");
+  let jobNum = UUIDre.test(idStr) ? "" : ((idStr.match(/^([A-Za-z]?\d+(?:\/\d+)?)-/) || [])[1] || "");
+  if (!jobNum && /^CHAP-\d/i.test(idStr)) jobNum = idStr.replace(/^CHAP-/i, "");
+  if (!jobNum) jobNum = (String(ref).match(/^([A-Za-z]?\d+(?:\/\d+)?)\b/) || [])[1] || "";
+  let siteNm = String(job.siteName || "").trim().replace(/^\s*[A-Za-z]?\d+(?:\/\d+)?\s*[-–,]\s*/, "").trim();
+  if (!siteNm) siteNm = String(job.siteCode || "").trim();
+  const titleParts = [];
+  [jobNum, String(job.siteCode || "").trim(), siteNm].forEach(v => {
+    v = String(v || "").trim();
+    if (v && !titleParts.some(p => p.toLowerCase() === v.toLowerCase())) titleParts.push(v);
+  });
+  const composedTitle = titleParts.join(" - ");
+  $("jobTitle").textContent = composedTitle || name || (shortRef ? `Job ${shortRef}` : "Job");
   $("jobSub").textContent = shortRef;
   renderCancelBanner();
   renderDrainBanner();
