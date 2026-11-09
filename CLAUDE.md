@@ -6536,6 +6536,14 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `opts.addrPrefix` on BOTH the send AND the preview/test paths; `buildMetroRodEmail` prepends it
   **guarded so it never double-prefixes** an address that already leads with the brand. Tests in
   test-drainage.mjs (all five brands + no-prefix + no-double).
+  **(9 Nov 2026) the brand now ALSO leads the Site line, not just the Address** (Jamie: a Cobra
+  site whose NAME doesn't say Starbucks — "Taunton DTU", "Bridgwater JS" — showed the brand only
+  buried in the Address, easy to miss). `buildMetroRodEmail` builds the Site box as
+  `"<code> <Brand> — <name>"` (e.g. "9639 Starbucks — Taunton DTU"), skipping the brand when the
+  name already contains it ("9512 Starbucks Wincanton" stays as-is). Same `norm`/`addrPrefix`
+  guard as the Address. (NB test-drainage.mjs has 3 PRE-EXISTING failures on the subject-line
+  assertions — the subject appends the Concerto incident `[31502/1]`, a feature the test's
+  expected string predates — unrelated to this change; the brand-prefix cases all pass.)
   now gets "X has no email address" instead of "Unknown subcontractor" (only Metro Rod has
   one today). OPEN: the email footer says "Segensworth Business Centre, Fareham, PO15 5RQ"
   — other templates say "Segensworth Road… Titchfield"; confirm the right one.
