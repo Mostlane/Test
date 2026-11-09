@@ -8,8 +8,8 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
-  <script src="/programme-gantt.js?v=8"></script>
-  <script src="/programme-export.js?v=3"></script>
+  <script src="/programme-gantt.js?v=9"></script>
+  <script src="/programme-export.js?v=4"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -28,6 +28,12 @@
     .ctr-row input[type=text]{max-width:220px;}
     .ctr-row input[type=color]{width:34px;height:30px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;flex:none;}
     .ctr-row button{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:4px 9px;font:600 12px 'Segoe UI';cursor:pointer;color:#334155;}
+    .blk-row{display:flex;align-items:center;gap:8px;margin:4px 0;flex-wrap:wrap;}
+    .blk-row input[type=text]{max-width:200px;}
+    .blk-row input[type=date]{border:1px solid #cbd5e1;border-radius:8px;padding:4px 6px;font:12px 'Segoe UI';}
+    .blk-row label.blk-work{display:inline-flex;align-items:center;gap:4px;font:600 12px 'Segoe UI';color:#475569;cursor:pointer;}
+    .blk-row .blk-dash{color:#94a3b8;}
+    .blk-row button{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:4px 9px;font:600 12px 'Segoe UI';cursor:pointer;color:#334155;}
     .fchips{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px;}
     .fchip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:5px 13px;font:600 12.5px 'Segoe UI';cursor:pointer;color:#334155;display:inline-flex;align-items:center;gap:6px;}
     .fchip.on{background:#003b82;color:#fff;border-color:#003b82;}
@@ -81,6 +87,8 @@
       </div>
       <label>Contractors (each gets a colour — bars are coloured by contractor)</label>
       <div id="contractors"></div>
+      <label title="Block out dates such as a Christmas shutdown. By default tasks are scheduled around them.">Blocked-out dates (e.g. Christmas shutdown — tasks move around these)</label>
+      <div id="blockouts"></div>
       <label>Notes (shown to the client under the programme)</label>
       <textarea id="fNotes" rows="2" placeholder="Assumptions, exclusions, access requirements…"></textarea>
       <div class="statusline">
@@ -249,6 +257,7 @@
     g("fNotes").value = DATA.notes||"";
     g("pageTitle").textContent = DATA.title ? DATA.title : "Programme builder";
     renderContractors();
+    renderBlockouts();
     renderNotes();
   }
 
@@ -330,6 +339,57 @@
       if(FILTER === c.id) FILTER = "";
       (DATA.tasks||[]).forEach(t => { if(t.contractor === c.id) t.contractor = ""; });
       renderContractors(); drawGantt(); queueSave();
+    }
+  });
+
+  // ── Blocked-out dates (Christmas shutdown etc.) ───────────────────────────
+  // DATA.blockouts = [{id,name,start,end,work}]. By default (work off) tasks are
+  // scheduled AROUND the range — its days count as non-working, like a bank
+  // holiday. Tick "allow work" to let tasks run through it (visual marker only).
+  function ensureBlockouts(){ if(!Array.isArray(DATA.blockouts)) DATA.blockouts = []; }
+  function renderBlockouts(){
+    ensureBlockouts();
+    const host = g("blockouts");
+    host.innerHTML = DATA.blockouts.map(b => `
+      <div class="blk-row" data-b="${esc(b.id)}">
+        <input type="text" data-bop="name" value="${esc(b.name||"")}" placeholder="e.g. Christmas shutdown">
+        <input type="date" data-bop="start" value="${esc(b.start||"")}">
+        <span class="blk-dash">→</span>
+        <input type="date" data-bop="end" value="${esc(b.end||"")}">
+        <label class="blk-work" title="Leave unticked and tasks move around these dates. Tick to let work carry on during them.">
+          <input type="checkbox" data-bop="work" ${b.work?"checked":""}> allow work during this time</label>
+        <button type="button" data-bop="del" title="Remove">✕</button>
+      </div>`).join("") +
+      `<div class="blk-row"><button type="button" data-bop="add">＋ Add blocked-out dates</button></div>`;
+  }
+  g("blockouts").addEventListener("input", e => {
+    const op = e.target.getAttribute("data-bop"); if(op!=="name") return;
+    const row = e.target.closest("[data-b]"); if(!row) return;
+    const b = (DATA.blockouts||[]).find(x => x.id === row.getAttribute("data-b")); if(!b) return;
+    b.name = e.target.value; drawGantt(); queueSave();
+  });
+  g("blockouts").addEventListener("change", e => {
+    const op = e.target.getAttribute("data-bop"); if(!op) return;
+    const row = e.target.closest("[data-b]"); if(!row) return;
+    const b = (DATA.blockouts||[]).find(x => x.id === row.getAttribute("data-b")); if(!b) return;
+    if(op==="start") b.start = e.target.value;
+    else if(op==="end") b.end = e.target.value;
+    else if(op==="work") b.work = e.target.checked;
+    else if(op==="name"){ b.name = e.target.value; }
+    drawGantt(); queueSave();
+  });
+  g("blockouts").addEventListener("click", e => {
+    const op = e.target.getAttribute("data-bop"); if(!op) return;
+    ensureBlockouts();
+    if(op==="add"){
+      const today = new Date().toISOString().slice(0,10);
+      DATA.blockouts.push({ id: MLProg.uid(), name:"", start:today, end:today, work:false });
+      renderBlockouts(); drawGantt(); queueSave(); return;
+    }
+    if(op==="del"){
+      const row = e.target.closest("[data-b]"); if(!row) return;
+      DATA.blockouts = DATA.blockouts.filter(x => x.id !== row.getAttribute("data-b"));
+      renderBlockouts(); drawGantt(); queueSave();
     }
   });
   function renderChips(){
@@ -436,7 +496,7 @@
 
   let UNDO=null;
   function snapshot(){ UNDO=JSON.stringify(DATA); g("toolsUndo").style.display=""; }
-  function undoEdit(){ if(!UNDO){ alert("Nothing to undo yet."); return; } try{ DATA=JSON.parse(UNDO); }catch(e){ return; } UNDO=null; g("toolsUndo").style.display="none"; drawGantt(); renderContractors(); queueSave(); alert("Reverted the last change ✓"); }
+  function undoEdit(){ if(!UNDO){ alert("Nothing to undo yet."); return; } try{ DATA=JSON.parse(UNDO); }catch(e){ return; } UNDO=null; g("toolsUndo").style.display="none"; drawGantt(); renderContractors(); renderBlockouts(); queueSave(); alert("Reverted the last change ✓"); }
 
   function shiftAllBy(n){ (DATA.tasks||[]).forEach(t=>{ if(t.start) t.start=addDaysISO(t.start,n); }); }
   function openShift(){
@@ -486,7 +546,7 @@
       if(!d.ok){ st.style.color="#b91c1c"; st.textContent=d.error||("Couldn't apply that (HTTP "+r.status+")."); btn.disabled=false; btn.textContent=old; return; }
       snapshot();
       DATA=MLProg.migrate(d.data)||DATA;
-      drawGantt(); renderContractors(); queueSave();
+      drawGantt(); renderContractors(); renderBlockouts(); queueSave();
       g("aiEditText").value="";
       closeM("aiEditBackdrop");
       alert("Programme updated by AI ✓ — review it; Tools › ↩ Undo reverts it. Issue when happy.");

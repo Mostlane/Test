@@ -37,14 +37,33 @@
     return Math.max(1, lines);
   }
 
-  const nonWork = (d, hs) => isWeekend(d) || hs.has(ymd(d));
-  function endOf(t, hs) {
+  const nonWork = (d, hs, bs) => isWeekend(d) || hs.has(ymd(d)) || (bs && bs.has(ymd(d)));
+  // data.blockouts = [{id,name,start,end,work}] — shutdown ranges; work falsy =
+  // tasks move around them (its days count as non-working, like a bank holiday).
+  function normBlockouts(data) {
+    const out = [];
+    for (const b of ((data && data.blockouts) || [])) {
+      if (!b) continue;
+      const a = parse(b.start), z = parse(b.end || b.start);
+      if (!a || !z) continue;
+      const s = a <= z ? a : z, e = a <= z ? z : a;
+      out.push({ name: String(b.name || "").slice(0, 60), work: !!b.work, s, e });
+    }
+    return out;
+  }
+  function blockSkipSet(blocks) {
+    const m = new Set();
+    for (const b of blocks) { if (b.work) continue; let d = b.s, g = 0; while (d <= b.e && g++ < 1200) { m.add(ymd(d)); d = addDays(d, 1); } }
+    return m;
+  }
+  const blockAt = (d, blocks) => { const y = ymd(d); for (const b of blocks) { if (ymd(b.s) <= y && y <= ymd(b.e)) return b; } return null; };
+  function endOf(t, hs, bs) {
     const s = parse(t.start);
     if (!s) return null;
     const days = Math.min(730, Math.max(1, Number(t.days) || 1));
     if (t.wknd) return addDays(s, days - 1);
     let d = s, left = days - 1, guard = 0;
-    while (left > 0 && guard++ < 4000) { d = addDays(d, 1); if (!nonWork(d, hs)) left--; }
+    while (left > 0 && guard++ < 4600) { d = addDays(d, 1); if (!nonWork(d, hs, bs)) left--; }
     return d;
   }
 
@@ -112,12 +131,14 @@
   // ── One worksheet's XML ───────────────────────────────────────────────────
   // Styles (cellXfs index): 0 default · 1 bold · 2 title · 3 grey · 4 header ·
   // 5 weekend · 6 bank holiday · 7+ one per contractor (X blocks).
-  function sheetXml(data, meta, tasks, styleOfContractor, pwHash, wrapStyle) {
+  function sheetXml(data, meta, tasks, styleOfContractor, pwHash, wrapStyle, blockStyle) {
     const hs = new Set((data.holidays || []).map(String));
+    const blocks = normBlockouts(data);
+    const bs = blockSkipSet(blocks);
     let s0 = null, e0 = null;
     for (const t of tasks) {
       const s = parse(t.start); if (!s) continue;
-      const e = endOf(t, hs);
+      const e = endOf(t, hs, bs);
       if (!s0 || s < s0) s0 = s;
       if (e && (!e0 || e > e0)) e0 = e;
     }
@@ -145,19 +166,23 @@
     cell(4, 0, "Start date:", 1); cell(4, 1, fmtFull(s0), 0);
     cell(5, 0, "End date:", 1); cell(5, 1, fmtFull(e0), 0);
     cell(6, 0, "Days on programme:", 1); cell(6, 1, String(Math.round((e0 - s0) / DAY) + 1), 0, true);
+    if (blocks.length) {
+      cell(7, 0, "Blocked out: " + blocks.map(b => (b.name || "Blocked out") + " (" + fmtDM(b.s) + "–" + fmtDM(b.e) + (b.work ? ", work allowed" : "") + ")").join("; "), 3);
+    }
 
     ["Works", "Contractor", "Start", "End", "Days", "Wknd"].forEach((h, i) => cell(HEADER_ROW - 1, i, h, 4));
     for (let i = 0; i < days; i++) {
       const d = addDays(s0, i);
-      const st = isWeekend(d) ? 5 : (hs.has(ymd(d)) ? 6 : 4);
+      const bk = (!isWeekend(d) && !hs.has(ymd(d))) ? blockAt(d, blocks) : null;
+      const st = isWeekend(d) ? 5 : (hs.has(ymd(d)) ? 6 : (bk ? blockStyle : 4));
       cell(HEADER_ROW - 1, FIRST_DAY_COL + i, fmtDM(d), st);
-      cell(DOW_ROW - 1, FIRST_DAY_COL + i, hs.has(ymd(d)) && !isWeekend(d) ? "BH" : DOW[d.getUTCDay()], st);
+      cell(DOW_ROW - 1, FIRST_DAY_COL + i, hs.has(ymd(d)) && !isWeekend(d) ? "BH" : (bk ? "BLK" : DOW[d.getUTCDay()]), st);
     }
 
     const byC = {}; for (const c of (data.contractors || [])) byC[c.id] = c;
     tasks.forEach((t, ti) => {
       const r = FIRST_TASK_ROW - 1 + ti;
-      const s = parse(t.start), e = endOf(t, hs);
+      const s = parse(t.start), e = endOf(t, hs, bs);
       cell(r, 0, t.name || "", wrapStyle);
       const nLines = wrapCount(t.name || "", nameCols);
       if (nLines > 1) rowHt[r] = Math.round(nLines * 15);   // ~15pt per line
@@ -169,7 +194,7 @@
       if (s && e) {
         const xStyle = styleOfContractor[t.contractor] || 1;
         for (let d = s; d <= e; d = addDays(d, 1)) {
-          if (!t.wknd && nonWork(d, hs)) continue;
+          if (!t.wknd && nonWork(d, hs, bs)) continue;
           const off = Math.round((d - s0) / DAY);
           if (off >= 0 && off < days) cell(r, FIRST_DAY_COL + off, "X", xStyle);
         }
@@ -210,6 +235,8 @@
       fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${(hex ? hex[1] : "94A3B8").toUpperCase()}"/></patternFill></fill>`);
       styleOfContractor[c.id] = 7 + i;    // cellXfs index below
     });
+    const blockFillId = fills.length;     // blocked-out (purple), after contractors
+    fills.push('<fill><patternFill patternType="solid"><fgColor rgb="FFEDE9FE"/></patternFill></fill>');
     // cellXfs: 0 default · 1 bold · 2 title · 3 grey · 4 header · 5 we · 6 bh · 7+ contractors
     const xfs = [
       '<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>',
@@ -226,6 +253,9 @@
     // Wrapping style for the Works cell so long task names wrap + read in full.
     const wrapStyle = xfs.length;
     xfs.push('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>');
+    // Blocked-out header column style (purple, centered).
+    const blockStyle = xfs.length;
+    xfs.push(`<xf numFmtId="0" fontId="3" fillId="${blockFillId}" borderId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>`);
     const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="15"/><color rgb="FF003366"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF667085"/><name val="Calibri"/></font></fonts>
@@ -235,7 +265,7 @@
 <cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
-    return { xml, styleOfContractor, wrapStyle };
+    return { xml, styleOfContractor, wrapStyle, blockStyle };
   }
 
   const safeSheetName = (name, used) => {
@@ -249,7 +279,7 @@
   function build(data, meta) {
     data = data || {}; meta = meta || {};
     const contractors = (data.contractors || []).filter(c => c && c.name);
-    const { xml: styles, styleOfContractor, wrapStyle } = stylesXml(contractors);
+    const { xml: styles, styleOfContractor, wrapStyle, blockStyle } = stylesXml(contractors);
     const pwHash = legacyHash("Mostlane");
     const used = new Set();
     const sheets = [{ name: safeSheetName("Programme", used), tasks: data.tasks || [] }];
@@ -291,7 +321,7 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       { name: "xl/styles.xml", text: styles },
     ];
     sheets.forEach((s, i) => {
-      files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, text: sheetXml(data, meta, s.tasks, styleOfContractor, pwHash, wrapStyle) });
+      files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, text: sheetXml(data, meta, s.tasks, styleOfContractor, pwHash, wrapStyle, blockStyle) });
     });
     return zip(files);
   }
