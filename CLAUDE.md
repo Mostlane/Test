@@ -7339,12 +7339,19 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      (splitting a paragraph) and the pinned footer sat at the bottom of the OVER-tall
      box = halfway up sheet 2. **Fix (CSS-only + a 1-line renderDoc concat):** in
      `@media print` content `.page` now FLOWS — `min-height:0;display:block;
-     padding:24mm 14mm 18mm` (no forced height, no flex pin); the per-page in-flow
+     padding:0` (no forced height, no flex pin); the per-page in-flow
      `.runhead`/`.footer-note` are hidden (`.doc .page .runhead,.doc .page .footer-note`)
      and replaced by ONE **fixed running header + footer** (`.run-head-fixed`/
      `.run-foot-fixed`, `position:fixed`, appended once inside `#docRoot` by renderDoc
-     so the Preview window gets them too; hidden on screen). The 24/18mm page padding
-     reserves room for them, so they repeat on every physical sheet of a long section.
+     so the Preview window gets them too; hidden on screen). **Space for them is reserved
+     by `@page{margin:24mm 14mm 15mm}` — NOT by padding on `.page`.** (First build used
+     `.page{padding:24mm 14mm 18mm}`; padding only pads the FIRST + LAST sheet, so the
+     2nd/3rd sheet of a long section ran its text UNDER the fixed bands and the saved PDF
+     cut it off — on-screen/Preview looked fine because `@page`/`position:fixed` don't
+     apply there. @page margins apply to EVERY sheet, so the content box is inset on all
+     of them and nothing collides. **Don't go back to per-page padding.**) The cover keeps
+     full-bleed via a **named page** — `.page.cover{page:cover}` + `@page cover{margin:0}`
+     — so it has no margin band and its z-index:5 still paints over the fixed pair.
      `page-break-inside:avoid` on p/li/tr/figure/h2-4/.kv/.sub/.ms-fill/.route-meta/
      .keygrid stops splits; a long TABLE breaks between rows (`tr` avoid, NOT the whole
      table) with `thead{display:table-header-group}` repeating its header. **The cover**

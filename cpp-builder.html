@@ -241,8 +241,13 @@
   .modal .ae-list .repeat-row{margin-bottom:6px}
   .modal .rinfo{font-family:var(--head);color:var(--brand-dark);font-weight:600}
 
-  /* ---------- Print ---------- */
-  @page{size:A4;margin:0}
+  /* ---------- Print ----------
+     Reserve the running header/footer band with @page MARGINS (they apply to
+     EVERY sheet) — NOT with padding on .page (that only pads the first/last
+     sheet, so inner sheets of a long section ran under the fixed header/footer
+     and got cut off). The cover keeps margin:0 (full-bleed) via a named page. */
+  @page{size:A4;margin:24mm 14mm 15mm}
+  @page cover{margin:0}
   @media print{
     /* Force the navy/blue bands to actually print — browsers drop background
        colours when SAVING to PDF unless this is set (the on-screen Preview showed
@@ -257,26 +262,26 @@
     #mlIntakeWarn,#mlToastHost,#mlPalOv{display:none !important}
     .layout{display:block}
     .doc-pane{height:auto;overflow:visible;padding:0;background:#fff}
-    /* Content pages FLOW: no forced full-page height and no flex-pinned footer
-       (that pinned the footer to the bottom of an OVER-tall box, which on a long
-       section landed it halfway up the next sheet and split paragraphs). Each
-       section still starts on a fresh page; top/bottom padding reserves room for
-       the fixed running header + footer below. */
+    /* Content pages FLOW: no forced full-page height, no flex-pinned footer, and
+       NO per-page padding (the @page top/bottom margin reserves the header/footer
+       band on EVERY sheet — padding here would only pad the first + last sheet,
+       which is what ran inner sheets under the fixed bands and cut text off). */
     .page{
       box-shadow:none;margin:0;width:auto;min-height:0;display:block;
-      padding:24mm 14mm 18mm;
+      padding:0;
       page-break-after:always;
     }
     .page:last-child{page-break-after:auto}
-    /* The in-flow per-page header/footer are replaced by the single fixed pair. */
+    /* The in-flow per-page header/footer are replaced by the single fixed pair,
+       which sits in the @page margin band (top:0/bottom:0 = the sheet edge). */
     .doc .page .runhead,.doc .page .footer-note{display:none !important}
-    .run-head-fixed{display:block;position:fixed;top:0;left:0;right:0;z-index:1;background:#fff;padding:9mm 14mm 0}
-    .run-foot-fixed{display:block;position:fixed;bottom:0;left:0;right:0;z-index:1;background:#fff;padding:0 14mm 7mm}
+    .run-head-fixed{display:block;position:fixed;top:0;left:0;right:0;z-index:1;background:#fff;padding:6mm 14mm 0}
+    .run-foot-fixed{display:block;position:fixed;bottom:0;left:0;right:0;z-index:1;background:#fff;padding:0 14mm 5mm}
     .run-head-fixed .runhead{margin-bottom:6px}
     .run-foot-fixed .footer-note{margin-top:0}
-    /* The cover is its own full sheet and paints OVER the fixed header/footer so
-       page 1 carries neither (z-index above the running pair). */
-    .page.cover{padding:0;min-height:297mm;position:relative;z-index:5;background:#fff;display:flex;flex-direction:column}
+    /* The cover is a full-bleed sheet (its own margin:0 named page) and paints
+       OVER the fixed header/footer so page 1 carries neither (z-index above). */
+    .page.cover{page:cover;padding:0;min-height:297mm;position:relative;z-index:5;background:#fff;display:flex;flex-direction:column}
     /* Keep blocks whole across the page break; a long table breaks between ROWS
        (never avoid the whole table, or one too tall for a page would overflow). */
     .doc p,.doc li,.doc tr,.doc figure,.doc h2,.doc h3,.doc h4,
