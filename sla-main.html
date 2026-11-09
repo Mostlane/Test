@@ -1104,9 +1104,12 @@ function filteredJobs(){
       if(!search.split(/\s+/).every(t => blob.includes(t))) return false;
     }
     return true;
-  // Sort by a cached numeric timestamp (no Date allocation per comparison).
-  }).sort((a,b) => (b._rms != null ? b._rms : (b._rms = Date.parse(b.raisedAt)||0))
-                 - (a._rms != null ? a._rms : (a._rms = Date.parse(a.raisedAt)||0)));
+  // Sort newest-first by a cached numeric timestamp = the LATER of raised and
+  // arrival (createdAt). A job just in always floats to the top, even when the
+  // client only gives a coarse raised DATE (Chapplins stamps 09:00, so several a
+  // day would otherwise tie and a fresh afternoon one would sit below the morning).
+  }).sort((a,b) => (b._rms != null ? b._rms : (b._rms = Math.max(Date.parse(b.raisedAt)||0, Date.parse(b.createdAt)||0)))
+                 - (a._rms != null ? a._rms : (a._rms = Math.max(Date.parse(a.raisedAt)||0, Date.parse(a.createdAt)||0))));
   _fjRef = allJobs; _fjSig = sig; _fjCache = res;
   return res;
 }
