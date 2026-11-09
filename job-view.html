@@ -1583,10 +1583,30 @@ async function renderSite(){
   const sname = job.siteName || "";
   const hasSite = !!(scode || sname);
   if(!info.address && !info.phone && !hasSite) return;   // truly nothing — keep hidden
-  $("siteAddress").textContent = info.address || "—";
+  // Address + a small 📞 beside it when the site has a phone — tap it to reveal
+  // the number (a tappable tel: link). The Contact field below still shows it too.
+  const addrEl = $("siteAddress");
+  addrEl.innerHTML = "";
+  addrEl.appendChild(document.createTextNode(info.address || "—"));
   if(info.phone){
+    const tel = "tel:" + info.phone.replace(/\s+/g,"");
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.title = "Show the site phone number"; btn.setAttribute("aria-expanded","false");
+    btn.textContent = "📞";
+    btn.style.cssText = "margin-left:8px;border:1px solid #d7dee6;background:#fff;border-radius:999px;padding:0 8px;cursor:pointer;font-size:14px;line-height:1.7;vertical-align:middle;";
+    const num = document.createElement("a");
+    num.href = tel; num.textContent = info.phone;
+    num.style.cssText = "margin-left:8px;display:none;color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap;";
+    btn.addEventListener("click", () => {
+      const show = num.style.display === "none";
+      num.style.display = show ? "inline" : "none";
+      btn.setAttribute("aria-expanded", show ? "true" : "false");
+    });
+    addrEl.appendChild(btn);
+    addrEl.appendChild(num);
+    // Contact field keeps showing the number openly.
     $("sitePhone").innerHTML = "";
-    const a = document.createElement("a"); a.href = "tel:" + info.phone.replace(/\s+/g,""); a.textContent = info.phone;
+    const a = document.createElement("a"); a.href = tel; a.textContent = info.phone;
     $("sitePhone").appendChild(a);
   }
   // Postcode/address first — sat-navs route better on postcodes than raw coords.
