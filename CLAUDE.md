@@ -7354,10 +7354,15 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      `.doc thead` repeats its own column header). **The cover is a full-bleed sheet
      OUTSIDE the table** (`.page.cover{min-height:297mm;page-break-after:always}`), so
      page 1 carries no running header/footer. **On SCREEN the table collapses to blocks**
-     (base CSS `.pbody,.pbody>tbody,.pbody>tbody>tr,.pbody>tbody>tr>td{display:block}` +
-     `.pbody>thead,.pbody>tfoot{display:none}`), so the builder AND the Preview window are
-     UNCHANGED — each `.page` is still a normal A4 card with its own in-flow header/footer
-     (which show on screen, hide in print). **renderDoc:** `pageCover()` then ONE
+     (base CSS `.doc table.pbody,…>tbody>tr>td{display:block}` + `…>thead,…>tfoot{display:none}`),
+     so the builder AND the Preview window are UNCHANGED — each `.page` is still a normal A4
+     card with its own in-flow header/footer (which show on screen, hide in print). **The base
+     rules also STRIP the `.doc table`/`.doc td` content-table styling off `.pbody` — the
+     `1px #c4cedb` cell BORDERS, the table margin, the `10.8px` font — or stray light-blue
+     lines show around the running header/footer + the page block (Jamie, 9 Nov). The intended
+     header underline + footer rule live on the `.runhead`/`.footer-note` divs, not the cells,
+     so they stay. The print rules re-add the cell paddings with the SAME `.doc table.pbody>…>td`
+     selector so they beat that reset (equal specificity, later source).** **renderDoc:** `pageCover()` then ONE
      `<table class="pbody"><thead><tr><td>runHead()</td></tr></thead><tfoot><tr><td>FOOT
      </tr></tfoot><tbody><tr><td>` + every other section + `</td></tr></tbody></table>`.
      **VERIFIED by rendering the real `#appstyle` through Chromium `page.pdf` to PNGs
