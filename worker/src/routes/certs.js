@@ -2242,6 +2242,26 @@ export async function handle(request, env, ctx, url, sess) {
     const rows = (results || []).map(shapeOrder);
     const all = await listJobs(env, tid);
     const byId = new Map(all.map(j => [j.id, j]));
+    // Self-heal legacy mis-filing (Nov 2026): before the 4-Nov "EM-only auto-link"
+    // fix, the inbound hard-tagged an ELECTRICAL-test match as kind "em" and linked
+    // it to the completed TEST job. That buried the order — both this board and the
+    // 5-year remedials queue (concerto.js deriveCase) EXCLUDE "em" — so it could
+    // never be found or allocated. Any straggler (matched_kind "em" with NO EM cert,
+    // pointing at an elecTest job) is corrected to its true kind "elec" so it shows a
+    // "create works job". The filter is a no-op once healed, so this costs nothing in
+    // steady state and uses the jobs already loaded above (no extra query).
+    try {
+      const fixIds = rows.filter(o => o.matchedKind === "em" && !o.matchedCertId && o.matchedJobId && byId.get(o.matchedJobId) && byId.get(o.matchedJobId).elecTest).map(o => o.id);
+      if (fixIds.length) {
+        const nowf = new Date().toISOString();
+        for (let i = 0; i < fixIds.length; i += 20) {
+          const ch = fixIds.slice(i, i + 20);
+          await env.DB.prepare(`UPDATE client_orders SET matched_kind='elec', matched_cert_id=NULL, status=CASE WHEN status='linked' THEN 'matched' ELSE status END, updated_at=? WHERE tenant_id=? AND id IN (${ch.map(() => "?").join(",")})`).bind(nowf, tid, ...ch).run();
+        }
+        const fix = new Set(fixIds);
+        for (const o of rows) if (fix.has(o.id)) { o.matchedKind = "elec"; o.matchedCertId = ""; if (o.status === "linked") o.status = "matched"; }
+      }
+    } catch {}
     let doneNames = new Set(); try { const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); (JSON.parse((c && c.value) || "[]") || []).forEach(x => { if (x && x.done) doneNames.add(String(x.name || "").toLowerCase()); }); } catch {}
     const finished = j => { const st = String((j && j.status) || "").toLowerCase(); return ["complete", "closed jobs", "closed", "invoiced", "cancelled"].includes(st) || doneNames.has(st); };
     const shaped = rows.map(o => {
