@@ -173,10 +173,12 @@
     ["Works", "Contractor", "Start", "End", "Days", "Wknd"].forEach((h, i) => cell(HEADER_ROW - 1, i, h, 4));
     for (let i = 0; i < days; i++) {
       const d = addDays(s0, i);
-      const bk = (!isWeekend(d) && !hs.has(ymd(d))) ? blockAt(d, blocks) : null;
-      const st = isWeekend(d) ? 5 : (hs.has(ymd(d)) ? 6 : (bk ? blockStyle : 4));
+      // A shutdown (blockout) takes priority over a bank holiday where they overlap.
+      const bk = !isWeekend(d) ? blockAt(d, blocks) : null;
+      const bh = !isWeekend(d) && !bk && hs.has(ymd(d));
+      const st = isWeekend(d) ? 5 : (bk ? blockStyle : (bh ? 6 : 4));
       cell(HEADER_ROW - 1, FIRST_DAY_COL + i, fmtDM(d), st);
-      cell(DOW_ROW - 1, FIRST_DAY_COL + i, hs.has(ymd(d)) && !isWeekend(d) ? "BH" : (bk ? "BLK" : DOW[d.getUTCDay()]), st);
+      cell(DOW_ROW - 1, FIRST_DAY_COL + i, bk ? "BLK" : (bh ? "BH" : DOW[d.getUTCDay()]), st);
     }
 
     const byC = {}; for (const c of (data.contractors || [])) byC[c.id] = c;

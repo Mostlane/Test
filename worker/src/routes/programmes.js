@@ -515,9 +515,15 @@ export async function handle(request, env, ctx, url) {
     const parseISO = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); if (!m) return null; const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)); return isNaN(d) ? null : d; };
     let base = parseISO(b.startDate);
     if (!base) { base = new Date(); base.setUTCHours(12, 0, 0, 0); const wd = base.getUTCDay(); base.setUTCDate(base.getUTCDate() + ((8 - wd) % 7 || 7)); }
-    const isWknd = (d) => { const g = d.getUTCDay(); return g === 0 || g === 6; };
-    const addWorkingDays = (from, n) => { let d = new Date(from); let left = Math.max(0, n | 0), guard = 0; while (isWknd(d)) d.setUTCDate(d.getUTCDate() + 1); while (left > 0 && guard++ < 5000) { d.setUTCDate(d.getUTCDate() + 1); if (!isWknd(d)) left--; } return d; };
+    // Bank holidays are non-working days too — a task must never START or run ON
+    // one, so the offset→date maths skips them exactly like weekends, and the
+    // list is snapshotted onto the draft so the chart/exports skip + flag them.
+    const holArr = await bankHolidayDates(db);
+    const holSet = new Set(holArr);
     const ymd = (d) => d.toISOString().slice(0, 10);
+    const isWknd = (d) => { const g = d.getUTCDay(); return g === 0 || g === 6; };
+    const isOff = (d) => isWknd(d) || holSet.has(ymd(d));
+    const addWorkingDays = (from, n) => { let d = new Date(from); let left = Math.max(0, n | 0), guard = 0; while (isOff(d)) d.setUTCDate(d.getUTCDate() + 1); while (left > 0 && guard++ < 5000) { d.setUTCDate(d.getUTCDate() + 1); if (!isOff(d)) left--; } return d; };
 
     const tasks = [];
     for (const t of out.tasks) {
@@ -535,7 +541,7 @@ export async function handle(request, env, ctx, url) {
     const data = {
       title: hintTitle || String(out.title || "").slice(0, 200) || "Programme of works",
       client: hintClient, site: hintSite, ref: "", notes: "",
-      contractors, tasks,
+      contractors, tasks, holidays: holArr,
     };
     const id = newId("PRG");
     const now = new Date().toISOString();
@@ -625,6 +631,7 @@ export async function handle(request, env, ctx, url) {
     if (!tasks.length) return json({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
     if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
     const data = { ...src, title: String(out.title || src.title || "").slice(0, 200) || "Programme of works", contractors, tasks };
+    if (!Array.isArray(data.holidays) || !data.holidays.length) data.holidays = await bankHolidayDates(db);
     return json({ ok: true, data, taskCount: tasks.length });
   }
 

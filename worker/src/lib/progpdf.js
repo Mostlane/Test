@@ -316,8 +316,10 @@ export function buildProgrammePdf(data, meta = {}) {
       for (let i = 0; i < win.days; i++) {
         const d = addDays(winStart, i);
         const x = GRID_X + i * dayW;
-        const we = isWeekend(d), bh = !we && hs.has(ymd(d));
-        const bk = (!we && !bh) ? blockAt(d, blocks) : null;
+        // A shutdown (blockout) takes priority over a bank holiday where they overlap.
+        const we = isWeekend(d);
+        const bk = !we ? blockAt(d, blocks) : null;
+        const bh = !we && !bk && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         if (bk) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: bk.work ? [0.957, 0.969, 0.98] : [0.929, 0.914, 0.98] });
