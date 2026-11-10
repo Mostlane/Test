@@ -1125,8 +1125,141 @@ function slimProposal(p) {
   return {
     mailbox: p.mailbox, messageId: p.messageId, attachmentId: p.attachmentId,
     filename: p.filename, subject: p.subject, from: p.from,
-    receivedDateTime: p.receivedDateTime, tier: p.tier, fields: p.fields || {},
+    receivedDateTime: p.receivedDateTime, tier: p.tier, fields: p.fields || {}, docType: p.docType || null,
   };
+}
+
+// ── AUTO-ATTACH (Nov 2026 — Jamie: "scan accounts@ and auto-add the cost to the PO") ──
+// The sweep above only PROPOSES; the office had to click ✓ Attach on every one
+// (150 sat waiting). The hourly cron now runs the same incremental sweep and
+// attaches ONLY the proposals where every check agrees — anything doubtful stays
+// in the po-office "🔎 Sweep" list exactly as before. Rules (all must hold):
+//   • the invoice names ONE PO number, that PO exists, has NO cost and NO invoice
+//     (a PO already priced by hand is never overwritten — the office reconciles it)
+//   • it reads as an invoice (not a statement / remittance / credit note)
+//   • net > 0, gross ≥ net, net + VAT = gross (±2p) and VAT is 0–20% of net
+//   • net ≤ the auto limit (config invoice_auto_max_net, default £2,000)
+//   • the supplier agrees with the PO's supplier — read from the invoice, or the
+//     PO supplier's name appears in the sender / subject / filename
+//   • not a second invoice for a PO already auto-attached in this same run
+// Kill switch: PO_DB config `invoice_autoattach` = "off".
+const AUTO_MAX_NET_DEFAULT = 2000;
+const AUTO_PER_RUN = 25;
+const SUPPLIER_GENERIC = new Set(("and electrical electric plumbing heating supplies supply trade "
+  + "hire direct maintenance construction contractors contractor mechanical building products "
+  + "distribution wholesale centre center invoice invoices accounts mail email noreply reply "
+  + "credit control billing ebilling").split(/\s+/));
+function supplierTokens(name) {
+  const n = normSupplierName(name || "");
+  if (!n) return [];
+  const words = n.split(" ").filter(w => w.length >= 3 && !SUPPLIER_GENERIC.has(w));
+  if (words.length) return words;
+  // Only short words left ("Mr Electric" → mr): match the squashed whole name
+  // instead. A name made ONLY of trade words ("Electrical Supplies") gives nothing.
+  const all = n.split(" ");
+  if (all.every(w => SUPPLIER_GENERIC.has(w))) return [];
+  const sq = n.replace(/\s+/g, "");
+  return sq.length >= 3 ? [sq] : [];
+}
+export function supplierAgrees(poSupplier, p) {
+  const f = (p && p.fields) || {};
+  if (!normSupplierName(poSupplier || "")) return false;
+  if (f.supplier && normMatchOne(f.supplier, [poSupplier])) return true;
+  const toks = supplierTokens(poSupplier);
+  if (!toks.length) return false;
+  const hay = normSupplierName([p && p.from, p && p.subject, p && p.filename].join(" "));
+  const words = new Set(hay.split(" "));
+  if (toks.every(t => words.has(t))) return true;
+  // "Rexel - WF Senate" vs a rexel.co.uk sender: one long distinctive word is enough.
+  if (toks.some(t => t.length >= 5 && words.has(t))) return true;
+  // "Metro Rod" vs metrorod.co.uk / "PO10844" glued filenames: compare squashed,
+  // but only for a long enough name that a substring can't be a coincidence.
+  const squash = toks.join("");
+  return squash.length >= 5 && hay.replace(/\s+/g, "").includes(squash);
+}
+export function autoAttachDecision(p, opts = {}) {
+  const maxNet = Number(opts.maxNet) > 0 ? Number(opts.maxNet) : AUTO_MAX_NET_DEFAULT;
+  const f = (p && p.fields) || {};
+  const po = p && p.po;
+  if (!po) return { ok: false, why: "no PO matched" };
+  const nums = Array.from(new Set((f.poNumbers || []).map(Number).filter(Boolean)));
+  if (nums.length > 1) return { ok: false, why: "invoice names several POs" };
+  if (po.priced) return { ok: false, why: "PO already has a cost" };
+  if (po.has_invoice) return { ok: false, why: "PO already has an invoice" };
+  const dt = String(p.docType || "").toLowerCase();
+  if (dt && dt !== "invoice") return { ok: false, why: "not an invoice (" + dt + ")" };
+  const label = [p.subject, p.filename].join(" ");
+  if (/credit\s*note|statement|remittance|proof\s*of\s*(collection|delivery)|delivery\s*note|despatch|dispatch|order\s*confirm|quotation|\bquote\b|receipt|pro\s*-?\s*forma/i.test(label)) return { ok: false, why: "not an invoice (by subject/filename)" };
+  // Positive signal: the email or the file must call itself an invoice. The text
+  // tier defaults docType to "invoice", so this stops a delivery slip that happens
+  // to carry the PO number (TP "Proof of Collection … order reference 10847").
+  if (!/invoice|\binv\b|\binv[\s\-_#]*\d/i.test(label)) return { ok: false, why: "not called an invoice" };
+  const net = Number(f.net), gross = Number(f.gross);
+  const vat = f.vat != null ? Number(f.vat) : round2(gross - net);
+  if (!(f.net != null && f.gross != null && Number.isFinite(net) && Number.isFinite(gross))) return { ok: false, why: "net/gross not read" };
+  if (net <= 0 || gross < net) return { ok: false, why: "amounts don't make sense" };
+  if (Math.abs(net + vat - gross) > 0.02) return { ok: false, why: "net + VAT ≠ gross" };
+  if (net < 1) return { ok: false, why: "under £1 (probably misread)" };
+  // UK VAT is 0%, 5% or 20% — allow a few pence of per-line rounding.
+  const tol = Math.max(0.03, net * 0.005);
+  if (![0, 0.05, 0.2].some(r => Math.abs(vat - net * r) <= tol)) return { ok: false, why: "VAT isn't 0/5/20%" };
+  if (net > maxNet) return { ok: false, why: "over the £" + maxNet + " auto limit" };
+  if (!supplierAgrees(po.supplier, p)) return { ok: false, why: "supplier doesn't match the PO" };
+  return { ok: true, net: round2(net), vat: round2(vat), gross: round2(gross) };
+}
+function round2(n) { return Math.round(Number(n) * 100) / 100; }
+
+// Cron entry (index.js, hourly). Fails soft — never throws into the scheduler.
+export async function sweepInvoicesAuto(env, tenantId) {
+  const db = env.PO_DB;
+  if (!db || !graphConfigured(env)) return { skipped: "not configured" };
+  await ensurePoInvoiceCols(db);
+  const cfg = await getConfigMap(db);
+  if (String(cfg.invoice_autoattach || "").toLowerCase() === "off") return { skipped: "switched off" };
+  // Office hours-ish only (06:00–21:59 London) — nothing arrives worth a 3am run.
+  const hr = Number(new Date().toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  if (hr < 6 || hr > 21) return { skipped: "outside hours" };
+  const mailbox = cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+  const days = Math.max(1, Math.min(365, Number(cfg.invoice_sweep_days) || 180));
+  const maxNet = Number(cfg.invoice_auto_max_net) || AUTO_MAX_NET_DEFAULT;
+  const out = await runInvoiceSweep(env, db, { mailbox, days, mode: "incremental" });
+  if (out.error) return { error: out.error };
+  const sess = { tenantId: String(tenantId), user: { username: "auto-invoice-sweep", name: "Auto (invoice sweep)" } };
+  const donePOs = new Set();
+  const attached = [], held = {};
+  for (const p of (out.proposals || [])) {
+    if (attached.length >= AUTO_PER_RUN) break;
+    const d = autoAttachDecision(p, { maxNet });
+    if (d.ok && donePOs.has(p.po.po_number)) { d.ok = false; d.why = "second invoice for the same PO"; }
+    if (!d.ok) { held[d.why] = (held[d.why] || 0) + 1; continue; }
+    try {
+      const fresh = await poBrief(db, p.po.po_number);          // re-check: the office may have just priced it
+      if (!fresh || fresh.priced || fresh.has_invoice) continue;
+      const bytes = await downloadAttachment(env, mailbox, p.messageId, p.attachmentId);
+      const f = p.fields || {};
+      await writeInvoiceToPo(env, db, sess, "https://mostlane-api.jamie-def.workers.dev", {
+        poNumber: p.po.po_number, cost: d.net, existingKey: null,
+        vatRate: d.net > 0 ? Math.round(d.vat / d.net * 100) : null,
+        invoiceNo: f.invoiceNumber || "", invoiceDate: f.invoiceDate || "", vat: d.vat, gross: d.gross,
+        bytes, filename: p.filename || "invoice.pdf", contentType: "application/pdf",
+        graph: { mailbox, messageId: p.messageId, attachmentId: p.attachmentId, auto: true },
+      });
+      await recordSeen(db, sess.tenantId, mailbox, p.messageId, p.attachmentId, "auto", p.po.po_number);
+      donePOs.add(p.po.po_number);
+      attached.push({ po: p.po.po_number, net: d.net, supplier: p.po.supplier, file: p.filename });
+    } catch (e) {
+      console.error("auto-attach PO " + (p.po && p.po.po_number) + ":", e && e.message);
+      held["error"] = (held["error"] || 0) + 1;
+    }
+  }
+  // Keep the last few runs so the office can see what the robot did.
+  try {
+    let log = [];
+    try { log = JSON.parse(cfg.invoice_autoattach_log || "[]"); } catch {}
+    log.unshift({ at: new Date().toISOString(), scanned: out.scanned, proposals: (out.proposals || []).length, attached, held });
+    await updateConfig(db, { invoice_autoattach_log: JSON.stringify(log.slice(0, 48)) });
+  } catch {}
+  return { scanned: out.scanned, attached, held };
 }
 
 async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
@@ -1182,7 +1315,7 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
         fresh.push({
           mailbox, messageId: m.id, attachmentId: a.id, filename: a.name || "invoice.pdf",
           subject: m.subject || "", from: (m.from && m.from.emailAddress && m.from.emailAddress.address) || "",
-          receivedDateTime: r, tier: res.tier, fields: res.fields || {},
+          receivedDateTime: r, tier: res.tier, fields: res.fields || {}, docType: res.docType || null,
         });
       }
       if (complete && r && (!oldestFull || r < oldestFull)) oldestFull = r;

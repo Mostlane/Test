@@ -318,6 +318,10 @@ const worker = {
       ctx.waitUntil(sla.remindPendingHolds(env, 1).catch(e => console.error("scheduled hold reminder:", e)));
     }
     if (new Date().getUTCMinutes() < 5) {
+      // Supplier invoices in accounts@ → auto-attach to their PO + set the cost,
+      // hourly. Only the cast-iron matches; the rest wait in po-office "🔎 Sweep".
+      // Kill switch: PO_DB config invoice_autoattach = "off".
+      ctx.waitUntil(po.sweepInvoicesAuto(env, 1).catch(e => console.error("scheduled invoice auto-attach:", e)));
       // Data-integrity sweep — the cross-area "does everything join up?" catalogue
       // (jobs↔sites, assignments↔users↔vehicles, compliance↔sites …). Its
       // correlated NOT-EXISTS joins are the heaviest read source in the whole

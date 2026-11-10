@@ -7229,6 +7229,31 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
        never the "Total". The columnar label/value layout means `invoiceNumber()`
        (adjacent-label regex) can't pick the invoice number up — it stays blank on the
        text tier (cosmetic; PO + cost are what the matcher needs, and both are correct).
+     - **AUTO-ATTACH from the hourly cron (10 Nov 2026 — Jamie: "scan accounts@ and
+       auto-add the cost to the PO").** The sweep only ever PROPOSED (150 sat waiting
+       for a click). `po.sweepInvoicesAuto(env,1)` now runs in index.js's top-of-hour
+       block (06:00–21:59 London): the same incremental `runInvoiceSweep`, then
+       `autoAttachDecision(p)` attaches ONLY when every rule holds — ONE PO number on
+       the invoice; that PO exists with NO cost and NO invoice (a hand-priced PO is
+       never overwritten); docType not statement/remittance; subject/filename say
+       "invoice" and NOT proof-of-collection/delivery note/quote/credit note/
+       statement/receipt; net ≥ £1, net+VAT=gross ±2p, VAT ≈ 0/5/20% (±max(3p,0.5%));
+       net ≤ `invoice_auto_max_net` (PO_DB config, default £2,000); and
+       `supplierAgrees` (invoice-read supplier matches the PO's, else the PO
+       supplier's distinctive words appear in sender/subject/filename — one ≥5-letter
+       word suffices, short names match squashed, all-trade-word names never match).
+       Max 25 per run, one invoice per PO per run, PO re-read just before writing.
+       Writes via the same `writeInvoiceToPo` (invoice_meta.by = "Auto (invoice
+       sweep)", graph.auto=true) + `recordSeen(... "auto")`. Everything else stays in
+       the po-office 🔎 Sweep list unchanged. Run log (last 48) in PO_DB config
+       `invoice_autoattach_log`. **Kill switch: PO_DB config `invoice_autoattach` =
+       "off".** Dry-run on the live backlog (150): 0 auto-attached — 142 had no PO
+       match, 7 were already done, and a TP "Proof of Collection" for PO 10847 (read
+       as £0.27) was correctly REFUSED (that case is why the "invoice"/VAT/£1 rules
+       exist). Re-run with those 7 treated as unpriced: 5 would attach at the costs
+       staff entered; 10889 (PO Metroplumb, invoice Auto Trade Tyres) and 10884
+       (EPM vs "Exeter Property Maintenance") held. Test
+       `node --no-warnings worker/tools/test-invoice-autoattach.mjs` (29).
    - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
      field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
      FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a

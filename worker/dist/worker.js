@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -7753,11 +7748,14 @@ var init_graphmail = __esm({
 // src/routes/po.js
 var po_exports = {};
 __export(po_exports, {
+  autoAttachDecision: () => autoAttachDecision,
   handle: () => handle4,
   listPoSubcontractorNames: () => listPoSubcontractorNames,
   mergeSweepProposals: () => mergeSweepProposals,
   peekNextPoNumber: () => peekNextPoNumber,
-  raiseSubcontractorPO: () => raiseSubcontractorPO
+  raiseSubcontractorPO: () => raiseSubcontractorPO,
+  supplierAgrees: () => supplierAgrees,
+  sweepInvoicesAuto: () => sweepInvoicesAuto
 });
 async function ensurePoInvoiceCols__raw(db) {
   for (const ddl of [
@@ -8913,8 +8911,127 @@ function slimProposal(p) {
     from: p.from,
     receivedDateTime: p.receivedDateTime,
     tier: p.tier,
-    fields: p.fields || {}
+    fields: p.fields || {},
+    docType: p.docType || null
   };
+}
+function supplierTokens(name) {
+  const n = normSupplierName(name || "");
+  if (!n) return [];
+  const words = n.split(" ").filter((w) => w.length >= 3 && !SUPPLIER_GENERIC.has(w));
+  if (words.length) return words;
+  const all = n.split(" ");
+  if (all.every((w) => SUPPLIER_GENERIC.has(w))) return [];
+  const sq = n.replace(/\s+/g, "");
+  return sq.length >= 3 ? [sq] : [];
+}
+function supplierAgrees(poSupplier, p) {
+  const f = p && p.fields || {};
+  if (!normSupplierName(poSupplier || "")) return false;
+  if (f.supplier && normMatchOne(f.supplier, [poSupplier])) return true;
+  const toks = supplierTokens(poSupplier);
+  if (!toks.length) return false;
+  const hay = normSupplierName([p && p.from, p && p.subject, p && p.filename].join(" "));
+  const words = new Set(hay.split(" "));
+  if (toks.every((t) => words.has(t))) return true;
+  if (toks.some((t) => t.length >= 5 && words.has(t))) return true;
+  const squash = toks.join("");
+  return squash.length >= 5 && hay.replace(/\s+/g, "").includes(squash);
+}
+function autoAttachDecision(p, opts = {}) {
+  const maxNet = Number(opts.maxNet) > 0 ? Number(opts.maxNet) : AUTO_MAX_NET_DEFAULT;
+  const f = p && p.fields || {};
+  const po = p && p.po;
+  if (!po) return { ok: false, why: "no PO matched" };
+  const nums = Array.from(new Set((f.poNumbers || []).map(Number).filter(Boolean)));
+  if (nums.length > 1) return { ok: false, why: "invoice names several POs" };
+  if (po.priced) return { ok: false, why: "PO already has a cost" };
+  if (po.has_invoice) return { ok: false, why: "PO already has an invoice" };
+  const dt = String(p.docType || "").toLowerCase();
+  if (dt && dt !== "invoice") return { ok: false, why: "not an invoice (" + dt + ")" };
+  const label2 = [p.subject, p.filename].join(" ");
+  if (/credit\s*note|statement|remittance|proof\s*of\s*(collection|delivery)|delivery\s*note|despatch|dispatch|order\s*confirm|quotation|\bquote\b|receipt|pro\s*-?\s*forma/i.test(label2)) return { ok: false, why: "not an invoice (by subject/filename)" };
+  if (!/invoice|\binv\b|\binv[\s\-_#]*\d/i.test(label2)) return { ok: false, why: "not called an invoice" };
+  const net = Number(f.net), gross = Number(f.gross);
+  const vat = f.vat != null ? Number(f.vat) : round22(gross - net);
+  if (!(f.net != null && f.gross != null && Number.isFinite(net) && Number.isFinite(gross))) return { ok: false, why: "net/gross not read" };
+  if (net <= 0 || gross < net) return { ok: false, why: "amounts don't make sense" };
+  if (Math.abs(net + vat - gross) > 0.02) return { ok: false, why: "net + VAT \u2260 gross" };
+  if (net < 1) return { ok: false, why: "under \xA31 (probably misread)" };
+  const tol = Math.max(0.03, net * 5e-3);
+  if (![0, 0.05, 0.2].some((r) => Math.abs(vat - net * r) <= tol)) return { ok: false, why: "VAT isn't 0/5/20%" };
+  if (net > maxNet) return { ok: false, why: "over the \xA3" + maxNet + " auto limit" };
+  if (!supplierAgrees(po.supplier, p)) return { ok: false, why: "supplier doesn't match the PO" };
+  return { ok: true, net: round22(net), vat: round22(vat), gross: round22(gross) };
+}
+function round22(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+async function sweepInvoicesAuto(env, tenantId) {
+  const db = env.PO_DB;
+  if (!db || !graphConfigured(env)) return { skipped: "not configured" };
+  await ensurePoInvoiceCols(db);
+  const cfg = await getConfigMap(db);
+  if (String(cfg.invoice_autoattach || "").toLowerCase() === "off") return { skipped: "switched off" };
+  const hr = Number((/* @__PURE__ */ new Date()).toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  if (hr < 6 || hr > 21) return { skipped: "outside hours" };
+  const mailbox = cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+  const days = Math.max(1, Math.min(365, Number(cfg.invoice_sweep_days) || 180));
+  const maxNet = Number(cfg.invoice_auto_max_net) || AUTO_MAX_NET_DEFAULT;
+  const out = await runInvoiceSweep(env, db, { mailbox, days, mode: "incremental" });
+  if (out.error) return { error: out.error };
+  const sess = { tenantId: String(tenantId), user: { username: "auto-invoice-sweep", name: "Auto (invoice sweep)" } };
+  const donePOs = /* @__PURE__ */ new Set();
+  const attached = [], held = {};
+  for (const p of out.proposals || []) {
+    if (attached.length >= AUTO_PER_RUN) break;
+    const d = autoAttachDecision(p, { maxNet });
+    if (d.ok && donePOs.has(p.po.po_number)) {
+      d.ok = false;
+      d.why = "second invoice for the same PO";
+    }
+    if (!d.ok) {
+      held[d.why] = (held[d.why] || 0) + 1;
+      continue;
+    }
+    try {
+      const fresh = await poBrief(db, p.po.po_number);
+      if (!fresh || fresh.priced || fresh.has_invoice) continue;
+      const bytes = await downloadAttachment(env, mailbox, p.messageId, p.attachmentId);
+      const f = p.fields || {};
+      await writeInvoiceToPo(env, db, sess, "https://mostlane-api.jamie-def.workers.dev", {
+        poNumber: p.po.po_number,
+        cost: d.net,
+        existingKey: null,
+        vatRate: d.net > 0 ? Math.round(d.vat / d.net * 100) : null,
+        invoiceNo: f.invoiceNumber || "",
+        invoiceDate: f.invoiceDate || "",
+        vat: d.vat,
+        gross: d.gross,
+        bytes,
+        filename: p.filename || "invoice.pdf",
+        contentType: "application/pdf",
+        graph: { mailbox, messageId: p.messageId, attachmentId: p.attachmentId, auto: true }
+      });
+      await recordSeen(db, sess.tenantId, mailbox, p.messageId, p.attachmentId, "auto", p.po.po_number);
+      donePOs.add(p.po.po_number);
+      attached.push({ po: p.po.po_number, net: d.net, supplier: p.po.supplier, file: p.filename });
+    } catch (e) {
+      console.error("auto-attach PO " + (p.po && p.po.po_number) + ":", e && e.message);
+      held["error"] = (held["error"] || 0) + 1;
+    }
+  }
+  try {
+    let log = [];
+    try {
+      log = JSON.parse(cfg.invoice_autoattach_log || "[]");
+    } catch {
+    }
+    log.unshift({ at: (/* @__PURE__ */ new Date()).toISOString(), scanned: out.scanned, proposals: (out.proposals || []).length, attached, held });
+    await updateConfig(db, { invoice_autoattach_log: JSON.stringify(log.slice(0, 48)) });
+  } catch {
+  }
+  return { scanned: out.scanned, attached, held };
 }
 async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
@@ -8980,7 +9097,8 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
           from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
           receivedDateTime: r,
           tier: res.tier,
-          fields: res.fields || {}
+          fields: res.fields || {},
+          docType: res.docType || null
         });
       }
       if (complete && r && (!oldestFull || r < oldestFull)) oldestFull = r;
@@ -9534,7 +9652,7 @@ async function getSummary(db, params) {
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
-var DEFAULT_SWEEP_MAILBOX, ensurePoInvoiceCols, numOrNull2, PO_START;
+var DEFAULT_SWEEP_MAILBOX, ensurePoInvoiceCols, numOrNull2, AUTO_MAX_NET_DEFAULT, AUTO_PER_RUN, SUPPLIER_GENERIC, PO_START;
 var init_po = __esm({
   "src/routes/po.js"() {
     init_http();
@@ -9549,6 +9667,9 @@ var init_po = __esm({
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     };
+    AUTO_MAX_NET_DEFAULT = 2e3;
+    AUTO_PER_RUN = 25;
+    SUPPLIER_GENERIC = new Set("and electrical electric plumbing heating supplies supply trade hire direct maintenance construction contractors contractor mechanical building products distribution wholesale centre center invoice invoices accounts mail email noreply reply credit control billing ebilling".split(/\s+/));
     PO_START = 10011;
   }
 });
@@ -46697,9 +46818,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -54648,6 +54769,7 @@ var worker = {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
+      ctx.waitUntil(sweepInvoicesAuto(env, 1).catch((e) => console.error("scheduled invoice auto-attach:", e)));
       {
         const d = /* @__PURE__ */ new Date();
         if (d.getUTCDay() === 0 && d.getUTCHours() === 3) {
@@ -54677,7 +54799,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -54940,7 +55062,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };
