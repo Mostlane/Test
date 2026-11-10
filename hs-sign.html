@@ -7,9 +7,10 @@
   <title>Sign a Risk Assessment — Mostlane Portal</title>
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
-  <script src="hs-rams-render.js?v=3"></script>
+  <script src="hs-rams-render.js?v=4"></script>
   <script src="html2canvas.min.js?v=1"></script>
   <script src="hs-pdf-capture.js?v=4"></script>
+  <script src="hs-pdf-merge.js?v=1"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -118,7 +119,7 @@
   function clearSig(id){ pads[id] && pads[id].clear(); }
   const sigVal = id => pads[id] ? pads[id].get() : "";
 
-  let CUR_ID = null;
+  let CUR_ID = null, CUR_DOC = null;
 
   async function loadOne(id) {
     CUR_ID = id;
@@ -128,6 +129,7 @@
       if (!d.ok) { g("topMsg").className = "msg err"; g("topMsg").textContent = d.error || "Couldn't load that document."; return; }
       if (d.doc.doc_type !== "rams") { g("topMsg").className = "msg err"; g("topMsg").textContent = "This document type can't be signed here."; return; }
       g("signMode").classList.remove("hide");
+      CUR_DOC = d.doc;
       g("docBody").innerHTML = window.HSRamsRender(d.doc);
       const already = d.myStatus === "signed";
       if (already) {
@@ -190,7 +192,8 @@
       const pages = await window.HSCaptureDoc(el);
       const res = await authFetch("/hs/doc/pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: CUR_ID, pages }) });
       if (!res.ok) throw new Error();
-      const blob = await res.blob();
+      let blob = await res.blob();
+      if (window.HSMergeAttachments && CUR_DOC) { btn.textContent = "Adding attachments…"; blob = await window.HSMergeAttachments(blob, CUR_DOC.attachments); }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = "Risk-Assessment.pdf"; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);

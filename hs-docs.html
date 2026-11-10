@@ -7,9 +7,10 @@
   <script src="/portal-config.js?v=48"></script>
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
-  <script src="hs-rams-render.js?v=3"></script>
+  <script src="hs-rams-render.js?v=4"></script>
   <script src="html2canvas.min.js?v=1"></script>
   <script src="hs-pdf-capture.js?v=4"></script>
+  <script src="hs-pdf-merge.js?v=1"></script>
   <script src="xlsx-lite.js?v=2"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
@@ -1313,7 +1314,9 @@
       const pages = await window.HSCaptureDoc(el);
       const res = await authFetch("/hs/doc/pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: DOC_CUR.id, pages }) });
       if (!res.ok) throw new Error();
-      const blob = await res.blob();
+      let blob = await res.blob();
+      if (window.HSMergeAttachments) { btn.textContent = "Adding attachments…"; blob = await window.HSMergeAttachments(blob, DOC_CUR.attachments); }
+      if (blob.mergeErrors && blob.mergeErrors.length) alert("Couldn't add these attachments to the PDF: " + blob.mergeErrors.join(", "));
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url;
       a.download = "RA-" + String(DOC_CUR.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_") + ".pdf";
