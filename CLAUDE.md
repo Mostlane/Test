@@ -7342,7 +7342,16 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
    returns raw visits (portal dates SiteLog labour + P4 reconcile from these).
    Worker last pasted ≈ the /update-engineer-portal_username build (3,184 lines,
    tail `};`); before that the /job-costing build. Confirm with Jamie what's live.
-3. **H&S planner** — Menu 🦺 → **hs-docs.html** (the H&S hub: inductions,
+3. **H&S planner** — **Risk-assessment attachments are MERGED into the downloaded PDF (10 Nov 2026,
+   Jamie):** the RA PDF (/hs/doc/pdf) is built from page IMAGES, so an attached PDF (e.g. an SMSTS cert)
+   only appeared as a link name in the appendix. `hs-pdf-merge.js` (`window.HSMergeAttachments(blob,
+   attachments)`, self-hosted **`/pdf-lib.min.js`** 1.17.1 — CDNs are blocked in the dev sandbox and a
+   self-hosted copy can't break on a CDN outage) appends every PDF attachment's real pages after the RA,
+   on both hs-docs.html "⬇ Download PDF" and hs-sign.html's download; images stay drawn in the appendix;
+   an unreadable file is skipped with an alert naming it. The appendix line says "(included at the end of
+   this document)" (`hs-rams-render.js?v=4`). NB the signer's filed My Documents copy
+   (server `buildRaContinuousPdf`) still lists PDFs by name only.
+   Menu 🦺 → **hs-docs.html** (the H&S hub: inductions,
    hot-works permits, RAMS, incidents + the Construction Phase Plan tile).
    - **Construction Phase Plan is now PORTAL-NATIVE (Sep 2026)** —
      **cpp-builder.html** (a faithful port of the old /hs-plan app so the OUTPUT
