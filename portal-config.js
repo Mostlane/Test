@@ -946,6 +946,10 @@
   (function viewAs() {
     try {
       var OWNER = "Jamie Line";
+      // Narrow View-As grants: named non-owner users who may View As ONE specific
+      // account each. The server (/auth/impersonate) enforces the SAME map — this
+      // is only show/hide + picker filtering. The owner is unaffected by it.
+      var MLVA_GRANTS = (window.MLVA_GRANTS = window.MLVA_GRANTS || { "Chloe Molloy": ["David Molloy"] });
       var vaPage = (location.pathname.split("/").pop() || "").toLowerCase();
       var VA_SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
         "reset-password.html", "change-password.html", "hash.html"];
@@ -1002,7 +1006,13 @@
           .then(function (r) { return r.json(); })
           .then(function (d) {
             sel.innerHTML = "";
-            (d.Users || []).filter(function (u) { return u.Username !== OWNER; }).forEach(function (u) {
+            var vaMe = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+            var vaGrant = MLVA_GRANTS[vaMe];   // array of permitted targets for a granted non-owner; undefined for the owner (→ everyone)
+            (d.Users || []).filter(function (u) {
+              if (u.Username === OWNER) return false;
+              if (vaGrant) return vaGrant.indexOf(u.Username) !== -1;   // granted user: ONLY their one permitted account
+              return true;                                             // owner: everyone
+            }).forEach(function (u) {
               var o = document.createElement("option");
               o.value = u.Username;
               o.textContent = (((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)
@@ -1243,7 +1253,12 @@
       function allowed(item) {
         if (item.ownerOnly) {
           var uu = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
-          return uu === "Jamie Line" && !localStorage.getItem("mostlaneViewAsReal");
+          if (localStorage.getItem("mostlaneViewAsReal")) return false;
+          if (uu === "Jamie Line") return true;
+          // A narrowly-granted user may see ONLY the "View as" entry (no other
+          // owner-only item), to open their one permitted account.
+          if (item.launch === "viewas" && (window.MLVA_GRANTS || {})[uu]) return true;
+          return false;
         }
         if (item.always) return true;
         // Office-management boards are hidden from field engineers even when they

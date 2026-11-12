@@ -213,10 +213,18 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/auth/impersonate" && request.method === "POST") {
     if (!sess) return error("Not authenticated", 401, env, request);
     const OWNER = env.OWNER_USERNAME || "Jamie Line";
-    if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
+    // The owner can View As anyone. A tiny, explicit allow-list ADDITIONALLY lets
+    // named non-owner users View As ONE specific account each — nobody else, and
+    // nothing wider. The owner's path below is unchanged. Keep this map minimal;
+    // the UI mirrors it, but THIS server check is the real gate.
+    const VIEWAS_GRANTS = { "Chloe Molloy": ["David Molloy"] };
+    const isOwner = sess.user.username === OWNER;
+    const myGrants = VIEWAS_GRANTS[sess.user.username] || [];
+    if (!isOwner && myGrants.length === 0) return error("Not allowed", 403, env, request);
     const { username } = await request.json().catch(() => ({}));
     if (!username) return error("username required", 400, env, request);
     if (username === OWNER) return error("You are already yourself", 400, env, request);
+    if (!isOwner && myGrants.indexOf(username) === -1) return error("Not allowed", 403, env, request);
     const db = tenantDB(env, sess.tenantId);
     const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?")
       .bind(db.tenantId, username).first();

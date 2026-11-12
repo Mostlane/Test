@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=48"></script>
+  <script src="/portal-config.js?v=49"></script>
   <script src="/van-check-gate.js?v=4"></script>
   <script src="/timesheet-gate.js?v=1"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
@@ -911,11 +911,13 @@ const MAP = window.ML_PERM_MAP || {
   </script>
 
   <script>
-    // 👁 View As — owner only. Client-side show/hide; the worker enforces that
-    // only the owner account can actually impersonate.
+    // 👁 View As — owner, plus any narrowly-granted user (window.MLVA_GRANTS, set
+    // by portal-config.js). Client-side show/hide; the worker enforces who may
+    // actually impersonate and which single account they may open.
     (function () {
       var u = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
-      if (u !== "Jamie Line" || localStorage.getItem("mostlaneViewAsReal")) return;
+      var vaGrant = (window.MLVA_GRANTS || {})[u];
+      if ((u !== "Jamie Line" && !vaGrant) || localStorage.getItem("mostlaneViewAsReal")) return;
       var b = document.getElementById("viewAsBtn");
       if (!b) return;
       b.style.display = "block";
