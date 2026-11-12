@@ -101,6 +101,18 @@
     /* Keep the 📎 + 🗂 buttons on ONE line so a store with documents isn't a
        taller (two-line) row than an empty one. */
     td.docs-cell{ white-space:nowrap; }
+    /* Comments column (far right): hidden for everyone by default; the server tells
+       the page (body.can-comment) when the viewer is Full Access or Tanya. */
+    .comments-col{ display:none; }
+    body.can-comment .comments-col{ display:table-cell; }
+    th.comments-col{ min-width:200px; }
+    td.comments-col{ white-space:normal; text-align:left; padding:4px 6px; }
+    td.comments-col textarea.cmt{ width:100%; min-width:180px; box-sizing:border-box;
+      border:1px solid #cbd5e1; border-radius:6px; padding:5px 7px; font:inherit;
+      font-size:13px; line-height:1.35; resize:vertical; min-height:30px; background:#fff;
+      color:#0f2438; }
+    td.comments-col textarea.cmt:focus{ outline:none; border-color:#0071CE; box-shadow:0 0 0 2px rgba(0,113,206,.18); }
+    td.comments-col .cmt-saved{ font-size:11px; color:#16a34a; margin-top:2px; min-height:13px; }
     /* The dominant cause of tall desktop rows was long site names wrapping to a
        second line. Keep the name on one line (left-aligned so it reads naturally);
        the table already scrolls sideways if a column gets wide. */
@@ -352,7 +364,7 @@
         <thead>
           <tr>
             <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
-            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV/Forecourt</th><th>Pump</th><th>Docs</th>
+            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV/Forecourt</th><th>Pump</th><th>Docs</th><th class="comments-col">Comments</th>
           </tr>
         </thead>
         <tbody id="tableBody"><tr><td colspan="12" class="loading">Loading data…</td></tr></tbody>
@@ -471,6 +483,10 @@ let editMode = false;
 let activeStoreType = 'ALL';
 const activeCategories = new Set();
 let viewMode = 'active';   // 'active' = live chart, 'closed' = archived (Closed Sites)
+/* Restricted free-text comments: the server (/compliance/stores) sets this true
+   ONLY for Full Access users + Tanya, and returns each row's `comment` only then.
+   The Comments column is hidden (CSS) for everyone else. */
+let canComment = false;
 /* Rows for the current view: live chart shows active stores, Closed Sites shows
    archived (active===0) ones. */
 function baseData(){ return allData.filter(e => viewMode === 'closed' ? e.active === 0 : e.active !== 0); }
@@ -1128,12 +1144,18 @@ function renderTable(d){
       return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
     if (closed) tr.classList.add('closed-row');
+    // Restricted free-text comment (Full Access + Tanya only). The whole column is
+    // hidden by CSS for anyone else; we only embed the text when canComment so it
+    // never reaches another viewer's DOM.
+    const cmtCell = canComment
+      ? `<td class="comments-col"><textarea class="cmt" data-code="${esc(e.storeCode)}" rows="2" placeholder="Add a comment…">${esc(e.comment || '')}</textarea><div class="cmt-saved" data-code="${esc(e.storeCode)}"></div></td>`
+      : `<td class="comments-col"></td>`;
     tr.innerHTML = `
       <td>${esc(e.storeCode)}</td><td class="site">${esc(e.siteName)}${closedBadge}</td><td>${esc(e.storeType)}</td>
       <td>${esc(e.postcode)}</td><td class="${ws?'st-'+ws:''}">${closed ? '' : statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('pat')}${dtd('em')}
       ${dtd('pv')}${dtd('ev')}${dtd('pump')}
-      <td class="docs-cell">${docsCell}</td>
+      <td class="docs-cell">${docsCell}</td>${cmtCell}
     `;
     frag.appendChild(tr);
   });
@@ -1311,6 +1333,10 @@ async function loadFromPortal(){
     const r = await authFetch('/compliance/stores');
     const j = await r.json();
     stores = j.stores || [];
+    // The server returns canComment (+ each row's comment) ONLY for Full Access
+    // users and Tanya — so the column shows/hides itself from the server's word.
+    canComment = !!j.canComment;
+    document.body.classList.toggle('can-comment', canComment);
   }catch(e){
     console.error('loadFromPortal', e);
     // On a background refresh, keep what's on screen rather than blanking it.
@@ -1333,6 +1359,7 @@ async function loadFromPortal(){
       active: s.active == null ? 1 : s.active,
       fiveYear: d.fiveYear || '', pat: d.pat || '', em: d.em || '',
       pv: d.pv || '', ev: d.ev || '', pump: d.pump || '',
+      comment: s.comment || '',
       sharePoint: ''
     };
   });
@@ -2107,6 +2134,33 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!already){ tr.classList.add('row-sel'); selectedCode = tr.dataset.code; }
       else selectedCode = null;
       return;
+    }
+  });
+
+  // Restricted comments: autosave a store's free-text comment on blur (only the
+  // canComment users ever see the textarea). Skips an unchanged value; updates the
+  // in-memory record so a re-render keeps it; shows a brief "Saved ✓".
+  tb.addEventListener('focusout', async (ev)=>{
+    const ta = ev.target.closest('textarea.cmt');
+    if (!ta || !canComment) return;
+    const code = ta.dataset.code;
+    const text = ta.value;
+    const rec = allData.find(r => r.storeCode === code);
+    if (rec && (rec.comment || '') === text) return;   // nothing changed
+    const savedEl = ta.parentElement.querySelector('.cmt-saved');
+    if (savedEl){ savedEl.style.color = '#64748b'; savedEl.textContent = 'Saving…'; }
+    try{
+      const r = await authFetch('/compliance/store-comment', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ code, comment: text })
+      });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok || !j.ok) throw 0;
+      if (rec) rec.comment = j.comment != null ? j.comment : text;
+      if (savedEl){ savedEl.style.color = '#16a34a'; savedEl.textContent = 'Saved ✓';
+        setTimeout(()=>{ if (savedEl) savedEl.textContent = ''; }, 2000); }
+    }catch(e){
+      if (savedEl){ savedEl.style.color = '#dc2626'; savedEl.textContent = "Couldn't save — try again"; }
     }
   });
 

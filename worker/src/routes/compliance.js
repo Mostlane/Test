@@ -448,6 +448,26 @@ export async function handle(request, env, ctx, url, sess) {
   const canWrite = viaToken || level === "edit";    // edit only (all write routes key off this)
   await ensure(env);
 
+  // ── Restricted per-store COMMENTS (Southern Co-op chart) ─────────────────────
+  // A free-text comment per store, visible AND editable ONLY by Full Access users
+  // and Tanya (Tanya Chinnery) — Jamie's rule. Stored in app_config, deliberately
+  // NOT in the store `meta`/row (which /stores returns to EVERY viewer), so the
+  // text never reaches any other compliance user. Computed lazily so the extra
+  // permission lookup only runs on the two routes that need it (/stores read,
+  // /store-comment write).
+  let _canComment = null;
+  const canCommentGate = async () => {
+    if (_canComment != null) return _canComment;
+    _canComment = false;
+    if (sess && !viaToken) {
+      try {
+        const pp = await permissionsFor(env, tid, me);
+        _canComment = (pp && pp.FullAccess === "Yes") || String(me).trim().toLowerCase() === "tanya chinnery";
+      } catch {}
+    }
+    return _canComment;
+  };
+
   // Reads for a scheme's chart require at least "view" on that scheme. The public
   // /file GET (handled above, signature-gated) and the cross-scheme /site-files
   // path (site-folder, used by engineers) are deliberately NOT gated here.
@@ -696,10 +716,21 @@ export async function handle(request, env, ctx, url, sess) {
       const prev = byCode.get(r.code);
       if (!prev || (!prev.sname && r.sname)) byCode.set(r.code, r);
     }
+    // Restricted comments: only loaded (and only ever sent) when the caller may
+    // see them. Keyed by the same pad4 code the write route uses.
+    const canComment = await canCommentGate();
+    let comments = {};
+    if (canComment) {
+      try {
+        const crow = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?")
+          .bind(tid, "compliance:comments:" + scheme + ":" + tid).first();
+        comments = JSON.parse((crow && crow.value) || "{}") || {};
+      } catch {}
+    }
     const stores = [...byCode.values()].map(r => {
       let due = {}; if (r.due) { try { due = JSON.parse(r.due) || {}; } catch {} }
       let meta = {}; if (r.meta) { try { meta = JSON.parse(r.meta) || {}; } catch {} }
-      return {
+      const out = {
         code: r.code,
         name: r.sname || r.cname || "",
         postcode: r.spost || r.cpost || "",
@@ -711,8 +742,10 @@ export async function handle(request, env, ctx, url, sess) {
         meta,
         files: idx[r.code] || {},
       };
+      if (canComment) out.comment = comments[pad4(r.code) || r.code] || "";
+      return out;
     });
-    return jr({ ok: true, stores, count: stores.length }, headers);
+    return jr({ ok: true, stores, count: stores.length, canComment }, headers);
   }
 
   // ── One-time migration from the old mostlane-pos store list (browser-driven) ─
@@ -878,6 +911,23 @@ export async function handle(request, env, ctx, url, sess) {
     if (b.on) codes[code] = 1; else delete codes[code];
     await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
     return jr({ ok: true, code, on: !!b.on }, headers);
+  }
+
+  // ── Free-text COMMENT per store (RESTRICTED: Full Access + Tanya only) ────────
+  // Stored in app_config, never on the store row/meta, so the text is only ever
+  // returned to a canComment caller (see /stores). Empty text clears the comment.
+  if (sub === "/store-comment" && method === "POST") {
+    if (!(await canCommentGate())) return jr({ error: "Not allowed" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr({ error: "code required" }, headers, 400);
+    const key = "compliance:comments:" + scheme + ":" + tid;
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+    let map = {}; try { map = JSON.parse((row && row.value) || "{}") || {}; } catch {}
+    const text = String(b.comment == null ? "" : b.comment).slice(0, 2000);
+    if (text) map[code] = text; else delete map[code];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(map)).run();
+    return jr({ ok: true, code, comment: text }, headers);
   }
 
   // ── Save a store's location / access meta (📍 pin + 🔑 access) ───────────────
