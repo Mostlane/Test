@@ -61,6 +61,21 @@
     tr.detail ul{margin:4px 0 4px 2px;padding-left:16px;} tr.detail li{margin:2px 0;}
     .empty{padding:40px 16px;text-align:center;color:#6b7a90;}
     .loading{padding:40px 16px;text-align:center;color:#6b7a90;}
+    /* Clickable status pill (opens the quote popup) */
+    button.pill.pillbtn{font:inherit;font-weight:800;cursor:pointer;}
+    button.pill.pillbtn:hover{filter:brightness(.97);}
+    /* Quote / copy popup */
+    .qov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;z-index:100000;padding:16px;}
+    .qov.show{display:flex;}
+    .qcard{background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden;}
+    .qhead{display:flex;align-items:center;gap:10px;padding:14px 16px 8px;}
+    .qhead b{flex:1;color:var(--brand);font-size:16px;}
+    .qx{background:none;border:0;font-size:20px;cursor:pointer;color:#64748b;line-height:1;}
+    .c3row{display:flex;align-items:center;gap:8px;padding:4px 16px 10px;font-size:13.5px;color:#334;cursor:pointer;}
+    .c3row input{width:18px;height:18px;}
+    .qta{margin:0 16px;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;font:inherit;font-size:13.5px;line-height:1.5;color:#0f2438;resize:vertical;min-height:160px;flex:1;}
+    .qfoot{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 16px;}
+    .qfoot .sub{margin-right:auto;color:#16a34a;font-weight:700;}
     @media(max-width:760px){ .need{max-width:180px;} }
   </style>
 </head>
@@ -88,6 +103,17 @@
         </tr></thead>
         <tbody id="tbody"><tr><td colspan="6" class="loading">Loading remedials…</td></tr></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Quote / copy popup: the remedial observations for one site, C1/C2/FI by
+       default, C3 behind a tick, with a Copy text button. -->
+  <div class="qov" id="qov">
+    <div class="qcard">
+      <div class="qhead"><b id="qtitle"></b><button class="qx" id="qx" title="Close">✕</button></div>
+      <label class="c3row"><input type="checkbox" id="qc3"> Include C3 recommendations <span class="sub" id="qc3n"></span></label>
+      <textarea class="qta" id="qta" readonly spellcheck="false"></textarea>
+      <div class="qfoot"><span class="sub" id="qsv"></span><button class="act primary" id="qcopy">📋 Copy text</button></div>
     </div>
   </div>
 
@@ -144,6 +170,12 @@
     function rowHtml(r, i){
       const s = effStatus(r);
       const sc = STATUS[s];
+      // To price / Priced rows with real observations: the status pill opens the
+      // quote popup (copy the remedials — C1/C2/FI by default, C3 behind a tick).
+      const quotable = (s==="to_price"||s==="priced") && hasQuote(r);
+      const pill = quotable
+        ? '<button class="pill '+sc.cls+' pillbtn" data-quote="'+esc(r.key)+'" title="Open the remedials to copy">'+esc(sc.label)+' 📋</button>'
+        : '<span class="pill '+sc.cls+'">'+esc(sc.label)+'</span>';
       const val = (r.order && r.order.value!=null && r.order.value!=="") ? r.order.value : (r.budgetCost || "");
       // REM number cell
       let rem = '';
@@ -160,7 +192,7 @@
       return '<tr class="'+(i%2?'zeb':'')+'" data-key="'+esc(r.key)+'">'
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span>'+off+'<div class="site">'+esc(r.siteName||"")+'</div></td>'
         + '<td>'+needCell(r)+'</td>'
-        + '<td><span class="pill '+sc.cls+'">'+esc(sc.label)+'</span></td>'
+        + '<td>'+pill+'</td>'
         + '<td class="val">'+esc(gbp(val))+'</td>'
         + '<td>'+rem+'</td>'
         + '<td><div class="acts">'+(acts.join("")||'<span class="sub">—</span>')+'</div></td></tr>';
@@ -281,12 +313,47 @@
       }
     }
 
+    // ── Quote / copy popup ──
+    // A remedial line's plain description (strip any leading "[C3] " the register bakes in).
+    function remDesc(l){ return String((l && (l.action || l.description)) || "").replace(/^\s*\[[^\]]*\]\s*/, "").trim(); }
+    // Has anything worth quoting? (a coded observation, or a real description — not a
+    // generic "As per quotation" placeholder from the Concerto import.)
+    function hasQuote(r){ return (r.lines||[]).some(l => { const d=remDesc(l); return (l.code && String(l.code).trim()) || (d && !/^as per\b/i.test(d)); }); }
+    function c3count(r){ return (r.lines||[]).filter(l => String(l.code||"").toUpperCase()==="C3" && remDesc(l)).length; }
+    function quoteLines(r, withC3){ return (r.lines||[]).filter(l => remDesc(l) && (withC3 || String(l.code||"").toUpperCase()!=="C3")); }
+    // One line per observation: "C2 — description" (uncoded → just the description).
+    function buildQuoteText(r, withC3){
+      return quoteLines(r, withC3).map(l => { const c=String(l.code||"").toUpperCase().replace(/\s/g,""); const d=remDesc(l); return c ? c+" — "+d : d; }).filter(Boolean).join("\n");
+    }
+    let QKEY = null;
+    function renderQuote(){ const r=ROWS.find(x=>x.key===QKEY); if(!r) return; const t=buildQuoteText(r, g("qc3").checked); g("qta").value = t || "(no observations recorded)"; }
+    function openQuote(key){
+      const r=ROWS.find(x=>x.key===key); if(!r) return; QKEY=key;
+      g("qtitle").textContent = (r.storeCode?r.storeCode+" ":"") + (r.siteName||"");
+      const n=c3count(r); g("qc3").checked=false; g("qc3n").textContent = n ? ("("+n+" available)") : "(none)";
+      g("qsv").textContent=""; renderQuote(); g("qov").classList.add("show");
+    }
+    function closeQuote(){ g("qov").classList.remove("show"); QKEY=null; }
+    function fallbackCopy(cb){ try{ const ta=g("qta"); ta.focus(); ta.select(); document.execCommand("copy"); cb&&cb(); }catch{ (window.MLUI&&MLUI.toast?MLUI.toast:alert)("Couldn't copy automatically — select the text and copy manually."); } }
+    function copyQuoteText(){
+      const txt=g("qta").value; if(!txt || txt==="(no observations recorded)") return;
+      const done=()=>{ g("qsv").textContent="Copied ✓"; setTimeout(()=>{ g("qsv").textContent=""; },1800); };
+      try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, ()=>fallbackCopy(done)); else fallbackCopy(done); }
+      catch{ fallbackCopy(done); }
+    }
+
     // ── wiring ──
     g("search").addEventListener("input", render);
+    g("qc3").addEventListener("change", renderQuote);
+    g("qcopy").onclick = copyQuoteText;
+    g("qx").onclick = closeQuote;
+    g("qov").addEventListener("click", e => { if(e.target===g("qov")) closeQuote(); });
     g("refreshBtn").onclick = load;
     g("sumrow").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
     g("chips").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
     g("tbody").addEventListener("click", e => {
+      const qb = e.target.closest("[data-quote]");
+      if (qb){ openQuote(qb.getAttribute("data-quote")); return; }
       const exp = e.target.closest("[data-exp]");
       if (exp){ const k=exp.getAttribute("data-exp"); if(EXPANDED.has(k)) EXPANDED.delete(k); else EXPANDED.add(k); render(); return; }
       const mk = e.target.closest("[data-mk]");
