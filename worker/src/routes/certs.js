@@ -3063,6 +3063,7 @@ export async function handle(request, env, ctx, url, sess) {
         // order_number so an order the office has reconciled by hand still reads as
         // "ordered" even when its client_orders row was dismissed (cleaned off the board).
         order: r.order || (r.order_number ? { number: r.order_number, value: r.order_value, id: r.order_id || "", status: "matched" } : null),
+        orderNote: d.orderNote || "",
         satisfactory: false, storeType: "",
       };
     });
