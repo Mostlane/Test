@@ -1144,30 +1144,53 @@ function shapeRow(cert) {
 // Attach the matching client order (by SR ref first, then store code) to each
 // remedial row. There are only a few dozen orders, so match in memory. Also used
 // to keep a remedial's own order_* columns current on read.
+// A remedial order = one actually matched to a remedial (elec/fiveyear/em) or a
+// Co-op REM/R order number. A plain reactive/incident order is not one.
+function isRemedialOrder(o) {
+  const k = String(o.matched_kind || "").toLowerCase();
+  if (k === "elec" || k === "fiveyear" || k === "em") return true;
+  return /^(r|rem)\d/i.test(String(o.order_number || "").trim());
+}
+function orderText(o) { return String(o.description || o.detail || o.title || ""); }
+// Does the order text actually describe ELECTRICAL remedial works? Used to reject
+// an order that merely shares a store code / cert link but is really a door, a
+// worktop, a deep-clean, PAT, a chiller repair or a construction project — so it
+// is never shown as a remedial's "order received". (Jamie: only list an order if
+// the text matches the remedial works.)
+function looksLikeElecRemedial(t) {
+  t = String(t || "").toLowerCase();
+  if (!t) return false;
+  return /(rcd|rcbo|ip[-\s]?rat|ip[0-9]x|ip4x|distribution board|\bdb[0-9]|consumer unit|socket|circuit|cable|isolat|earth|bond|\bmcb\b|\bfuse|eicr|electric|remedial|blank plate|intumescent|fire seal|crimp|conductor|patress|\bspd\b|afdd|wiring|rewire|\bcpc\b|\bzs\b)/.test(t);
+}
+// A test is "carried out" once it's past the pre-visit states (so a satisfactory,
+// no-remedial test still counts as done and belongs on the audit list).
+function isCarriedOut(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (!s) return false;
+  return !/^(pending|scheduled|travel|travelling|in progress|on hold|quote|order)$/.test(s);
+}
+
 async function attachRemedialOrders(env, tid, rows) {
   if (!rows.length) return rows;
   const { results } = await env.DB.prepare(
-    "SELECT id, order_number, order_value, store_code, sr_ref, status, matched_kind, notified_at FROM client_orders WHERE tenant_id=? AND COALESCE(status,'') <> 'dismissed'"
+    "SELECT id, order_number, order_value, store_code, sr_ref, status, matched_kind, matched_job_id, matched_cert_id, description, detail, title, notified_at FROM client_orders WHERE tenant_id=? AND COALESCE(status,'') <> 'dismissed'"
   ).bind(tid).all().catch(() => ({ results: [] }));
-  // Only an actual REMEDIAL order may set a remedial's status. A DISMISSED order
-  // (filtered above) or an unrelated reactive/incident order for the same store
-  // (e.g. "00024748/2", no remedial match) must NOT bump a to-price remedial into
-  // "ordered" — that silently hid sites from the To-price list. A remedial order
-  // is one matched to a remedial (elec/fiveyear/em) or a Co-op REM/R order number.
-  const isRemedialOrder = o => {
-    const k = String(o.matched_kind || "").toLowerCase();
-    if (k === "elec" || k === "fiveyear" || k === "em") return true;
-    return /^(r|rem)\d/i.test(String(o.order_number || "").trim());
-  };
-  const bySr = {}, byCode = {};
-  const seen = (results || []).filter(isRemedialOrder)
+  const orders = (results || []).filter(isRemedialOrder)
     .sort((a, b) => String(b.notified_at || "").localeCompare(String(a.notified_at || "")));  // newest first
-  for (const o of seen) {
+  const byJob = {}, byCert = {}, bySr = {}, byCode = {};
+  for (const o of orders) {
+    // A JOB-linked order IS the order raised against that test's remedials — trust
+    // it. For looser links (cert / SR / store code) the order text must genuinely
+    // describe electrical remedial works, so an unrelated reactive order for the
+    // same store (a door, a clean, a worktop, PAT…) never sets "ordered".
+    if (o.matched_job_id) (byJob["JOB-" + o.matched_job_id] ||= []).push(o);
+    if (!looksLikeElecRemedial(orderText(o))) continue;
+    if (o.matched_cert_id) (byCert[String(o.matched_cert_id)] ||= []).push(o);
     if (o.sr_ref) (bySr[String(o.sr_ref).toUpperCase()] ||= []).push(o);
     const c = fyrCode(o.store_code); if (c) (byCode[c] ||= []).push(o);
   }
   for (const r of rows) {
-    const hit = (bySr[String(r.sr || "").toUpperCase()] || byCode[fyrCode(r.store_code)] || [])[0];
+    const hit = (byJob[r.id] || byCert[r.id] || bySr[String(r.sr || "").toUpperCase()] || byCode[fyrCode(r.store_code)] || [])[0];
     r.order = hit ? { number: hit.order_number, value: hit.order_value, id: hit.id, status: hit.status } : null;
   }
   return rows;
@@ -3011,14 +3034,15 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /certs/five-year/board — the remedials register (+ live order match + stage).
   if (sub === "/five-year/board" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
-    // Self-heal: every completed electrical (EICR) test with remedials should have a
-    // case here — covers jobs finished before the auto-open hook + any missed one.
+    let jobs = [];
+    try { jobs = await listJobs(env, tid); } catch {}
+    const hasRealRems = j => Array.isArray(j.remedials) && j.remedials.some(r => r && (r.description || (r.photos || []).length));
+    // Self-heal: every carried-out EICR test WITH remedials should have a case here
+    // (covers jobs sitting in a review category like "Jamie/Tanya" too, not only
+    // ones whose status literally says complete/closed/invoiced).
     try {
-      const jobs = await listJobs(env, tid);
       for (const j of jobs) {
-        if (j && j.elecTest && Array.isArray(j.remedials) &&
-            j.remedials.some(r => r && (r.description || (r.photos || []).length)) &&
-            /complete|closed|invoiced/i.test(String(j.status || ""))) {
+        if (j && j.elecTest && hasRealRems(j) && isCarriedOut(j.status)) {
           await upsertFiveYearFromJob(env, tid, j, { silent: true });
         }
       }
@@ -3035,14 +3059,30 @@ export async function handle(request, env, ctx, url, sess) {
         lines,
         source: d.source || "concerto", jobId: d.jobId || "", worksJobId: d.worksJobId || "",
         photoCount: lines.reduce((a, l) => a + ((l.photos || []).length), 0),
-        order: r.order,
+        order: r.order, satisfactory: false, storeType: "",
       };
     });
+    // Append SATISFACTORY electrical tests — carried out with no remedials — so
+    // EVERY test is accounted for, not only the ones that need works.
+    const have = new Set(rows.map(r => r.id));
+    for (const j of jobs) {
+      if (!j || !j.elecTest || !isCarriedOut(j.status) || hasRealRems(j)) continue;
+      const id = "JOB-" + j.id;
+      if (have.has(id)) continue;
+      have.add(id);
+      rows.push({
+        id, sr: "", storeCode: String(j.siteCode || ""), siteName: j.siteName || j.helpdeskRef || "",
+        element: "", quoteDate: "", budgetCost: 0, priority: "", workStatus: "",
+        stage: "satisfactory", lines: [], source: "job", jobId: j.id, worksJobId: "",
+        photoCount: 0, order: null, satisfactory: true, storeType: j.storeType || "",
+      });
+    }
     const wantStatus = (q.get("status") || "").trim();
     const filtered = wantStatus ? rows.filter(r => (r.stage || "quoted") === wantStatus) : rows;
     return json({ ok: true, rows: filtered, count: rows.length,
       toReview: rows.filter(r => r.stage === "to_review").length,
-      ordered: rows.filter(r => r.order).length }, {}, env, request);
+      ordered: rows.filter(r => r.order).length,
+      satisfactory: rows.filter(r => r.satisfactory).length }, {}, env, request);
   }
   // GET /certs/five-year/schedule?year= — the full completed-test schedule.
   if (sub === "/five-year/schedule" && method === "GET") {
