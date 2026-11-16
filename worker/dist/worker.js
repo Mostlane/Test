@@ -19927,10 +19927,16 @@ function shapeRow2(cert) {
 async function attachRemedialOrders(env, tid, rows) {
   if (!rows.length) return rows;
   const { results } = await env.DB.prepare(
-    "SELECT id, order_number, order_value, store_code, sr_ref, status FROM client_orders WHERE tenant_id=?"
+    "SELECT id, order_number, order_value, store_code, sr_ref, status, matched_kind, notified_at FROM client_orders WHERE tenant_id=? AND COALESCE(status,'') <> 'dismissed'"
   ).bind(tid).all().catch(() => ({ results: [] }));
+  const isRemedialOrder = (o) => {
+    const k = String(o.matched_kind || "").toLowerCase();
+    if (k === "elec" || k === "fiveyear" || k === "em") return true;
+    return /^(r|rem)\d/i.test(String(o.order_number || "").trim());
+  };
   const bySr = {}, byCode = {};
-  for (const o of results || []) {
+  const seen = (results || []).filter(isRemedialOrder).sort((a, b) => String(b.notified_at || "").localeCompare(String(a.notified_at || "")));
+  for (const o of seen) {
     if (o.sr_ref) (bySr[String(o.sr_ref).toUpperCase()] ||= []).push(o);
     const c = fyrCode(o.store_code);
     if (c) (byCode[c] ||= []).push(o);

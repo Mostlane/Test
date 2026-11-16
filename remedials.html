@@ -326,7 +326,14 @@
       return quoteLines(r, withC3).map(l => { const c=String(l.code||"").toUpperCase().replace(/\s/g,""); const d=remDesc(l); return c ? c+" — "+d : d; }).filter(Boolean).join("\n");
     }
     let QKEY = null;
-    function renderQuote(){ const r=ROWS.find(x=>x.key===QKEY); if(!r) return; const t=buildQuoteText(r, g("qc3").checked); g("qta").value = t || "(no observations recorded)"; }
+    function renderQuote(){
+      const r=ROWS.find(x=>x.key===QKEY); if(!r) return;
+      const withC3 = g("qc3").checked;
+      const t = buildQuoteText(r, withC3);
+      if (t) g("qta").value = t;
+      else if (!withC3 && c3count(r) > 0) g("qta").value = "All " + c3count(r) + " observation" + (c3count(r)===1?"":"s") + " here are C3 (recommendations).\nTick “Include C3 recommendations” above to copy them.";
+      else g("qta").value = "(no observations recorded)";
+    }
     function openQuote(key){
       const r=ROWS.find(x=>x.key===key); if(!r) return; QKEY=key;
       g("qtitle").textContent = (r.storeCode?r.storeCode+" ":"") + (r.siteName||"");
@@ -336,7 +343,9 @@
     function closeQuote(){ g("qov").classList.remove("show"); QKEY=null; }
     function fallbackCopy(cb){ try{ const ta=g("qta"); ta.focus(); ta.select(); document.execCommand("copy"); cb&&cb(); }catch{ (window.MLUI&&MLUI.toast?MLUI.toast:alert)("Couldn't copy automatically — select the text and copy manually."); } }
     function copyQuoteText(){
-      const txt=g("qta").value; if(!txt || txt==="(no observations recorded)") return;
+      const r=ROWS.find(x=>x.key===QKEY); if(!r) return;
+      const txt = buildQuoteText(r, g("qc3").checked);   // the real observations, not the hint
+      if (!txt){ (window.MLUI&&MLUI.toast?MLUI.toast:alert)("Nothing to copy — tick “Include C3” if the observations are all C3."); return; }
       const done=()=>{ g("qsv").textContent="Copied ✓"; setTimeout(()=>{ g("qsv").textContent=""; },1800); };
       try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, ()=>fallbackCopy(done)); else fallbackCopy(done); }
       catch{ fallbackCopy(done); }
