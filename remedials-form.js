@@ -12,7 +12,9 @@
  *   (POST /sla/jobs/{id}/create-works-job) that spins the remedials into a new
  *   unassigned site-audit job (photos carried, duration/cost stripped).
  *
- * v1
+ * v7 — office/engineer thumbnails now use the server-decorated photoUrls (signed,
+ *   viewable links) so images load on the office job card + click-to-enlarge works;
+ *   + onerror thumb→full fallback.
  */
 (function () {
   var CODES = ["", "C1", "C2", "C3", "FI"];
@@ -86,7 +88,13 @@
         id: r.id || uid(), code: CODES.indexOf(r.code) >= 0 ? r.code : "",
         description: r.description || "", minutes: Number(r.minutes) || 0,
         materialCost: Number(r.materialCost) || 0,
-        photos: (r.photos || r.photoUrls || []).map(function (p) { return typeof p === "string" ? { key: p, thumb: "", url: "" } : { key: p.key, thumb: p.thumb || "", url: p.url || "" }; }).filter(function (p) { return p.key; }),
+        // Prefer the server-decorated `photoUrls` ({key,url,thumb} carrying the
+        // signed, viewable links) when present. `r.photos` is only the raw R2 key
+        // strings, which are ALWAYS present — so the old `r.photos || r.photoUrls`
+        // took the keys first and never reached photoUrls, leaving every office
+        // thumbnail with an empty src (broken image) and nothing to enlarge. Fall
+        // back to the keys when the job wasn't decorated.
+        photos: ((Array.isArray(r.photoUrls) && r.photoUrls.length ? r.photoUrls : r.photos) || []).map(function (p) { return typeof p === "string" ? { key: p, thumb: "", url: "" } : { key: p.key, thumb: p.thumb || "", url: p.url || "" }; }).filter(function (p) { return p.key; }),
       };
     }
     function payloadItems() {
@@ -133,7 +141,7 @@
     }
     function itemHtml(r, i) {
       var opts2 = CODES.map(function (c) { return '<option value="' + c + '"' + (c === r.code ? " selected" : "") + '>' + CODE_LABEL[c] + '</option>'; }).join("");
-      var photos = r.photos.map(function (p) { return '<div class="mlr-ph"><img src="' + esc(p.thumb || p.url) + '" loading="lazy"><button type="button" class="mlr-ph-x" data-delph="' + esc(p.key) + '">✕</button></div>'; }).join("");
+      var photos = r.photos.map(function (p) { return '<div class="mlr-ph"><img src="' + esc(p.thumb || p.url) + '" data-full="' + esc(p.url || p.thumb) + '" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}"><button type="button" class="mlr-ph-x" data-delph="' + esc(p.key) + '">✕</button></div>'; }).join("");
       return '<div class="mlr-item" data-i="' + i + '">' +
         '<div class="mlr-row1"><span class="mlr-num">' + (i + 1) + '</span>' +
         '<select class="mlr-code" title="Code">' + opts2 + '</select>' +
@@ -195,7 +203,7 @@
       if (!items.length) { h += '<p class="mlr-hint">No remedials recorded — the test was satisfactory (or not yet completed).</p></div>'; el.innerHTML = h; return; }
       h += '<div class="mlr-tblwrap"><table class="mlr-tbl"><thead><tr><th>#</th><th>Code</th><th>Task</th><th>Duration</th><th>Material</th><th>Photos</th></tr></thead><tbody>';
       items.forEach(function (r, i) {
-        var photos = r.photos.map(function (p) { return '<img class="mlr-th" src="' + esc(p.thumb || p.url) + '" data-full="' + esc(p.url || p.thumb) + '" loading="lazy">'; }).join("");
+        var photos = r.photos.map(function (p) { return '<img class="mlr-th" src="' + esc(p.thumb || p.url) + '" data-full="' + esc(p.url || p.thumb) + '" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}">'; }).join("");
         h += '<tr><td>' + (i + 1) + '</td><td>' + (r.code ? '<span class="mlr-code-pill c' + r.code + '">' + esc(r.code) + '</span>' : "–") + '</td>' +
           '<td class="mlr-t">' + esc(r.description) + '</td><td>' + fmtDur(r.minutes) + '</td><td>' + fmtGBP(r.materialCost) + '</td>' +
           '<td class="mlr-ths">' + (photos || "–") + '</td></tr>';
