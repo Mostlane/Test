@@ -21969,7 +21969,10 @@ ${con.tradingTitle || "Mostlane"}`;
         jobId: d.jobId || "",
         worksJobId: d.worksJobId || "",
         photoCount: lines.reduce((a, l) => a + (l.photos || []).length, 0),
-        order: r.order,
+        // Prefer the live client-order match; fall back to the remedial's own stamped
+        // order_number so an order the office has reconciled by hand still reads as
+        // "ordered" even when its client_orders row was dismissed (cleaned off the board).
+        order: r.order || (r.order_number ? { number: r.order_number, value: r.order_value, id: r.order_id || "", status: "matched" } : null),
         satisfactory: false,
         storeType: ""
       };
