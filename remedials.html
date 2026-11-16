@@ -20,7 +20,7 @@
     .stat{flex:1 1 130px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;cursor:pointer;text-align:left;}
     .stat .n{font-size:26px;font-weight:800;color:var(--brand);line-height:1;}
     .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;margin-top:4px;}
-    .stat.amber .n{color:var(--warn);} .stat.blue .n{color:#1d4ed8;} .stat.green .n{color:var(--ok);} .stat.teal .n{color:#0f766e;}
+    .stat.amber .n{color:var(--warn);} .stat.blue .n{color:#1d4ed8;} .stat.green .n{color:var(--ok);} .stat.teal .n{color:#0f766e;} .stat.purple .n{color:#6d28d9;}
     .stat.on{outline:2px solid var(--brand);outline-offset:1px;}
     .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
     .toolbar input{padding:8px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;min-width:200px;flex:1;}
@@ -50,6 +50,7 @@
     .tl-teal{background:#ccfbf1;color:#0f766e;border-color:#5eead4;}
     .tl-grey{background:#eef2f6;color:#5a6b80;border-color:#d7dee6;}
     .tl-sat{background:#eefbf3;color:#15803d;border-color:#bbf7d0;}
+    .tl-purple{background:#ede9fe;color:#5b21b6;border-color:#c4b5fd;}
     .c3tag{display:inline-block;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;font-size:10.5px;font-weight:800;border-radius:6px;padding:1px 6px;vertical-align:middle;}
     .rem{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;white-space:nowrap;}
     .rem-warn{font-size:11.5px;font-weight:700;color:var(--warn);white-space:nowrap;}
@@ -90,7 +91,7 @@
   </header>
 
   <div class="wrap">
-    <div class="infobox">Every site that needs <b>electrical (EICR) remedial works</b>, in one list. Statuses: <b>To price</b> → <b>Priced</b> (quoted, awaiting the order) → <b>Ordered</b> (you have the REM order — create the works job) → <b>In works</b> → <b>Done</b>.</div>
+    <div class="infobox">Every site that needs <b>electrical (EICR) remedial works</b>, in one list. The status follows the real job: <b>To price</b> → <b>Priced</b> (quoted, awaiting the order) → <b>Ordered</b> (you have the REM order) → <b>In works</b> (engineer on it) → <b>Awaiting cert</b> (works done — re-issue the EICR) → <b>Done</b>.</div>
 
     <div class="sumrow" id="sumrow"></div>
 
@@ -135,11 +136,12 @@
       priced:   { label:"Priced",    cls:"tl-blue",  statcls:"blue" },
       ordered:  { label:"Ordered",   cls:"tl-green", statcls:"green" },
       in_works: { label:"In works",  cls:"tl-teal",  statcls:"teal" },
+      awaiting_cert: { label:"Awaiting cert", cls:"tl-purple", statcls:"purple" },
       done:     { label:"Done",      cls:"tl-grey",  statcls:"grey" },
       satisfactory: { label:"✓ Satisfactory", cls:"tl-sat", statcls:"sat" },
     };
-    const STATUS_ORDER = ["to_price","priced","ordered","in_works","done","satisfactory"];
-    const TILE_ORDER = ["to_price","priced","ordered","in_works"];   // the action pipeline
+    const STATUS_ORDER = ["to_price","priced","ordered","in_works","awaiting_cert","done","satisfactory"];
+    const TILE_ORDER = ["to_price","priced","ordered","in_works","awaiting_cert"];   // the action pipeline
 
     let ROWS = [];
     let FILTER = "live";                 // live = everything not done
@@ -150,7 +152,8 @@
       const st = String(r.stage||"").toLowerCase();
       if (r.satisfactory || st === "satisfactory") return "satisfactory";
       if (st === "done" || st === "invoiced") return "done";
-      if (r.worksJobId || st === "in_works") return "in_works";
+      if (r.liveStage === "awaiting_cert") return "awaiting_cert";   // works done — cert to re-issue
+      if (r.liveStage === "in_works" || r.worksJobId || st === "in_works") return "in_works";
       if (r.order || st === "ordered") return "ordered";
       if (st === "quoted" || st === "priced") return "priced";
       return "to_price";               // to_review / tested / blank
@@ -206,6 +209,7 @@
       const acts = [];
       if (r.worksJobId) acts.push('<a class="act primary" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Open works job →</a>');
       else if (s==="ordered") acts.push('<button class="act primary" data-mk="'+esc(r.key)+'">Create works job</button>');
+      if (s==="awaiting_cert") acts.push('<button class="act" data-cert="'+esc(r.key)+'" title="Mark the EICR certificate as re-issued — moves this to Done">✓ Cert updated</button>');
       if (r.jobId) acts.push('<a class="act" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job</a>');
       if (r.storeCode) acts.push('<a class="act" href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">Site</a>');
       const off = r.offRegister ? '<span class="offreg" title="This order has no matching remedial on the register — check it">⚠ not on register</span>' : '';
@@ -231,7 +235,7 @@
     }
 
     function counts(){
-      const c = { to_price:0, priced:0, ordered:0, in_works:0, done:0, satisfactory:0, c3only:0 };
+      const c = { to_price:0, priced:0, ordered:0, in_works:0, awaiting_cert:0, done:0, satisfactory:0, c3only:0 };
       ROWS.forEach(r => { c[effStatus(r)]++; if (isC3Only(r)) c.c3only++; });
       return c;
     }
@@ -251,10 +255,11 @@
       ).join("");
       // chips
       const chip = (f,label,n) => '<button class="chip'+(FILTER===f?' on':'')+'" data-f="'+f+'">'+label+(n!=null?'<span class="n">'+n+'</span>':'')+'</button>';
-      const live = c.to_price+c.priced+c.ordered+c.in_works;
+      const live = c.to_price+c.priced+c.ordered+c.in_works+c.awaiting_cert;
       g("chips").innerHTML = [
         chip("live","Live",live), chip("to_price","To price",c.to_price), chip("priced","Priced",c.priced),
         chip("ordered","Ordered",c.ordered), chip("in_works","In works",c.in_works),
+        chip("awaiting_cert","Awaiting cert",c.awaiting_cert),
         chip("c3only","C3 only",c.c3only), chip("satisfactory","Satisfactory",c.satisfactory),
         chip("done","Done",c.done), chip("all","All",ROWS.length)
       ].join("");
@@ -283,7 +288,7 @@
       const rows = board.map(r => ({
         key: "reg:"+r.id, id: r.id, storeCode: r.storeCode, siteName: r.siteName,
         lines: r.lines||[], stage: r.stage, worksJobId: r.worksJobId||"", jobId: r.jobId||"",
-        order: r.order||null, orderNote: r.orderNote||"", budgetCost: r.budgetCost, quoteDate: r.quoteDate, source: r.source,
+        order: r.order||null, orderNote: r.orderNote||"", liveStage: r.liveStage||"", worksStatus: r.worksStatus||"", budgetCost: r.budgetCost, quoteDate: r.quoteDate, source: r.source,
         photoCount: r.photoCount||0, offRegister:false,
         satisfactory: !!r.satisfactory, storeType: r.storeType||"",
       }));
@@ -340,6 +345,16 @@
       }
     }
 
+    // Mark the EICR cert re-issued → moves an "Awaiting cert" row to Done.
+    async function markCertUpdated(r, btn){
+      if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+      try {
+        const res = await authFetch("/certs/five-year/stage", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, stage:"done" }) }).then(x=>x.json());
+        if (res && res.ok){ r.stage = "done"; r.liveStage = ""; render(); (window.MLUI&&MLUI.toast)&&MLUI.toast("Marked done — certificate updated"); return; }
+        alert((res && res.error) || "Couldn't update."); if (btn){ btn.disabled=false; btn.textContent="✓ Cert updated"; }
+      } catch(e){ alert("Couldn't update."); if (btn){ btn.disabled=false; btn.textContent="✓ Cert updated"; } }
+    }
+
     // ── Quote / copy popup ──
     // A remedial line's plain description (strip any leading "[C3] " the register bakes in).
     function remDesc(l){ return String((l && (l.action || l.description)) || "").replace(/^\s*\[[^\]]*\]\s*/, "").trim(); }
@@ -392,6 +407,8 @@
       if (qb){ openQuote(qb.getAttribute("data-quote")); return; }
       const exp = e.target.closest("[data-exp]");
       if (exp){ const k=exp.getAttribute("data-exp"); if(EXPANDED.has(k)) EXPANDED.delete(k); else EXPANDED.add(k); render(); return; }
+      const cert = e.target.closest("[data-cert]");
+      if (cert){ const r = ROWS.find(x=>x.key===cert.getAttribute("data-cert")); if(r) markCertUpdated(r, cert); return; }
       const mk = e.target.closest("[data-mk]");
       if (mk){ const r = ROWS.find(x=>x.key===mk.getAttribute("data-mk")); if(r) createWorks(r, mk); return; }
     });
