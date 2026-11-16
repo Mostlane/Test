@@ -221,6 +221,8 @@
   Cache-Control: no-cache
 /five-year-remedials.html
   Cache-Control: no-cache
+/remedials.html
+  Cache-Control: no-cache
 /engineers-live.html
   Cache-Control: no-cache
 /cert-form.js

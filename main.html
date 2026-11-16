@@ -372,6 +372,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button" href="employees.html" id="StaffRecords"><span class="emoji">👷</span> Employees</a>
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
     <a class="button" href="five-year-remedials.html" id="FiveYear"><span class="emoji">⚡</span> 5-Year EICR</a>
+    <a class="button" href="remedials.html" id="Remedials"><span class="emoji">🔧</span> Remedials</a>
     <a class="button" href="chapplins.html" id="Chapplins"><span class="emoji">🏠</span> Chapplins</a>
     <a class="button" href="fbc.html" id="FBC"><span class="emoji">🏛️</span> FBC Jobs</a>
     <a class="button" href="eicr-check.html" id="EicrCheck"><span class="emoji">⚡</span> EICR Check</a>
@@ -442,6 +443,7 @@ const MAP = window.ML_PERM_MAP || {
   Forms: ["Forms", "formsBtn"],
   Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
   FiveYear: ["Compliance", "SLAAdmin"],
+  Remedials: ["Compliance", "SLAAdmin"],
   StaffRecords: ["StaffRecords"],
   Chapplins: ["Chapplins"],
   FBC: ["FullAccess", "SLAAdmin", "Compliance"],
@@ -557,7 +559,7 @@ const MAP = window.ML_PERM_MAP || {
           // PurchaseOrders2 = the "PO System" tile. Field engineers raise POs ONLY
           // from a job now (open the job → "Raise PO for this job"), so the
           // standalone PO launcher is removed for them (Oct 2026).
-          ["ClientOrders", "FBC", "FiveYear", "PurchaseOrders2"].forEach(id => {
+          ["ClientOrders", "FBC", "FiveYear", "Remedials", "PurchaseOrders2"].forEach(id => {
             const b = document.getElementById(id); if (b) b.classList.remove("visible");
           });
         }
