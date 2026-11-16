@@ -19924,25 +19924,41 @@ function shapeRow2(cert) {
   };
   return normalizeRemedials(rec);
 }
+function isRemedialOrder(o) {
+  const k = String(o.matched_kind || "").toLowerCase();
+  if (k === "elec" || k === "fiveyear" || k === "em") return true;
+  return /^(r|rem)\d/i.test(String(o.order_number || "").trim());
+}
+function orderText(o) {
+  return String(o.description || o.detail || o.title || "");
+}
+function looksLikeElecRemedial(t) {
+  t = String(t || "").toLowerCase();
+  if (!t) return false;
+  return /(rcd|rcbo|ip[-\s]?rat|ip[0-9]x|ip4x|distribution board|\bdb[0-9]|consumer unit|socket|circuit|cable|isolat|earth|bond|\bmcb\b|\bfuse|eicr|electric|remedial|blank plate|intumescent|fire seal|crimp|conductor|patress|\bspd\b|afdd|wiring|rewire|\bcpc\b|\bzs\b)/.test(t);
+}
+function isCarriedOut(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (!s) return false;
+  return !/^(pending|scheduled|travel|travelling|in progress|on hold|quote|order)$/.test(s);
+}
 async function attachRemedialOrders(env, tid, rows) {
   if (!rows.length) return rows;
   const { results } = await env.DB.prepare(
-    "SELECT id, order_number, order_value, store_code, sr_ref, status, matched_kind, notified_at FROM client_orders WHERE tenant_id=? AND COALESCE(status,'') <> 'dismissed'"
+    "SELECT id, order_number, order_value, store_code, sr_ref, status, matched_kind, matched_job_id, matched_cert_id, description, detail, title, notified_at FROM client_orders WHERE tenant_id=? AND COALESCE(status,'') <> 'dismissed'"
   ).bind(tid).all().catch(() => ({ results: [] }));
-  const isRemedialOrder = (o) => {
-    const k = String(o.matched_kind || "").toLowerCase();
-    if (k === "elec" || k === "fiveyear" || k === "em") return true;
-    return /^(r|rem)\d/i.test(String(o.order_number || "").trim());
-  };
-  const bySr = {}, byCode = {};
-  const seen = (results || []).filter(isRemedialOrder).sort((a, b) => String(b.notified_at || "").localeCompare(String(a.notified_at || "")));
-  for (const o of seen) {
+  const orders = (results || []).filter(isRemedialOrder).sort((a, b) => String(b.notified_at || "").localeCompare(String(a.notified_at || "")));
+  const byJob = {}, byCert = {}, bySr = {}, byCode = {};
+  for (const o of orders) {
+    if (o.matched_job_id) (byJob["JOB-" + o.matched_job_id] ||= []).push(o);
+    if (!looksLikeElecRemedial(orderText(o))) continue;
+    if (o.matched_cert_id) (byCert[String(o.matched_cert_id)] ||= []).push(o);
     if (o.sr_ref) (bySr[String(o.sr_ref).toUpperCase()] ||= []).push(o);
     const c = fyrCode(o.store_code);
     if (c) (byCode[c] ||= []).push(o);
   }
   for (const r of rows) {
-    const hit = (bySr[String(r.sr || "").toUpperCase()] || byCode[fyrCode(r.store_code)] || [])[0];
+    const hit = (byJob[r.id] || byCert[r.id] || bySr[String(r.sr || "").toUpperCase()] || byCode[fyrCode(r.store_code)] || [])[0];
     r.order = hit ? { number: hit.order_number, value: hit.order_value, id: hit.id, status: hit.status } : null;
   }
   return rows;
@@ -21908,10 +21924,15 @@ ${con.tradingTitle || "Mostlane"}`;
   }
   if (sub === "/five-year/board" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
+    let jobs = [];
     try {
-      const jobs = await listJobs(env, tid);
+      jobs = await listJobs(env, tid);
+    } catch {
+    }
+    const hasRealRems = (j) => Array.isArray(j.remedials) && j.remedials.some((r) => r && (r.description || (r.photos || []).length));
+    try {
       for (const j of jobs) {
-        if (j && j.elecTest && Array.isArray(j.remedials) && j.remedials.some((r) => r && (r.description || (r.photos || []).length)) && /complete|closed|invoiced/i.test(String(j.status || ""))) {
+        if (j && j.elecTest && hasRealRems(j) && isCarriedOut(j.status)) {
           await upsertFiveYearFromJob(env, tid, j, { silent: true });
         }
       }
@@ -21948,9 +21969,38 @@ ${con.tradingTitle || "Mostlane"}`;
         jobId: d.jobId || "",
         worksJobId: d.worksJobId || "",
         photoCount: lines.reduce((a, l) => a + (l.photos || []).length, 0),
-        order: r.order
+        order: r.order,
+        satisfactory: false,
+        storeType: ""
       };
     });
+    const have = new Set(rows.map((r) => r.id));
+    for (const j of jobs) {
+      if (!j || !j.elecTest || !isCarriedOut(j.status) || hasRealRems(j)) continue;
+      const id = "JOB-" + j.id;
+      if (have.has(id)) continue;
+      have.add(id);
+      rows.push({
+        id,
+        sr: "",
+        storeCode: String(j.siteCode || ""),
+        siteName: j.siteName || j.helpdeskRef || "",
+        element: "",
+        quoteDate: "",
+        budgetCost: 0,
+        priority: "",
+        workStatus: "",
+        stage: "satisfactory",
+        lines: [],
+        source: "job",
+        jobId: j.id,
+        worksJobId: "",
+        photoCount: 0,
+        order: null,
+        satisfactory: true,
+        storeType: j.storeType || ""
+      });
+    }
     const wantStatus = (q.get("status") || "").trim();
     const filtered = wantStatus ? rows.filter((r) => (r.stage || "quoted") === wantStatus) : rows;
     return json({
@@ -21958,7 +22008,8 @@ ${con.tradingTitle || "Mostlane"}`;
       rows: filtered,
       count: rows.length,
       toReview: rows.filter((r) => r.stage === "to_review").length,
-      ordered: rows.filter((r) => r.order).length
+      ordered: rows.filter((r) => r.order).length,
+      satisfactory: rows.filter((r) => r.satisfactory).length
     }, {}, env, request);
   }
   if (sub === "/five-year/schedule" && method === "GET") {
@@ -26604,7 +26655,7 @@ function stripPricing(text) {
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
-function orderText(o) {
+function orderText2(o) {
   const d = String(o.description || o.detail || "").trim();
   return stripPricing(d || String(o.title || "").trim());
 }
@@ -26721,7 +26772,7 @@ async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   if (linked) return { job: linked, how: "linked" };
   const inc = orderRefIncident(ref);
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
-  const text = orderText(o);
+  const text = orderText2(o);
   if (sibs.length) {
     const finished = await jobFinishedFor(env, tenantId);
     const skip = String(o && o.unlinkedJobId || "");

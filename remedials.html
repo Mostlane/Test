@@ -49,6 +49,8 @@
     .tl-green{background:#dcfce7;color:#166534;border-color:#86efac;}
     .tl-teal{background:#ccfbf1;color:#0f766e;border-color:#5eead4;}
     .tl-grey{background:#eef2f6;color:#5a6b80;border-color:#d7dee6;}
+    .tl-sat{background:#eefbf3;color:#15803d;border-color:#bbf7d0;}
+    .c3tag{display:inline-block;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;font-size:10.5px;font-weight:800;border-radius:6px;padding:1px 6px;vertical-align:middle;}
     .rem{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;white-space:nowrap;}
     .rem-warn{font-size:11.5px;font-weight:700;color:var(--warn);white-space:nowrap;}
     .val{font-variant-numeric:tabular-nums;white-space:nowrap;}
@@ -133,8 +135,10 @@
       ordered:  { label:"Ordered",   cls:"tl-green", statcls:"green" },
       in_works: { label:"In works",  cls:"tl-teal",  statcls:"teal" },
       done:     { label:"Done",      cls:"tl-grey",  statcls:"grey" },
+      satisfactory: { label:"✓ Satisfactory", cls:"tl-sat", statcls:"sat" },
     };
-    const STATUS_ORDER = ["to_price","priced","ordered","in_works","done"];
+    const STATUS_ORDER = ["to_price","priced","ordered","in_works","done","satisfactory"];
+    const TILE_ORDER = ["to_price","priced","ordered","in_works"];   // the action pipeline
 
     let ROWS = [];
     let FILTER = "live";                 // live = everything not done
@@ -143,12 +147,22 @@
     // Effective status from the register stage + whether an order is attached.
     function effStatus(r){
       const st = String(r.stage||"").toLowerCase();
+      if (r.satisfactory || st === "satisfactory") return "satisfactory";
       if (st === "done" || st === "invoiced") return "done";
       if (r.worksJobId || st === "in_works") return "in_works";
       if (r.order || st === "ordered") return "ordered";
       if (st === "quoted" || st === "priced") return "priced";
       return "to_price";               // to_review / tested / blank
     }
+    // A site whose observations are ALL C3 (recommendations only) — flagged clearly.
+    function isC3Only(r){
+      if (r.satisfactory) return false;
+      const coded = (r.lines||[]).map(l=>String(l.code||"").toUpperCase().replace(/[^A-Z0-9]/g,"")).filter(c=>["C1","C2","C3","FI"].includes(c));
+      return coded.length>0 && coded.every(c=>c==="C3");
+    }
+    // Does an order's text actually read as electrical remedial works? (keeps a
+    // ram-raid / door / worktop / PAT order off the remedials list.)
+    function looksElec(t){ t=String(t||"").toLowerCase(); return /(rcd|rcbo|ip[-\s]?rat|ip[0-9]x|distribution board|\bdb[0-9]|consumer unit|socket|circuit|cable|isolat|earth|bond|\bmcb\b|\bfuse|eicr|electric|remedial|blank plate|intumescent|fire seal|crimp|conductor|patress|\bspd\b|afdd|wiring|rewire|\bcpc\b|\bzs\b)/.test(t); }
 
     function codePills(lines){
       const codes = [];
@@ -156,6 +170,7 @@
       return codes.map(c => '<span class="codepill c'+c+'">'+c+'</span>').join("");
     }
     function needCell(r){
+      if (r.satisfactory) return '<span class="sub">✓ No remedials — satisfactory</span>';
       const lines = r.lines || [];
       if (!lines.length){
         const d = String(r.detail||"").trim();
@@ -176,6 +191,7 @@
       const pill = quotable
         ? '<button class="pill '+sc.cls+' pillbtn" data-quote="'+esc(r.key)+'" title="Open the remedials to copy">'+esc(sc.label)+' 📋</button>'
         : '<span class="pill '+sc.cls+'">'+esc(sc.label)+'</span>';
+      const c3badge = isC3Only(r) ? ' <span class="c3tag" title="All observations are C3 (recommendations only)">C3 only</span>' : '';
       const val = (r.order && r.order.value!=null && r.order.value!=="") ? r.order.value : (r.budgetCost || "");
       // REM number cell
       let rem = '';
@@ -192,7 +208,7 @@
       return '<tr class="'+(i%2?'zeb':'')+'" data-key="'+esc(r.key)+'">'
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span>'+off+'<div class="site">'+esc(r.siteName||"")+'</div></td>'
         + '<td>'+needCell(r)+'</td>'
-        + '<td>'+pill+'</td>'
+        + '<td>'+pill+c3badge+'</td>'
         + '<td class="val">'+esc(gbp(val))+'</td>'
         + '<td>'+rem+'</td>'
         + '<td><div class="acts">'+(acts.join("")||'<span class="sub">—</span>')+'</div></td></tr>';
@@ -211,21 +227,22 @@
     }
 
     function counts(){
-      const c = { to_price:0, priced:0, ordered:0, in_works:0, done:0 };
-      ROWS.forEach(r => { c[effStatus(r)]++; });
+      const c = { to_price:0, priced:0, ordered:0, in_works:0, done:0, satisfactory:0, c3only:0 };
+      ROWS.forEach(r => { c[effStatus(r)]++; if (isC3Only(r)) c.c3only++; });
       return c;
     }
     function matchesFilter(r){
       const s = effStatus(r);
       if (FILTER === "all") return true;
-      if (FILTER === "live") return s !== "done";
+      if (FILTER === "live") return s !== "done" && s !== "satisfactory";   // live = needs attention
+      if (FILTER === "c3only") return isC3Only(r);
       return s === FILTER;
     }
 
     function render(){
       const c = counts();
       // stat cards
-      g("sumrow").innerHTML = STATUS_ORDER.filter(k=>k!=="done").map(k =>
+      g("sumrow").innerHTML = TILE_ORDER.map(k =>
         '<button class="stat '+STATUS[k].statcls+(FILTER===k?' on':'')+'" data-f="'+k+'"><div class="n">'+c[k]+'</div><div class="l">'+STATUS[k].label+'</div></button>'
       ).join("");
       // chips
@@ -233,7 +250,9 @@
       const live = c.to_price+c.priced+c.ordered+c.in_works;
       g("chips").innerHTML = [
         chip("live","Live",live), chip("to_price","To price",c.to_price), chip("priced","Priced",c.priced),
-        chip("ordered","Ordered",c.ordered), chip("in_works","In works",c.in_works), chip("done","Done",c.done), chip("all","All",ROWS.length)
+        chip("ordered","Ordered",c.ordered), chip("in_works","In works",c.in_works),
+        chip("c3only","C3 only",c.c3only), chip("satisfactory","Satisfactory",c.satisfactory),
+        chip("done","Done",c.done), chip("all","All",ROWS.length)
       ].join("");
 
       const q = g("search").value.trim().toLowerCase();
@@ -262,6 +281,7 @@
         lines: r.lines||[], stage: r.stage, worksJobId: r.worksJobId||"", jobId: r.jobId||"",
         order: r.order||null, budgetCost: r.budgetCost, quoteDate: r.quoteDate, source: r.source,
         photoCount: r.photoCount||0, offRegister:false,
+        satisfactory: !!r.satisfactory, storeType: r.storeType||"",
       }));
       const haveStores = new Set(rows.map(r => fyrCode(r.storeCode)));
 
@@ -274,6 +294,9 @@
           const isRemedial = ["elec","fiveyear"].includes(o.matchedKind) || /^(R|REM)\d/i.test(String(o.orderNumber||""));
           if (!isRemedial) return;
           if (o.status === "dismissed") return;
+          // Only surface it if the ORDER TEXT genuinely reads as electrical remedial
+          // works — a ram-raid / door / worktop / PAT order is not a remedial.
+          if (!looksElec(o.description || o.detail || o.title || "")) return;
           const code = fyrCode(o.storeCode);
           if (!code || haveStores.has(code)) return;      // already shown via the register
           const worksJobId = (o.job && o.job.id && !o.canCreateWorks) ? o.job.id : "";
