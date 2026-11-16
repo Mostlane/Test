@@ -21940,6 +21940,42 @@ ${con.tradingTitle || "Mostlane"}`;
     }
     let { results } = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? ORDER BY quote_date DESC, store_code").bind(tid).all();
     results = await attachRemedialOrders(env, tid, results || []);
+    let doneCats = /* @__PURE__ */ new Set();
+    try {
+      const cfg = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+      for (const c of JSON.parse(cfg && cfg.value || "[]") || []) if (c && c.done) doneCats.add(String(c.name || "").trim().toLowerCase());
+    } catch {
+    }
+    const BUILTIN_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced"]);
+    const worksDone = (st) => {
+      const s = String(st || "").trim().toLowerCase();
+      return BUILTIN_DONE.has(s) || doneCats.has(s);
+    };
+    const isCancel = (st) => String(st || "").trim().toLowerCase() === "cancelled";
+    const orderToks = (s) => String(s || "").toUpperCase().match(/\b(?:REM|R)\d{3,}\b/g) || [];
+    const jobsById = {}, jobsByTok = {};
+    for (const j of jobs) {
+      if (!j || !j.id) continue;
+      jobsById[j.id] = j;
+      if (j.elecTest || isCancel(j.status)) continue;
+      for (const t of orderToks(j.helpdeskRef || j.reference || "")) (jobsByTok[t] ||= []).push(j);
+    }
+    const liveFor = (r, d) => {
+      let j = null;
+      if (d.worksJobId && jobsById[d.worksJobId] && !isCancel(jobsById[d.worksJobId].status)) j = jobsById[d.worksJobId];
+      const num5 = r.order_number || r.order && r.order.number || "";
+      if (!j && num5) {
+        for (const t of orderToks(num5)) {
+          const arr = jobsByTok[t];
+          if (arr && arr.length) {
+            j = arr.slice().sort((a, b) => String(b.scheduledAt || b.createdAt || "").localeCompare(String(a.scheduledAt || a.createdAt || "")))[0];
+            break;
+          }
+        }
+      }
+      if (!j) return { liveStage: "", worksStatus: "", worksJobId: d.worksJobId || "" };
+      return { liveStage: worksDone(j.status) ? "awaiting_cert" : "in_works", worksStatus: j.status || "", worksJobId: j.id };
+    };
     const rows = results.map((r) => {
       let d = {};
       try {
@@ -21953,6 +21989,7 @@ ${con.tradingTitle || "Mostlane"}`;
           return [];
         }
       })();
+      const lv = liveFor(r, d);
       return {
         id: r.id,
         sr: r.sr,
@@ -21967,7 +22004,9 @@ ${con.tradingTitle || "Mostlane"}`;
         lines,
         source: d.source || "concerto",
         jobId: d.jobId || "",
-        worksJobId: d.worksJobId || "",
+        worksJobId: lv.worksJobId,
+        liveStage: lv.liveStage,
+        worksStatus: lv.worksStatus,
         photoCount: lines.reduce((a, l) => a + (l.photos || []).length, 0),
         // Prefer the live client-order match; fall back to the remedial's own stamped
         // order_number so an order the office has reconciled by hand still reads as

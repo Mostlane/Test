@@ -3049,15 +3049,52 @@ export async function handle(request, env, ctx, url, sess) {
     } catch {}
     let { results } = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? ORDER BY quote_date DESC, store_code").bind(tid).all();
     results = await attachRemedialOrders(env, tid, results || []);
+    // ── live works-job overlay: show each case's REAL job progress ──────────
+    // The remedial is worked as a real job — a "REM####"/"R####"-titled job, or an
+    // audit job linked via worksJobId. Find it by the case's ORDER NUMBER appearing
+    // in a job's reference (unambiguous), read its live status, and surface it so the
+    // board shows true progress (In works → Awaiting cert update) instead of a static
+    // stage. The EICR TEST job itself (elecTest) is never treated as the works job.
+    let doneCats = new Set();
+    try {
+      const cfg = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+      for (const c of (JSON.parse((cfg && cfg.value) || "[]") || [])) if (c && c.done) doneCats.add(String(c.name || "").trim().toLowerCase());
+    } catch {}
+    const BUILTIN_DONE = new Set(["complete", "closed jobs", "closed", "invoiced"]);
+    const worksDone = st => { const s = String(st || "").trim().toLowerCase(); return BUILTIN_DONE.has(s) || doneCats.has(s); };
+    const isCancel = st => String(st || "").trim().toLowerCase() === "cancelled";
+    const orderToks = s => (String(s || "").toUpperCase().match(/\b(?:REM|R)\d{3,}\b/g) || []);
+    const jobsById = {}, jobsByTok = {};
+    for (const j of jobs) {
+      if (!j || !j.id) continue;
+      jobsById[j.id] = j;
+      if (j.elecTest || isCancel(j.status)) continue;     // the works job is never the test
+      for (const t of orderToks(j.helpdeskRef || j.reference || "")) (jobsByTok[t] ||= []).push(j);
+    }
+    const liveFor = (r, d) => {
+      let j = null;
+      if (d.worksJobId && jobsById[d.worksJobId] && !isCancel(jobsById[d.worksJobId].status)) j = jobsById[d.worksJobId];
+      const num = r.order_number || (r.order && r.order.number) || "";
+      if (!j && num) {
+        for (const t of orderToks(num)) {
+          const arr = jobsByTok[t];
+          if (arr && arr.length) { j = arr.slice().sort((a, b) => String(b.scheduledAt || b.createdAt || "").localeCompare(String(a.scheduledAt || a.createdAt || "")))[0]; break; }
+        }
+      }
+      if (!j) return { liveStage: "", worksStatus: "", worksJobId: d.worksJobId || "" };
+      return { liveStage: worksDone(j.status) ? "awaiting_cert" : "in_works", worksStatus: j.status || "", worksJobId: j.id };
+    };
     const rows = results.map(r => {
       let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
       const lines = (() => { try { return JSON.parse(r.lines || "[]"); } catch { return []; } })();
+      const lv = liveFor(r, d);
       return {
         id: r.id, sr: r.sr, storeCode: r.store_code, siteName: r.site_name,
         element: r.element, quoteDate: r.quote_date, budgetCost: r.budget_cost,
         priority: r.priority, workStatus: r.work_status, stage: r.stage || "quoted",
         lines,
-        source: d.source || "concerto", jobId: d.jobId || "", worksJobId: d.worksJobId || "",
+        source: d.source || "concerto", jobId: d.jobId || "", worksJobId: lv.worksJobId,
+        liveStage: lv.liveStage, worksStatus: lv.worksStatus,
         photoCount: lines.reduce((a, l) => a + ((l.photos || []).length), 0),
         // Prefer the live client-order match; fall back to the remedial's own stamped
         // order_number so an order the office has reconciled by hand still reads as
