@@ -1442,15 +1442,23 @@
   /* ── Photos (gallery + cover) ── */
   let PHOTO_REG=null;
   // Shrink in the browser so uploads are quick on phone data (same as personalise).
-  async function shrinkImg(file){
-    try{
-      const bmp=await createImageBitmap(file);
-      const scale=Math.min(1,1600/Math.max(bmp.width,bmp.height));
-      const c=document.createElement("canvas");
-      c.width=Math.round(bmp.width*scale); c.height=Math.round(bmp.height*scale);
-      c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
-      return await new Promise(res=>c.toBlob(res,"image/jpeg",0.82));
-    }catch(e){ return file; }   // fall back to the raw file if the browser can't decode it
+  // Decode via <img> (createImageBitmap throws on iPhone HEIC photos on iOS Safari);
+  // hard timeout + fall back to the raw file so an upload never hangs or is lost.
+  function shrinkImg(file){
+    return new Promise(resolve=>{
+      let done=false; const img=new Image(); const url=URL.createObjectURL(file);
+      const cleanup=()=>{ try{ URL.revokeObjectURL(url); }catch(e){} };
+      const fin=v=>{ if(done) return; done=true; cleanup(); resolve(v); };
+      const t=setTimeout(()=>fin(file),10000);
+      img.onload=()=>{ if(done) return;
+        try{ let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+          const s=Math.min(1,1600/Math.max(w,h)); w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+          const c=document.createElement("canvas"); c.width=w; c.height=h; c.getContext("2d").drawImage(img,0,0,w,h);
+          c.toBlob(b=>{ clearTimeout(t); fin(b||file); },"image/jpeg",0.82);
+        }catch(e){ clearTimeout(t); fin(file); } };
+      img.onerror=()=>{ clearTimeout(t); fin(file); };
+      img.src=url;
+    });
   }
   let PHOTO_ALL=[];   // all photos for the open vehicle (uploaded + van-check)
   let PHOTO_SORT=(localStorage.getItem("mlVehPhotoSort")==="asc")?"asc":"desc";   // desc = newest first
