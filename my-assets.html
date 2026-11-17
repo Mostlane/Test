@@ -371,13 +371,36 @@
     });
 
     // ── Condition photos: shared picker (camera on phones, compressed) ──
-    async function shrink(file) {
-      const bmp = await createImageBitmap(file);
-      const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
-      const c = document.createElement("canvas");
-      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
-      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-      return c.toDataURL("image/jpeg", 0.72);
+    // Decode via <img> (createImageBitmap throws on iPhone HEIC photos on iOS Safari);
+    // hard timeout + FileReader fallback so an upload never hangs or silently loses a photo.
+    function shrink(file) {
+      return new Promise((resolve, reject) => {
+        let done = false; const img = new Image(); const url = URL.createObjectURL(file);
+        const cleanup = () => { try { URL.revokeObjectURL(url); } catch (e) {} };
+        const fallback = () => {
+          if (done) return;
+          try {
+            const fr = new FileReader();
+            fr.onload = () => { if (done) return; done = true; cleanup(); resolve(fr.result); };
+            fr.onerror = () => { if (done) return; done = true; cleanup(); reject(new Error("image")); };
+            fr.readAsDataURL(file);
+          } catch (e) { if (!done) { done = true; cleanup(); reject(new Error("image")); } }
+        };
+        const t = setTimeout(fallback, 10000);
+        img.onload = () => {
+          if (done) return;
+          try {
+            let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+            const scale = Math.min(1, 1280 / Math.max(w, h));
+            w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+            const c = document.createElement("canvas"); c.width = w; c.height = h;
+            c.getContext("2d").drawImage(img, 0, 0, w, h);
+            clearTimeout(t); done = true; cleanup(); resolve(c.toDataURL("image/jpeg", 0.72));
+          } catch (e) { clearTimeout(t); fallback(); }
+        };
+        img.onerror = () => { clearTimeout(t); fallback(); };
+        img.src = url;
+      });
     }
     function photoPicker(btnId, fileId, stripId) {
       const store = [];
