@@ -21958,7 +21958,7 @@ ${con.tradingTitle || "Mostlane"}`;
       if (!j || !j.id) continue;
       jobsById[j.id] = j;
       if (j.elecTest || isCancel(j.status)) continue;
-      for (const t of orderToks(j.helpdeskRef || j.reference || "")) (jobsByTok[t] ||= []).push(j);
+      for (const t of orderToks([j.helpdeskRef, j.reference, j.id].filter(Boolean).join(" "))) (jobsByTok[t] ||= []).push(j);
     }
     const liveFor = (r, d) => {
       let j = null;
