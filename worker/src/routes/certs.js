@@ -3069,7 +3069,9 @@ export async function handle(request, env, ctx, url, sess) {
       if (!j || !j.id) continue;
       jobsById[j.id] = j;
       if (j.elecTest || isCancel(j.status)) continue;     // the works job is never the test
-      for (const t of orderToks(j.helpdeskRef || j.reference || "")) (jobsByTok[t] ||= []).push(j);
+      // The order number can sit in the reference OR the job id (some works jobs are
+      // titled "R27796, Odiham…" with the site name as the reference), so scan both.
+      for (const t of orderToks([j.helpdeskRef, j.reference, j.id].filter(Boolean).join(" "))) (jobsByTok[t] ||= []).push(j);
     }
     const liveFor = (r, d) => {
       let j = null;
