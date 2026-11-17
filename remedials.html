@@ -55,6 +55,18 @@
     .rem{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;white-space:nowrap;}
     .rem-warn{font-size:11.5px;font-weight:700;color:var(--warn);white-space:nowrap;}
     .ordnote{display:block;white-space:normal;font-size:10.5px;font-weight:700;color:#9a3412;margin-top:3px;line-height:1.3;max-width:240px;}
+    .mflag{margin-left:5px;color:#6d28d9;font-weight:800;cursor:default;}
+    .nflag{margin-left:4px;cursor:default;}
+    .statusedit{margin-top:11px;padding-top:10px;border-top:1px dashed #d7dee6;}
+    .selab{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#5a6b80;margin:9px 0 5px;}
+    .schips{display:flex;flex-wrap:wrap;gap:6px;}
+    .schip{border:1px solid #ccd5dd;background:#fff;border-radius:999px;padding:5px 11px;font:inherit;font-size:12.5px;font-weight:700;color:#334;cursor:pointer;}
+    .schip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .schip.auto{color:#b45309;border-color:#fcd34d;background:#fffbeb;}
+    .noteta{display:block;width:100%;max-width:560px;border:1px solid #cbd5e1;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;min-height:54px;resize:vertical;color:#0f2438;}
+    .serow{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap;}
+    .sesave{font-size:12px;font-weight:700;color:var(--ok);}
+    .semeta{font-size:12px;color:#5a6b80;}
     .val{font-variant-numeric:tabular-nums;white-space:nowrap;}
     .offreg{display:inline-block;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;font-size:10.5px;font-weight:700;border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap;}
     .acts{display:flex;gap:6px;flex-wrap:wrap;white-space:nowrap;}
@@ -150,6 +162,7 @@
     // Effective status from the register stage + whether an order is attached.
     function effStatus(r){
       const st = String(r.stage||"").toLowerCase();
+      if (r.manualStage) return r.manualStage;          // office manual override wins
       if (r.satisfactory || st === "satisfactory") return "satisfactory";
       if (st === "done" || st === "invoiced") return "done";
       if (r.liveStage === "awaiting_cert") return "awaiting_cert";   // works done — cert to re-issue
@@ -196,6 +209,8 @@
         ? '<button class="pill '+sc.cls+' pillbtn" data-quote="'+esc(r.key)+'" title="Open the remedials to copy">'+esc(sc.label)+' 📋</button>'
         : '<span class="pill '+sc.cls+'">'+esc(sc.label)+'</span>';
       const c3badge = isC3Only(r) ? ' <span class="c3tag" title="All observations are C3 (recommendations only)">C3 only</span>' : '';
+      const mflag = r.manualStage ? ' <span class="mflag" title="Status set manually'+(r.manualBy?(' by '+esc(r.manualBy)):'')+(r.manualAt?(' on '+esc(fmtD(r.manualAt))):'')+'">✎</span>' : '';
+      const nflag = r.note ? ' <span class="nflag" title="'+esc(r.note)+'">📝</span>' : '';
       const val = (r.order && r.order.value!=null && r.order.value!=="") ? r.order.value : (r.budgetCost || "");
       // REM number cell
       let rem = '';
@@ -210,18 +225,37 @@
       if (r.worksJobId) acts.push('<a class="act primary" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Open works job →</a>');
       else if (s==="ordered") acts.push('<button class="act primary" data-mk="'+esc(r.key)+'">Create works job</button>');
       if (s==="awaiting_cert") acts.push('<button class="act" data-cert="'+esc(r.key)+'" title="Mark the EICR certificate as re-issued — moves this to Done">✓ Cert updated</button>');
+      acts.push('<button class="act" data-edit="'+esc(r.key)+'" title="Change status / add a note">✏️ Status</button>');
       if (r.jobId) acts.push('<a class="act" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job</a>');
       if (r.storeCode) acts.push('<a class="act" href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">Site</a>');
       const off = r.offRegister ? '<span class="offreg" title="This order has no matching remedial on the register — check it">⚠ not on register</span>' : '';
       return '<tr class="'+(i%2?'zeb':'')+'" data-key="'+esc(r.key)+'">'
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span>'+off+'<div class="site">'+esc(r.siteName||"")+'</div></td>'
         + '<td>'+needCell(r)+'</td>'
-        + '<td>'+pill+c3badge+'</td>'
+        + '<td>'+pill+c3badge+mflag+nflag+'</td>'
         + '<td class="val">'+esc(gbp(val))+'</td>'
         + '<td>'+rem+'</td>'
         + '<td><div class="acts">'+(acts.join("")||'<span class="sub">—</span>')+'</div></td></tr>';
     }
 
+    const STAGE_OPTS = ["to_price","priced","ordered","in_works","awaiting_cert","done"];
+    // The expandable status editor: pick a status manually (wins over the automatic
+    // one), clear back to Auto, and add a note. Shown inside the expanded row.
+    function statusEditor(r){
+      const cur = effStatus(r);
+      const chips = STAGE_OPTS.map(k => '<button class="schip'+(cur===k?' on':'')+'" data-setstage="'+esc(r.key)+'|'+k+'">'+esc(STATUS[k].label)+'</button>').join("");
+      const auto = r.manualStage ? '<button class="schip auto" data-setstage="'+esc(r.key)+'|">↩ Auto (follow the job)</button>' : '';
+      const meta = r.manualStage
+        ? '<span class="semeta">Set manually'+(r.manualBy?(' by '+esc(r.manualBy)):'')+(r.manualAt?(' · '+esc(fmtD(r.manualAt))):'')+'</span>'
+        : '<span class="semeta">Following the job automatically</span>';
+      return '<div class="statusedit">'
+        + '<div class="selab">Set status manually</div>'
+        + '<div class="schips">'+chips+auto+'</div>'
+        + '<div class="selab">Notes</div>'
+        + '<textarea class="noteta" data-noteta="'+esc(r.key)+'" placeholder="Add a note for this site…">'+esc(r.note||"")+'</textarea>'
+        + '<div class="serow"><button class="act primary" data-savenote="'+esc(r.key)+'">Save note</button> <span class="sesave" data-savemsg="'+esc(r.key)+'"></span> '+meta+'</div>'
+        + '</div>';
+    }
     function detailHtml(r){
       const lines = r.lines || [];
       let body = lines.length
@@ -231,7 +265,7 @@
       if (r.quoteDate) bits.push("Quoted/raised "+fmtD(r.quoteDate));
       if (r.order && r.order.number) bits.push("Order "+esc(r.order.number));
       if (r.source) bits.push("Source: "+esc(r.source));
-      return '<tr class="detail"><td colspan="6"><b>Remedial works at '+esc(r.storeCode||"")+' '+esc(r.siteName||"")+'</b>'+body+(bits.length?'<div class="sub">'+bits.join(" · ")+'</div>':'')+'</td></tr>';
+      return '<tr class="detail"><td colspan="6"><b>Remedial works at '+esc(r.storeCode||"")+' '+esc(r.siteName||"")+'</b>'+body+(bits.length?'<div class="sub">'+bits.join(" · ")+'</div>':'')+statusEditor(r)+'</td></tr>';
     }
 
     function counts(){
@@ -289,6 +323,7 @@
         key: "reg:"+r.id, id: r.id, storeCode: r.storeCode, siteName: r.siteName,
         lines: r.lines||[], stage: r.stage, worksJobId: r.worksJobId||"", jobId: r.jobId||"",
         order: r.order||null, orderNote: r.orderNote||"", liveStage: r.liveStage||"", worksStatus: r.worksStatus||"", budgetCost: r.budgetCost, quoteDate: r.quoteDate, source: r.source,
+        manualStage: r.manualStage||"", note: r.note||"", manualBy: r.manualBy||"", manualAt: r.manualAt||"",
         photoCount: r.photoCount||0, offRegister:false,
         satisfactory: !!r.satisfactory, storeType: r.storeType||"",
       }));
@@ -355,6 +390,27 @@
       } catch(e){ alert("Couldn't update."); if (btn){ btn.disabled=false; btn.textContent="✓ Cert updated"; } }
     }
 
+    // Manual status override + notes (the expandable editor).
+    async function setManualStage(key, stage){
+      const r = ROWS.find(x=>x.key===key); if(!r) return;
+      try {
+        const res = await authFetch("/certs/five-year/manual", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, stage }) }).then(x=>x.json());
+        if (res && res.ok){ r.manualStage = res.manualStage||""; r.manualBy = res.manualBy||""; r.manualAt = res.manualAt||""; render(); return; }
+        alert((res && res.error) || "Couldn't change the status.");
+      } catch(e){ alert("Couldn't change the status."); }
+    }
+    async function saveNoteFor(key, btn){
+      const r = ROWS.find(x=>x.key===key); if(!r) return;
+      const ta = document.querySelector('[data-noteta="'+key.replace(/"/g,'\\"')+'"]'); if(!ta) return;
+      const note = ta.value;
+      if (btn){ btn.disabled = true; }
+      try {
+        const res = await authFetch("/certs/five-year/manual", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, note }) }).then(x=>x.json());
+        if (res && res.ok){ r.note = res.note||""; const m=document.querySelector('[data-savemsg="'+key.replace(/"/g,'\\"')+'"]'); if(m) m.textContent="Saved ✓"; setTimeout(render, 700); return; }
+        alert((res && res.error) || "Couldn't save the note."); if(btn) btn.disabled=false;
+      } catch(e){ alert("Couldn't save the note."); if(btn) btn.disabled=false; }
+    }
+
     // ── Quote / copy popup ──
     // A remedial line's plain description (strip any leading "[C3] " the register bakes in).
     function remDesc(l){ return String((l && (l.action || l.description)) || "").replace(/^\s*\[[^\]]*\]\s*/, "").trim(); }
@@ -409,6 +465,12 @@
       if (exp){ const k=exp.getAttribute("data-exp"); if(EXPANDED.has(k)) EXPANDED.delete(k); else EXPANDED.add(k); render(); return; }
       const cert = e.target.closest("[data-cert]");
       if (cert){ const r = ROWS.find(x=>x.key===cert.getAttribute("data-cert")); if(r) markCertUpdated(r, cert); return; }
+      const ed = e.target.closest("[data-edit]");
+      if (ed){ EXPANDED.add(ed.getAttribute("data-edit")); render(); return; }
+      const ss = e.target.closest("[data-setstage]");
+      if (ss){ const v=ss.getAttribute("data-setstage"); const i=v.lastIndexOf("|"); setManualStage(v.slice(0,i), v.slice(i+1)); return; }
+      const sn = e.target.closest("[data-savenote]");
+      if (sn){ saveNoteFor(sn.getAttribute("data-savenote"), sn); return; }
       const mk = e.target.closest("[data-mk]");
       if (mk){ const r = ROWS.find(x=>x.key===mk.getAttribute("data-mk")); if(r) createWorks(r, mk); return; }
     });
