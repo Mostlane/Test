@@ -3103,6 +3103,8 @@ export async function handle(request, env, ctx, url, sess) {
         // "ordered" even when its client_orders row was dismissed (cleaned off the board).
         order: r.order || (r.order_number ? { number: r.order_number, value: r.order_value, id: r.order_id || "", status: "matched" } : null),
         orderNote: d.orderNote || "",
+        // Office manual override (wins over the automatic status) + a free note.
+        manualStage: d.manualStage || "", note: d.note || "", manualBy: d.manualBy || "", manualAt: d.manualAt || "",
         satisfactory: false, storeType: "",
       };
     });
@@ -3160,6 +3162,34 @@ export async function handle(request, env, ctx, url, sess) {
     }
     _fyrTestedCache = { tid: null, at: 0, map: null };
     return json({ ok: true, id, stage }, {}, env, request);
+  }
+  // POST /certs/five-year/manual {id, stage?, note?} — office manual override of a
+  // remedial's status (wins over the automatic status) and/or a free-text note.
+  // stage:"" clears the override back to automatic; note:"" clears the note.
+  if (sub === "/five-year/manual" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("id is required", 400, env, request);
+    const row = await env.DB.prepare("SELECT data FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return error("Not found", 404, env, request);
+    let d = {}; try { d = JSON.parse(row.data || "{}"); } catch {}
+    const now = new Date().toISOString();
+    const ALLOWED = ["to_price", "priced", "ordered", "in_works", "awaiting_cert", "done", "satisfactory"];
+    if ("stage" in b) {
+      const s = String(b.stage || "").trim();
+      if (s === "") { delete d.manualStage; delete d.manualBy; delete d.manualAt; }
+      else if (ALLOWED.includes(s)) { d.manualStage = s; d.manualBy = me || "office"; d.manualAt = now; }
+      else return error("invalid status", 400, env, request);
+    }
+    if ("note" in b) {
+      const n = String(b.note || "").slice(0, 2000);
+      if (n) { d.note = n; d.noteBy = me || "office"; d.noteAt = now; }
+      else { delete d.note; delete d.noteBy; delete d.noteAt; }
+    }
+    await env.DB.prepare("UPDATE five_year_remedials SET data=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(d), now, tid, id).run();
+    return json({ ok: true, id, manualStage: d.manualStage || "", note: d.note || "", manualBy: d.manualBy || "", manualAt: d.manualAt || "" }, {}, env, request);
   }
   // GET /certs/five-year/quote-text?id= — a client-facing quote body built from the
   // engineer's remedial list (code + description, one per line + a materials guide).

@@ -22013,6 +22013,11 @@ ${con.tradingTitle || "Mostlane"}`;
         // "ordered" even when its client_orders row was dismissed (cleaned off the board).
         order: r.order || (r.order_number ? { number: r.order_number, value: r.order_value, id: r.order_id || "", status: "matched" } : null),
         orderNote: d.orderNote || "",
+        // Office manual override (wins over the automatic status) + a free note.
+        manualStage: d.manualStage || "",
+        note: d.note || "",
+        manualBy: d.manualBy || "",
+        manualAt: d.manualAt || "",
         satisfactory: false,
         storeType: ""
       };
@@ -22096,6 +22101,47 @@ ${con.tradingTitle || "Mostlane"}`;
     }
     _fyrTestedCache = { tid: null, at: 0, map: null };
     return json({ ok: true, id, stage }, {}, env, request);
+  }
+  if (sub === "/five-year/manual" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("id is required", 400, env, request);
+    const row = await env.DB.prepare("SELECT data FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return error("Not found", 404, env, request);
+    let d = {};
+    try {
+      d = JSON.parse(row.data || "{}");
+    } catch {
+    }
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const ALLOWED = ["to_price", "priced", "ordered", "in_works", "awaiting_cert", "done", "satisfactory"];
+    if ("stage" in b) {
+      const s = String(b.stage || "").trim();
+      if (s === "") {
+        delete d.manualStage;
+        delete d.manualBy;
+        delete d.manualAt;
+      } else if (ALLOWED.includes(s)) {
+        d.manualStage = s;
+        d.manualBy = me || "office";
+        d.manualAt = now2;
+      } else return error("invalid status", 400, env, request);
+    }
+    if ("note" in b) {
+      const n = String(b.note || "").slice(0, 2e3);
+      if (n) {
+        d.note = n;
+        d.noteBy = me || "office";
+        d.noteAt = now2;
+      } else {
+        delete d.note;
+        delete d.noteBy;
+        delete d.noteAt;
+      }
+    }
+    await env.DB.prepare("UPDATE five_year_remedials SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), now2, tid, id).run();
+    return json({ ok: true, id, manualStage: d.manualStage || "", note: d.note || "", manualBy: d.manualBy || "", manualAt: d.manualAt || "" }, {}, env, request);
   }
   if (sub === "/five-year/quote-text" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
