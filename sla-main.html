@@ -701,7 +701,11 @@ function readBoardCache(){
 let showCertJobs = true;
 try{ showCertJobs = localStorage.getItem("slaMainCertJobs") !== "0"; }catch(e){}
 function isCertJob(j){ return !!(j && (j.emTest || j.pat)); }
-function boardJobs(){ return showCertJobs ? allJobs : allJobs.filter(j => !isCertJob(j)); }
+// EM/PAT jobs the office has deliberately placed in a custom OPEN category (e.g.
+// "PAT & EM Certs") are a managed worklist, not reactive clutter — keep them on the
+// board (and their category chip) even when the EM/PAT toggle hides the yearly round.
+// Finished cert jobs (done categories) and cert jobs in built-in statuses stay hidden.
+function boardJobs(){ return showCertJobs ? allJobs : allJobs.filter(j => !isCertJob(j) || (isSavedCategory(j.status) && !isClosed(j))); }
 // 🙈 = the engineer can't see this job yet (release gated / queued / skipped).
 function hiddenFromEng(j){
   const rv = j && j.releaseView; if(!rv) return false;
