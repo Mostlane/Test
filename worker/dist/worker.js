@@ -649,17 +649,17 @@ var init_webpush = __esm({
 
 // src/lib/once.js
 function onceMigration(fn) {
-  let pending = null;
-  function onceWrapped(...args) {
-    if (pending) return pending;
-    pending = Promise.resolve().then(() => fn.apply(this, args)).catch((e) => {
-      pending = null;
-      throw e;
-    });
-    return pending;
+  let done = false, result;
+  async function onceWrapped(...args) {
+    if (done) return result;
+    const r = await fn.apply(this, args);
+    done = true;
+    result = r;
+    return r;
   }
   onceWrapped.reset = () => {
-    pending = null;
+    done = false;
+    result = void 0;
   };
   return onceWrapped;
 }
@@ -3333,10 +3333,7 @@ function poSiteish(o) {
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
   if (PO_MAP !== void 0 && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1e3)) return PO_MAP;
-  if (!PO_PROBE) PO_PROBE = probePoDb(env).finally(() => {
-    PO_PROBE = null;
-  });
-  await PO_PROBE;
+  await probePoDb(env);
   return PO_MAP;
 }
 async function probePoDb(env) {
@@ -5320,7 +5317,7 @@ async function handle3(request, env, ctx, url, sess) {
   }
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
-var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES, REMINDER_MODES, escHtml;
+var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES, REMINDER_MODES, escHtml;
 var init_timesheets = __esm({
   "src/routes/timesheets.js"() {
     init_http();
@@ -5368,7 +5365,6 @@ var init_timesheets = __esm({
     DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     PO_MAP_AT = 0;
-    PO_PROBE = null;
     ROAD_FACTOR = 1.25;
     DRIVE_MEMO = /* @__PURE__ */ new Map();
     DRIVE_MEMO_TTL = 12 * 3600 * 1e3;

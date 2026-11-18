@@ -6734,6 +6734,16 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   confirm → link; the 🔗 Link modal lists the likely jobs first. Tuned on live data: Worle
   striplights → 29339-Worle JS; Eastney door → 3 Eastney door jobs; Lambourn/Fairoak/
   Farnborough/Archers/Bristol aircon correctly get nothing.
+  **NEVER share an in-flight promise between requests (18 Nov 2026).** A Workers
+  promise belongs to the request that created it; if that request ends first,
+  everyone else awaiting it gets a 500 "This promise was created by a request
+  that has since ended…". `lib/once.js` `onceMigration()` did exactly this (kept
+  `pending`), so once a phone dropped the request that was running a module's
+  migration, EVERY endpoint behind that migration (certs, fleet, messages, van
+  check, memos, H&S…) failed in that isolate until it recycled — Jamie hit it on
+  61 EM cert jobs. Now only a plain done flag/result is shared and each request
+  runs the migration itself until one completes. Same fix for the timesheets
+  `PO_PROBE`. Module-level caches must hold VALUES, never promises.
   **Compliance chart 🚩 unsatisfactory flags (fixed 18 Nov 2026):** the flags
   (eicr-portal.html 5-Year cell, stored as one map in app_config
   `compliance:unsat:<scheme>:<tid>`) SAVED fine but never showed after a refresh —
