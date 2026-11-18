@@ -906,10 +906,26 @@ export async function handle(request, env, ctx, url, sess) {
     const code = pad4(b.code);
     if (!code) return jr({ error: "code required" }, headers, 400);
     const key = "compliance:unsat:" + scheme + ":" + tid;
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
-    let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}
-    if (b.on) codes[code] = 1; else delete codes[code];
-    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
+    // ONE atomic statement per toggle (json_set / json_remove on the stored map)
+    // so two saves landing together can never drop each other's flag — the old
+    // read-then-write of the whole map could. Falls back to read-then-write only
+    // if the stored value isn't valid JSON.
+    const path = '$."' + code + '"';
+    try {
+      if (b.on) {
+        await env.DB.prepare(
+          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, 1)) " +
+          "ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, 1)"
+        ).bind(tid, key, code, path).run();
+      } else {
+        await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
+      }
+    } catch {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}
+      if (b.on) codes[code] = 1; else delete codes[code];
+      await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
+    }
     return jr({ ok: true, code, on: !!b.on }, headers);
   }
 
