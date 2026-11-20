@@ -8,7 +8,7 @@
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=37"></script>
   <script src="firestop-form.js?v=3"></script>
-  <script src="cert-form.js?v=27"></script>
+  <script src="cert-form.js?v=28"></script>
   <script src="pump-form.js?v=5"></script>
   <script src="remedials-form.js?v=7"></script>
   <script src="docviewer.js?v=7"></script>
@@ -1929,12 +1929,14 @@ function renderDrainBanner(){
     if(sc.declined && st === "returned"){ el.className = "drain-banner failed"; }
     el.innerHTML = "<b>" + head + "</b> — " + (sc.manual ? "handed over " : "sent ") + esc(when(sc.sentAt)) + (sc.sentBy ? " by " + esc(sc.sentBy) : "") +
       (st !== "open" && sc.closedAt ? " · marked " + esc(when(sc.closedAt)) + (sc.closedBy ? " by " + esc(sc.closedBy) : "") : "") +
-      (sc.poRef ? "<br><span style=\"font-size:12.5px;opacity:.85\">Our PO <b>" + esc(sc.poRef) + "</b></span>" : "") +
+      (sc.poRef ? "<br><span style=\"font-size:12.5px;opacity:.85\">Our PO <b>" + esc(sc.poRef) + "</b>" + (sc.followOn ? " — <b>follow-on works</b>" + (sc.quoteRef ? " (their quote " + esc(sc.quoteRef) + ")" : "") : "") + "</span>" : "") +
+      ((job.subcontractHistory || []).length ? "<br><span style=\"font-size:12.5px;opacity:.85\">Earlier on this job: " + job.subcontractHistory.map(h => "PO <b>" + esc(h.poRef || h.poNumber || "—") + "</b> " + esc(when(h.sentAt))).join(" · ") + "</span>" : "") +
       (sc.declined ? "<br><span style=\"font-size:13px\">Told us " + esc(when(sc.declined.at)) + (sc.declined.reason ? ": “" + esc(sc.declined.reason) + "”" : "") + (sc.poRef ? " — cancel PO " + esc(sc.poRef) + " in the PO system if it won't be used." : "") + "</span>" : "") +
       "<br><span style=\"font-size:12.5px;opacity:.85\">" + (sc.to ? "Emailed to " + esc(sc.to) + (sc.subject ? " · “" + esc(sc.subject) + "”" : "") : "No email sent from the portal") + (sc.note ? " · " + esc(sc.note) : "") + "</span>" +
       '<div class="db-btns">' + (st === "open"
         ? '<button class="db-go" data-db="st-done" title="Also sets this job to Complete">✓ Done by them</button><button class="db-no" data-db="st-returned">↩ Back with us</button>'
-        : '<button class="db-no" data-db="st-open">Reopen — still with them</button>') +
+        : (st === "done" && !sc.manual ? '<button class="db-go" data-db="follow" data-key="' + esc(sc.key||"") + '" title="They quoted for more work — raises a NEW PO, emails them to proceed and puts this job back with them">📮 Send follow-on works</button>' : "") +
+          '<button class="db-no" data-db="st-open">Reopen — still with them</button>') +
       (open && st === "returned" ? '<button class="db-link" data-db="pick">Send to another subcontractor</button>' : "") +
       '<a class="db-link" href="subcontracted-jobs.html" style="align-self:center">All jobs with subcontractors →</a>' +
       (isFullAccessJV() ? '<button class="db-link" data-db="clear">Clear this record</button>' : "") + "</div>";
@@ -1976,13 +1978,16 @@ function promptPhone(name, site, current){
     setTimeout(() => inp.focus(), 50);
   });
 }
-async function sendToSubcontractor(key, name){
+async function sendToSubcontractor(key, name, opts){
+  opts = opts || {};
   const id = (job && job.id) || getJobIdFromQuery();
   // Show EXACTLY what will be emailed (recipients, subject, the rendered email) and let
   // the office edit the details text before anything is raised or sent.
-  const res = await previewSubconEmail(id, key, name);
+  const res = await previewSubconEmail(id, key, name, opts);
   if(res == null) return false;
   const body = { to: key, details: res.details, target: res.target };
+  // follow-on works: a NEW PO + "please proceed" email on a job they've already done
+  if(res.followOn){ if(opts.followOn) body.followOn = true; body.quoteRef = res.quoteRef || ""; }
   if(res.attachKeys && res.attachKeys.length) body.attachKeys = res.attachKeys;
   if(res.attachUploads && res.attachUploads.length) body.attachUploads = res.attachUploads;
   for(;;){
@@ -1990,7 +1995,7 @@ async function sendToSubcontractor(key, name){
     const d = await r.json().catch(()=>({}));
     if(r.ok){
       if(d.already) alert("Already sent to " + (d.subcontract && d.subcontract.name || name) + (d.subcontract && d.subcontract.sentBy ? " by " + d.subcontract.sentBy : "") + " — nothing sent again.");
-      else alert("✓ Sent to " + (d.subcontract && d.subcontract.name || name));
+      else alert("✓ " + (res.followOn ? "Follow-on works sent to " : "Sent to ") + (d.subcontract && d.subcontract.name || name) + (d.subcontract && d.subcontract.poRef ? " — PO " + d.subcontract.poRef : ""));
       if(d.job) job = d.job; else if(d.subcontract) job.subcontract = d.subcontract;
       return true;
     }
@@ -2003,12 +2008,15 @@ async function sendToSubcontractor(key, name){
     throw new Error(d.error || ("HTTP " + r.status));
   }
 }
-function previewSubconEmail(id, key, name){
+function previewSubconEmail(id, key, name, opts){
+  opts = opts || {};
   return new Promise(function(resolve){
     const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const wrap = document.createElement("div"); wrap.className = "sc-modal"; wrap.style.zIndex = "9050";
-    wrap.innerHTML = '<div class="sc-sheet" style="max-width:720px"><h3>📧 Check the email to ' + esc(name||"the subcontractor") + '</h3>' +
+    wrap.innerHTML = '<div class="sc-sheet" style="max-width:720px"><h3 id="pvTitle">📧 Check the ' + (opts.followOn ? 'follow-on works email to ' : 'email to ') + esc(name||"the subcontractor") + '</h3>' +
       '<div id="pvHead" class="sc-sub">Loading preview…</div>' +
+      '<div id="pvQuoteRow" style="display:none"><label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Their quote reference (shown on the order so they know which quote to proceed with)</label>' +
+      '<input id="pvQuote" type="text" maxlength="60" placeholder="e.g. Q-123456" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box"></div>' +
       '<label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Details sent to them (edit before sending — the job itself isn’t changed)</label>' +
       '<textarea id="pvDet" rows="4" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box"></textarea>' +
       '<label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Target response time shown to them (defaults to the job’s SLA — leave blank to hide)</label>' +
@@ -2029,6 +2037,7 @@ function previewSubconEmail(id, key, name){
       '<button id="pvSend" class="sc-send" style="flex:0 0 auto" disabled>Send to ' + esc(name||"them") + '</button></div></div>';
     document.body.appendChild(wrap);
     const det = wrap.querySelector("#pvDet"), tgt = wrap.querySelector("#pvTarget"), msg = wrap.querySelector("#pvMsg"), sendBtn = wrap.querySelector("#pvSend");
+    const quote = wrap.querySelector("#pvQuote"); let isFollowOn = !!opts.followOn;
     // ── Attachments: tick the job's photos and/or add files from the device ──
     const photosEl = wrap.querySelector("#pvPhotos"), fileIn = wrap.querySelector("#pvFile"), attInfo = wrap.querySelector("#pvAttInfo"), attList = wrap.querySelector("#pvAttList");
     const selKeys = new Set();     // chosen job-photo R2 keys
@@ -2080,12 +2089,18 @@ function previewSubconEmail(id, key, name){
     let first = true, t = 0;
     async function load(test){
       const body = { to: key, test: !!test };
-      if(!first){ body.details = det.value; body.target = tgt.value; }
+      if(opts.followOn) body.followOn = true;
+      if(!first){ body.details = det.value; body.target = tgt.value; if(isFollowOn) body.quoteRef = quote.value; }
       if(test){ const a = collectAttach(); body.attachKeys = a.attachKeys; body.attachUploads = a.attachUploads; }
       const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract-preview", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
       const d = await r.json().catch(()=>({}));
       if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
-      if(first){ det.value = d.details || ""; tgt.value = d.target || ""; first = false; }
+      if(first){ det.value = d.details || ""; tgt.value = d.target || ""; first = false;
+        // the server says when this is follow-on works (the button, or a failed follow-on being re-sent)
+        isFollowOn = !!d.followOn;
+        if(isFollowOn){ wrap.querySelector("#pvQuoteRow").style.display = ""; quote.value = d.quoteRef || "";
+          wrap.querySelector("#pvTitle").textContent = "📧 Check the follow-on works email to " + (name||"the subcontractor");
+          sendBtn.textContent = "Send follow-on works to " + (name||"them"); } }
       const cc = (d.cc||[]).length ? (d.cc||[]).join(", ") : "—";
       wrap.querySelector("#pvHead").innerHTML =
         '<div><b>To:</b> ' + esc(d.to) + ' &nbsp; <b>CC:</b> ' + esc(cc) + '</div>' +
@@ -2100,13 +2115,14 @@ function previewSubconEmail(id, key, name){
     const reload = () => { clearTimeout(t); t = setTimeout(() => load(false).catch(e => { msg.style.color="#b91c1c"; msg.textContent = e.message||e; }), 400); };
     det.addEventListener("input", reload);
     tgt.addEventListener("input", reload);
+    quote.addEventListener("input", reload);
     wrap.querySelector("#pvTest").onclick = async function(){
       this.disabled = true; msg.style.color = "#334155"; msg.textContent = "Sending a test copy…";
       try{ const d = await load(true); if (d.testVia === "portal") { msg.style.color = "#92400e"; msg.textContent = "⚠ Test sent to " + d.testSentTo + ", but NOT through Microsoft 365 — it went from the portal's own address (" + (d.testFallbackReason || "365 unavailable") + "). Real orders would do the same until this is fixed."; } else { msg.style.color = "#166534"; msg.textContent = "✓ Test sent to " + d.testSentTo + " from " + (d.testFrom || "Microsoft 365") + " — nothing was sent to " + (name||"them") + " and no PO was raised."; } }
       catch(e){ msg.style.color = "#b91c1c"; msg.textContent = e.message || e; }
       this.disabled = false;
     };
-    sendBtn.onclick = () => done(Object.assign({ details: det.value, target: tgt.value }, collectAttach()));
+    sendBtn.onclick = () => done(Object.assign({ details: det.value, target: tgt.value, followOn: isFollowOn, quoteRef: isFollowOn ? quote.value.trim() : "" }, collectAttach()));
     load(false).catch(e => { wrap.querySelector("#pvHead").innerHTML = '<span style="color:#b91c1c">' + esc(e.message||e) + '</span>'; });
   });
 }
@@ -2162,6 +2178,10 @@ async function drainAction(act, btn, key){
       btn.disabled = true; btn.textContent = "Sending…";
       const done = await sendToSubcontractor("metrorod", "Metro Rod");
       if(!done){ btn.disabled = false; btn.textContent = "Send to Metro Rod"; return; }
+    } else if(act === "follow"){
+      btn.disabled = true; btn.textContent = "Sending…";
+      const done = await sendToSubcontractor(key || (job.subcontract && job.subcontract.key) || "metrorod", (job.subcontract && job.subcontract.name) || "subcontractor", { followOn:true });
+      if(!done){ btn.disabled = false; btn.textContent = "📮 Send follow-on works"; return; }
     } else if(act === "retry"){
       btn.disabled = true; btn.textContent = "Sending…";
       const done = await sendToSubcontractor(key || (job.subcontract && job.subcontract.key) || "metrorod", (job.subcontract && job.subcontract.name) || "subcontractor");

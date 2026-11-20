@@ -289,6 +289,20 @@
     // tab done + not prompt to resubmit an already-submitted cert on reload).
     if (opts.onStatus) { try { opts.onStatus(rec.status || "draft"); } catch (e) {} }
 
+    // Who may SIGN here. The engineer view always could. The OFFICE view (job-view /
+    // cert-review) now can too — but only the person named as the engineer on this
+    // certificate (their login is the cert's engineer, or the "Engineer name" box is
+    // their name / first name), so an office user can't sign over someone else's cert.
+    function meName() { try { return String(sessionStorage.getItem("mostlaneUsername") || localStorage.getItem("mostlaneUsername") || "").trim(); } catch (e) { return ""; } }
+    function iAmTheEngineer() {
+      const n = v => String(v || "").toLowerCase().replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+      const me = n(meName()); if (!me) return false;
+      if (n(rec.engineer) === me) return true;
+      const named = n(rec.contractor && rec.contractor.name);
+      return !!named && (named === me || named === me.split(" ")[0]);
+    }
+    function canSign() { return editable && (mode === "engineer" || (mode === "office" && iAmTheEngineer())); }
+    let signShown = false;
     function render() {
       const titleType = type === "pat" ? "Portable Appliance Test" : "Emergency Lighting Test";
       let h = "";
@@ -346,13 +360,15 @@
 
       // Signature (engineer captures; office sees status)
       h += '<div class="cc"><h4>Signature</h4>';
-      if (mode === "engineer" && editable) {
+      signShown = canSign();
+      if (signShown) {
         h += '<canvas class="sigpad" id="mlcSig"></canvas><div class="toolbar"><button class="btn ghost sm" data-act="sigclear">Clear</button>'
           + '<button class="btn ghost sm" data-act="siguse">✒ Use my saved signature</button>'
           + '<button class="btn ghost sm" data-act="sigsave">💾 Save as my signature</button>'
           + '<span class="muted" id="mlcSigState">' + (rec.signature ? "Signed ✓" : "Sign above") + '</span></div>';
       } else {
         h += '<div class="muted">' + (rec.signature ? "Signed by the engineer ✓" : "Not signed") + '</div>';
+        if (mode === "office" && editable && !rec.signature) h += '<div class="muted" style="font-size:12.5px;margin-top:4px">Only the named engineer can sign. To sign it yourself, put your own name in “Engineer name” above.</div>';
         if (rec.signature) h += '<img src="' + esc(rec.signature) + '" alt="signature" style="max-width:220px;border:1px solid #e2e8f0;border-radius:8px;margin-top:6px;background:#fff">';
       }
       h += '</div>';
@@ -374,7 +390,7 @@
       container.innerHTML = h;
       renderRows();
       wire();
-      if (mode === "engineer" && editable) initSig();
+      if (signShown) initSig();
     }
 
     function ro() { return editable ? "" : "readonly"; }
@@ -704,6 +720,9 @@
       container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; el.classList.remove("err"); queueSave(); }));
       container.querySelectorAll("[data-b]").forEach(el => el.addEventListener("input", () => { const [k, f] = el.dataset.b.split("."); (rec[k] = rec[k] || {})[f] = el.value; el.classList.remove("err"); queueSave(); }));
       container.querySelectorAll("[data-c]").forEach(el => el.addEventListener("input", () => { rec.contractor[el.dataset.c] = el.value; el.classList.remove("err"); queueSave(); }));
+      // Office view: once the Engineer name box holds (or stops holding) the signed-in
+      // user's name, show/hide the signature pad — on leaving the box, so typing isn't interrupted.
+      const cn = container.querySelector('[data-c="name"]'); if (cn && mode === "office") cn.addEventListener("change", () => { if (canSign() !== signShown) render(); });
       const tb = container.querySelector('[data-act="add"]'); if (tb) tb.addEventListener("click", () => { addRows(1); });
       const t5 = container.querySelector('[data-act="add5"]'); if (t5) t5.addEventListener("click", () => { addRows(5); });
       const ap = container.querySelector('[data-act="allpass"]'); if (ap) ap.addEventListener("click", allPass);

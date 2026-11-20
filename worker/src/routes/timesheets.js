@@ -846,12 +846,13 @@ function poShape(o) {
   return { name: String(name), pc: String(pc || ""), job: job != null && job !== "" ? String(job) : null };
 }
 function poSiteish(o) { const s = poShape(o); return !!(s && (s.pc || s.job)); }
-let PO_PROBE = null;   // in-flight probe — concurrent requests share one sweep
+// Each request runs its own probe until one has cached a result. The in-flight
+// promise is NOT shared between requests: a Workers promise dies with the request
+// that created it, and anyone else awaiting it then fails (see lib/once.js).
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
   if (PO_MAP !== undefined && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1000)) return PO_MAP;
-  if (!PO_PROBE) PO_PROBE = probePoDb(env).finally(() => { PO_PROBE = null; });
-  await PO_PROBE;
+  await probePoDb(env);
   return PO_MAP;
 }
 async function probePoDb(env) {

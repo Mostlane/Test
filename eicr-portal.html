@@ -532,11 +532,15 @@ async function loadTestedFlags(){
 // store code → 1 when the office has manually flagged the 5-year as UNSATISFACTORY
 // (a toggle on the 5-Year date cell — turned on/off by hand). Forces the cell red.
 let unsatFlags = {};
+let unsatSaving = 0;       // flag saves in flight — a reload must not overwrite them
+let unsatReload = false;   // a reload was skipped while saving — run it once saves finish
 async function loadUnsatFlags(){
+  if (unsatSaving) { unsatReload = true; return; }
   try {
     const r = await authFetch('/compliance/unsat-flags?scheme=' + COMPLIANCE_SCHEME);
     if (!r.ok) return;
     const j = await r.json();
+    if (unsatSaving) { unsatReload = true; return; }   // a save started while we were fetching
     unsatFlags = (j && j.codes) ? j.codes : {};
     if (allData.length) applyFilters();
   } catch(e){ /* non-critical */ }
@@ -545,6 +549,7 @@ async function toggleUnsat(code, on){
   const k = pad4(code), prev = !!unsatFlags[k];
   if (on) unsatFlags[k] = 1; else delete unsatFlags[k];   // optimistic
   applyFilters();
+  unsatSaving++;
   try {
     const r = await authFetch('/compliance/unsat-flag?scheme=' + COMPLIANCE_SCHEME, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -555,6 +560,9 @@ async function toggleUnsat(code, on){
     if (prev) unsatFlags[k] = 1; else delete unsatFlags[k];   // revert on failure
     applyFilters();
     alert("Couldn't save the flag — check your connection and try again.");
+  } finally {
+    unsatSaving--;
+    if (!unsatSaving && unsatReload) { unsatReload = false; loadUnsatFlags(); }
   }
 }
 async function loadComplianceIndex(){
@@ -1371,6 +1379,10 @@ async function loadFromPortal(){
   // Restore the scroll position now that the table has its full height back.
   if (wrap) wrap.scrollTop = keepScroll;
   if (keepWin) window.scrollTo(0, keepWin);
+  // The manual UNSATISFACTORY flags live on the server, shared by every user —
+  // fetch them on every chart load. (They were only loaded by the retired
+  // loadComplianceIndex(), so a flag saved fine but vanished on refresh.)
+  loadUnsatFlags();
 }
 
 /* One-time migration: read the old mostlane-pos store list BROWSER-SIDE (it's

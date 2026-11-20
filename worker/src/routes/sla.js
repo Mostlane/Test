@@ -2578,7 +2578,15 @@ export async function handle(request, env, ctx, url, sess) {
       if (!sc.to) return jsonResponse({ error: sc.name + " has no email address — add one on the Subcontractors page." }, headers, 400);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const reused = job.subconPO && job.subconPO.key === key && job.subconPO.poNumber;
+      const fo = followOnState(job, b.followOn === true);
+      if (b.followOn === true && !fo.on) return jsonResponse({ error: "This job hasn't been sent to a subcontractor yet — use Send to subcontractor." }, headers, 400);
+      if (fo.on && fo.prior) {
+        if (fo.sc.key !== key) return jsonResponse({ error: "Follow-on works go to the same subcontractor (" + (fo.sc.name || fo.sc.key) + ")." }, headers, 400);
+        if ((fo.sc.status || "open") !== "done") return jsonResponse({ error: "Mark the first visit as done by " + (fo.sc.name || "them") + " before sending follow-on works." }, headers, 400);
+      }
+      const foPrevRef = fo.on ? followOnPrevRef(job, sc.poDigits) : "";
+      // a follow-on always gets its OWN new PO (a failed follow-on attempt keeps the one it raised)
+      const reused = (!fo.on || fo.retry) && job.subconPO && job.subconPO.key === key && job.subconPO.poNumber;
       let nextNo = null;
       if (!reused) { try { const { peekNextPoNumber } = await import("./po.js"); nextNo = await peekNextPoNumber(env); } catch {} }
       const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : nextNo ? formatPoRef(nextNo, sc.poDigits) : "[new PO no.]";
@@ -2587,6 +2595,11 @@ export async function handle(request, env, ctx, url, sess) {
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
       const pOpts = edited != null ? { details: edited } : {};
       if (typeof b.target === "string") pOpts.target = b.target;   // per-email response-time override ("" hides it)
+      if (fo.on) {
+        if (edited == null) pOpts.details = followOnDefaultDetails(job, foPrevRef);
+        if (typeof b.target !== "string") pOpts.target = "";       // no SLA clock on quoted follow-on works unless the office adds one
+        pOpts.followOn = { quoteRef: String(b.quoteRef != null ? b.quoteRef : (fo.retry && fo.sc.quoteRef) || "").trim().slice(0, 60), prevRef: foPrevRef };
+      }
       pOpts.addrPrefix = await siteAddrPrefix(env, tenantId, job);
       if (sc.declineLink) pOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, true);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, pOpts);
@@ -2595,7 +2608,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (String(job.telephone || "").replace(/\D/g, "").length < 7) warnings.push(sc.requirePhone ? "No valid phone number — you'll be asked for one when you send." : "No phone number on the job.");
       if (!String(mail.details || "").trim()) warnings.push("The details box is empty.");
       const out = { ok: true, name: sc.name, from: (await getSubconSender(env, tenantId)) || env.EMAIL_FROM || "Mostlane <no-reply@mostlane-portal.com>", to: sc.to, cc: sc.cc || [], replyTo: sc.replyTo || "",
-        subject: mail.subject, html: mail.html, details: mail.details, target: mail.target, poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)."
+        subject: mail.subject, html: mail.html, details: mail.details, target: mail.target, followOn: fo.on, quoteRef: fo.on ? pOpts.followOn.quoteRef : undefined, poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)."
           : nextNo ? "PO " + poRef + " is the next number — it is only raised when you press Send. If someone raises another PO first, the next free number is used."
           : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].", warnings };
       if (b.test) {
@@ -2640,7 +2653,20 @@ export async function handle(request, env, ctx, url, sess) {
       if (!sc.to) return jsonResponse({ error: sc.name + " has no email address — add one on the Subcontractors page." }, headers, 400);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      if (job.subcontract && job.subcontract.sentAt && job.subcontract.status !== "returned") return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
+      // Follow-on works {followOn:true}: a NEW order on a job they've already done —
+      // its own PO + email, the first send kept in job.subcontractHistory.
+      const fo = followOnState(job, b.followOn === true);
+      if (b.followOn === true && !fo.on) return jsonResponse({ error: "This job hasn't been sent to a subcontractor yet — use Send to subcontractor." }, headers, 400);
+      if (fo.on && fo.prior) {
+        if (fo.sc.key !== key) return jsonResponse({ error: "Follow-on works go to the same subcontractor (" + (fo.sc.name || fo.sc.key) + ")." }, headers, 400);
+        if ((fo.sc.status || "open") !== "done") return jsonResponse({ error: "Mark the first visit as done by " + (fo.sc.name || "them") + " before sending follow-on works." }, headers, 400);
+      }
+      const foPrior = fo.on && fo.prior ? fo.sc : null;                 // the record we're following on from
+      const foPrevRef = fo.on ? followOnPrevRef(job, sc.poDigits) : "";
+      const foPrevPo = foPrior ? String(foPrior.poNumber || "") : "";
+      const foQuote = fo.on ? String(b.quoteRef != null ? b.quoteRef : (fo.retry && fo.sc.quoteRef) || "").trim().slice(0, 60) : "";
+      const foVisit = fo.on ? (job.subcontractHistory || []).length + (foPrior ? 1 : 0) + 1 : 1;   // 2 = first follow-on
+      if (!fo.on && job.subcontract && job.subcontract.sentAt && job.subcontract.status !== "returned") return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
       // Phone gate — some subcontractors (Metro Rod) won't accept a job without a
       // valid phone number. The client may re-send with {phone}; we save it onto
       // the job (so the email carries it + it's kept) and only then proceed. No PO
@@ -2659,7 +2685,7 @@ export async function handle(request, env, ctx, url, sess) {
       // or taking the lock, so a size problem fails cleanly with nothing side-effected.
       const ab = await collectSubconAttachments(env, tenantId, id, b);
       if (ab.error) return jsonResponse({ error: ab.error }, headers, 400);
-      const lockId = "subcon:" + key + ":" + id;
+      const lockId = "subcon:" + key + ":" + id + (fo.on ? ":fo" + foVisit : "");   // one lock per visit
       if (!(await firstTime(env, tenantId, lockId, "subcontract"))) {
         const fresh = await getJob(env, tenantId, id);
         return jsonResponse({ ok: true, already: true, subcontract: (fresh && fresh.subcontract) || { name: sc.name, sentBy: "someone else", sentAt: null } }, headers);
@@ -2669,11 +2695,16 @@ export async function handle(request, env, ctx, url, sess) {
       // number (not the client's incident number). Reuse a PO from a prior attempt
       // whose email failed (job.subconPO) so a retry never allocates a second PO.
       let poNumber = (job.subconPO && job.subconPO.key === key && job.subconPO.poNumber) || null;
+      // A follow-on never reuses the FIRST visit's PO — only one this follow-on already
+      // raised (stamped followOnOf = the PO it follows), i.e. an interrupted attempt.
+      if (foPrior && !(job.subconPO && job.subconPO.followOnOf != null && String(job.subconPO.followOnOf) === foPrevPo)) poNumber = null;
+      const foDetails = fo.on ? (typeof b.details === "string" ? b.details.slice(0, 4000) : followOnDefaultDetails(job, foPrevRef)) : null;
       if (!poNumber) {
         const { raiseSubcontractorPO } = await import("./po.js");
         const po = await raiseSubcontractorPO(env, {
-          supplier: sc.name, trade: sc.trade || "", site: job.siteName || job.siteCode || "",
-          description: job.description || "", jobId: id, jobRef: job.helpdeskRef || "",
+          supplier: await poSupplierName(env, sc.name), trade: sc.trade || "", site: job.siteName || job.siteCode || "",
+          description: fo.on ? ("FOLLOW-ON WORKS" + (foQuote ? " — their quote " + foQuote : "") + (foPrevRef ? " — follows PO " + foPrevRef : "") + ". " + foDetails).slice(0, 4000) : (job.description || ""),
+          jobId: id, jobRef: job.helpdeskRef || "",
           userSlug: null, userName: sess.user.username
         });
         if (!po || !po.success) {
@@ -2683,14 +2714,23 @@ export async function handle(request, env, ctx, url, sess) {
         poNumber = po.po_number;
         // Persist the allocated PO straight away so an email failure + retry reuses it.
         job.subconPO = { key, poNumber, raisedAt: new Date().toISOString(), raisedBy: sess.user.username };
+        if (foPrior) job.subconPO.followOnOf = foPrevPo;
         await saveJob(env, tenantId, job);
       }
+      // From here job.subcontract is replaced (sent or failed) — keep the visit we're
+      // following on from in the history first, so nothing about it is lost.
+      const keepPrior = () => { if (foPrior) { job.subcontractHistory = [...(job.subcontractHistory || []), foPrior].slice(-20); } };
       const poRef = formatPoRef(poNumber, sc.poDigits);
       let hours = 0;
       try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
       const sOpts = edited != null ? { details: edited } : {};
       if (typeof b.target === "string") sOpts.target = b.target;   // per-email response-time override ("" hides it)
+      if (fo.on) {
+        sOpts.details = foDetails;
+        if (typeof b.target !== "string") sOpts.target = "";
+        sOpts.followOn = { quoteRef: foQuote, prevRef: foPrevRef };
+      }
       sOpts.addrPrefix = await siteAddrPrefix(env, tenantId, job);
       if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
@@ -2702,22 +2742,31 @@ export async function handle(request, env, ctx, url, sess) {
         // re-press reuses it rather than allocating a second PO).
         const fAt = new Date().toISOString();
         const errTxt = String((r && (r.error || r.reason)) || "email send failed").slice(0, 160);
+        keepPrior();
         job.subcontract = { key, name: sc.name, to: sc.to, failedAt: fAt, failedBy: sess.user.username, error: errTxt, poNumber, poRef };
+        if (fo.on) Object.assign(job.subcontract, { followOn: true, visit: foVisit, quoteRef: foQuote, details: foDetails });
         job.events ||= [];
-        job.events.push({ at: fAt, by: sess.user.username, type: "subcontract", note: `Send to ${sc.name} FAILED (PO ${poRef} raised) — ${errTxt}` });
+        job.events.push({ at: fAt, by: sess.user.username, type: "subcontract", note: `${fo.on ? "Follow-on works send" : "Send"} to ${sc.name} FAILED (PO ${poRef} raised) — ${errTxt}` });
         job.updatedAt = fAt;
         await saveJob(env, tenantId, job);
         return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " — " + errTxt : "") + ". Press again to re-send (the same PO is kept).", subcontract: job.subcontract }, headers, 502);
       }
       const now = new Date().toISOString();
+      keepPrior();
       job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open", details: mail.details, via: r.via, from: r.from };
+      if (fo.on) Object.assign(job.subcontract, { followOn: true, visit: foVisit, quoteRef: foQuote, followsPo: foPrevRef });
       if (ab.names && ab.names.length) job.subcontract.attachments = ab.names.slice(0, 20);
       if (r.fallbackReason) job.subcontract.fallbackReason = String(r.fallbackReason).slice(0, 200);
       const attachNote = ab.names && ab.names.length ? ` with ${ab.names.length} attachment${ab.names.length === 1 ? "" : "s"} (${ab.names.join(", ")})` : "";
       job.events ||= [];
-      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail — Microsoft 365 unavailable)" : ""}${attachNote} — "${mail.subject}"` });
+      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `${fo.on ? "Follow-on works sent" : "Sent"} to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail — Microsoft 365 unavailable)" : ""}${attachNote} — "${mail.subject}"${fo.on && foQuote ? " — their quote " + foQuote : ""}` });
       job.updatedAt = now;
+      // A follow-on RE-OPENS a finished job: toSubconStatus (below) deliberately leaves
+      // Complete/Closed jobs alone, so move it here. "Back with us" then lands on Pending.
+      const foReopen = fo.on && job.status !== SUBCON_STATUS;
+      if (foReopen) { job.subcontract.statusSet = true; job.subcontract.prevStatus = "Pending"; delete job.closedAt; }
       await saveJob(env, tenantId, job);
+      if (foReopen) await patchJob(env, tenantId, id, { status: SUBCON_STATUS, changedBy: sess.user.username }, ctx);
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "🚿 Sent to " + sc.name, body: `${job.helpdeskRef || id} — sent by ${sess.user.username}` }).catch(() => {}));
       const sj = await toSubconStatus(env, tenantId, id, sess.user.username, ctx);
       return jsonResponse({ ok: true, subcontract: sj.subcontract, job: decorateJobWithLiveSla(sj) }, headers);
@@ -7525,6 +7574,42 @@ function subconReplyPage(title, body) {
 // The job text a subcontractor should see: the description minus the portal's own
 // linking notes ("↩ Re-assigned incident — follows our earlier visit …") which are
 // for the office, not for a third party.
+/* ── Follow-on works: a SECOND order to the same subcontractor on the same job ──
+   They attended, the job was completed/closed, they quoted for more, and the office
+   wants them to proceed. followOnState() reads where the job is:
+     prior  — a sent record we'd be following on from (must be marked done)
+     retry  — a follow-on whose email failed (no sentAt) — a re-press continues it
+   followOnDefaultDetails() is the text the office starts from (always editable). */
+export function followOnState(job, wanted) {
+  const sc = job && job.subcontract;
+  const prior = !!(sc && sc.sentAt);
+  const retry = !!(sc && sc.followOn && !sc.sentAt);
+  return { prior, retry, on: retry || (wanted === true && prior), sc };
+}
+export function followOnPrevRef(job, digits) {
+  const sc = job && job.subcontract;
+  if (sc && sc.sentAt) return sc.poRef || (sc.poNumber ? formatPoRef(sc.poNumber, digits) : "");
+  const h = (job && job.subcontractHistory) || [];
+  const last = h[h.length - 1];
+  return last ? (last.poRef || (last.poNumber ? formatPoRef(last.poNumber, digits) : "")) : "";
+}
+export function followOnDefaultDetails(job, prevRef) {
+  const sc = job && job.subcontract;
+  if (sc && sc.followOn && !sc.sentAt && sc.details) return String(sc.details);   // a failed attempt's text
+  return "Please proceed with the works on your quotation" + (prevRef ? ", following your visit under our order " + prevRef : "") + "." +
+    "\n\nOriginal job: " + subconDetails(job);
+}
+// The PO system's own spelling of a subcontractor ("Metrorod") so every PO for one
+// firm lands under ONE supplier name, whatever the portal's routing list calls it.
+async function poSupplierName(env, name) {
+  try {
+    const { listPoSubcontractorNames } = await import("./po.js");
+    const k = subKey(name);
+    const hit = (await listPoSubcontractorNames(env)).find(n => subKey(n) === k);
+    return hit || name;
+  } catch { return name; }
+}
+
 export function subconDetails(job) {
   return String((job && job.description) || "").split(/\r?\n/)
     .filter(l => !/^\s*↩/.test(l)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -7543,7 +7628,10 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const autoTarget = hrs ? (hrs % 24 === 0 && hrs >= 48 ? (hrs / 24) + " Days" : hrs + " Hours") : "";
   // The office can override the response time per email (opts.target); "" hides it.
   const target = (opts.target != null) ? String(opts.target).trim().slice(0, 60) : autoTarget;
-  const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : (job.priority || "Job");
+  // Follow-on works (opts.followOn): a second order on the SAME job after their
+  // first visit — "proceed with your quote". Never worded as an emergency call-out.
+  const fo = opts.followOn ? opts.followOn : null;
+  const urgency = fo ? "Follow-on works" : /priority\s*1/i.test(job.priority || "") ? "Emergency" : (job.priority || "Job");
   const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}${incident ? ` [${incident}]` : ""}`;
   const code = String(job.siteCode || "").trim();
   const codePart = /^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code;
@@ -7572,15 +7660,17 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
     on("address") && box("Address", addr),
     on("phone") && box("Phone", job.telephone),
     (on("target") && target) && box("Target", target),
-    on("description") && box("Details", details, false),
+    (fo && fo.quoteRef) && box("Your quote ref", fo.quoteRef),
+    (fo && fo.prevRef) && box("Follows our order", fo.prevRef),
+    on("description") && box(fo ? "Works to proceed with" : "Details", details, false),
   ].filter(Boolean).join("");
   const headPriority = (on("priority") || on("target"));
   const invoiceBox = ref ? `<table style="width:100%;background:#fff7e6;border:1px solid #f3c969;border-radius:12px;margin:4px 0 10px 0"><tr><td style="padding:14px 18px;font-size:14px;color:#5c3d00;line-height:1.5"><b>Invoicing:</b> all invoices for this job <b>must quote our PO number ${escH(ref)}</b>. Invoices without it cannot be processed.</td></tr></table>` : "";
   const declineBox = opts.declineUrl ? `<tr><td style="padding:16px 28px 0 28px"><table style="width:100%;border:1px solid #e2e6ec;border-radius:12px"><tr><td style="padding:14px 18px;font-size:14px;color:#33424f;line-height:1.5">We'll take it that you've <b>accepted this job</b> unless you tell us otherwise. If you're unable to attend, please let us know straight away so we can arrange cover:<div style="margin-top:12px"><a href="${escH(opts.declineUrl)}" style="display:inline-block;background:#ffffff;color:#15599d;border:2px solid #15599d;border-radius:10px;padding:10px 18px;font-weight:600;text-decoration:none">We can't take this job</a></div></td></tr></table></td></tr>` : "";
   const html = `<table style="width:100%;background:#eef1f5;margin:0;padding:24px 0"><tr><td align="center"><table style="width:600px;max-width:600px;background:#ffffff;border:1px solid #e2e6ec;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-<tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${headPriority ? (target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "")) : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
+<tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${fo ? "Follow-on works — please proceed" : headPriority ? (target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "")) : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
 <tr><td style="padding:18px 28px 4px 28px">${boxes}${invoiceBox}</td></tr>
-<tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
+<tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${fo ? "Please proceed with the works above and confirm the date you will attend." : opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
 <tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd · Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.${incident ? "<br>Our job reference: " + escH(incident) : ""}</div></td></tr>
 </table></td></tr></table>`;
   return { subject, html, ref, details, target };

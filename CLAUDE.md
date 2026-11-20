@@ -6734,6 +6734,47 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   confirm → link; the 🔗 Link modal lists the likely jobs first. Tuned on live data: Worle
   striplights → 29339-Worle JS; Eastney door → 3 Eastney door jobs; Lambourn/Fairoak/
   Farnborough/Archers/Bristol aircon correctly get nothing.
+  **NEVER share an in-flight promise between requests (18 Nov 2026).** A Workers
+  promise belongs to the request that created it; if that request ends first,
+  everyone else awaiting it gets a 500 "This promise was created by a request
+  that has since ended…". `lib/once.js` `onceMigration()` did exactly this (kept
+  `pending`), so once a phone dropped the request that was running a module's
+  migration, EVERY endpoint behind that migration (certs, fleet, messages, van
+  check, memos, H&S…) failed in that isolate until it recycled — Jamie hit it on
+  61 EM cert jobs. Now only a plain done flag/result is shared and each request
+  runs the migration itself until one completes. Same fix for the timesheets
+  `PO_PROBE`. Module-level caches must hold VALUES, never promises.
+  **Compliance chart 🚩 unsatisfactory flags (fixed 18 Nov 2026):** the flags
+  (eicr-portal.html 5-Year cell, stored as one map in app_config
+  `compliance:unsat:<scheme>:<tid>`) SAVED fine but never showed after a refresh —
+  `loadUnsatFlags()` was only called from `loadComplianceIndex()`, which nothing
+  has called since the 7 Aug portal-native rewrite. It now runs at the end of
+  every `loadFromPortal()`. Saves in flight block a reload from overwriting them
+  (`unsatSaving`). Server toggle is ONE atomic json_set/json_remove (was read-
+  then-write of the whole map — two saves together could drop a flag).
+  **Still disconnected (not re-enabled — would recolour cells):** `loadRemedialFlags()`
+  (EM ⚠️) and `loadTestedFlags()` (red→amber "tested, cert to file") have the same
+  dead caller. Ask Jamie before wiring them in.
+  **"📮 Send follow-on works" (18 Nov 2026):** for when a subcontractor has DONE a
+  job, it's Complete/Closed, they've quoted for more and the office wants them to
+  proceed (the Goring Road / Metro Rod case — before this, Tanya could only flip
+  the done/open label, which emails nobody and raises nothing). job-view's banner
+  shows the button when `subcontract.status === "done"` (not manual hand-offs). It
+  reuses the SAME routes with `{followOn:true, quoteRef?}`: **POST
+  /sla/jobs/{id}/subcontract-preview** and **/subcontract**. Server (`followOnState`
+  in sla.js): requires the same subcontractor + the first visit marked done; raises
+  a **NEW PO** (never reuses the first — `subconPO.followOnOf` marks one an
+  interrupted follow-on already raised); email subject "Mostlane - Follow-on works -
+  Order <PO>", boxes "Your quote ref" + "Follows our order <first PO>", no SLA
+  target unless the office types one; the previous record moves to
+  `job.subcontractHistory[]`; the job is **re-opened to "Sent to Subcontractor"**
+  (closedAt cleared, prevStatus "Pending") — toSubconStatus alone leaves finished
+  jobs untouched. Lock is per visit (`subcon:<key>:<id>:fo<visit>`). A failed
+  follow-on email keeps its PO; "Try sending again" continues it as a follow-on
+  (`subcontract.followOn` with no sentAt). **PO supplier name** for every portal
+  subcontractor PO now comes from the PO system's own list when it matches
+  (`poSupplierName` — "Metrorod", not the routing list's "Metro Rod"), so one firm
+  isn't split across two supplier names.
   **"Sent to Subcontractor" status (12 Oct 2026):** a BUILT-IN job category
   (`SUBCON_STATUS`, sla.js) that `getCategories` always injects (purple #7c3aed,
   `system:true`, recolourable, delete refused). `toSubconStatus` moves a job into it on a
