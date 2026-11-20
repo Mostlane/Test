@@ -1198,8 +1198,15 @@ const MAP = window.ML_PERM_MAP || {
       // A note may be TIME-gated (snoozeUntil = last moment a snooze is allowed,
       // e.g. 2h before the van-check deadline) instead of count-gated. Time-gated
       // notes ignore the snooze count entirely.
+      // The OWNER is never boxed in by the snooze count — it's their system, so a
+      // count-gated reminder can always be put off (Jamie, 20 Nov 2026). Time-gated
+      // notes (e.g. the van-check cutoff) still apply to everyone, owner included.
+      function isOwnerUser() {
+        try { return (sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") || "") === "Jamie Line"; } catch (e) { return false; }
+      }
       function itemCanSnooze(i, now) {
         if (i.timeGated) return now < (i.snoozeUntil || 0);   // enforced once past cutoff (incl. overdue → 0)
+        if (isOwnerUser()) return true;                       // owner: unlimited deferrals, no cap
         return (i.snoozes || 0) < (i.maxSnooze || SNOOZE_MAX);
       }
       function snoozeStore() {
@@ -1306,7 +1313,9 @@ const MAP = window.ML_PERM_MAP || {
           ? "Puts this off for 4 hours — you can keep doing this until " +
             new Date(Math.min.apply(null, timeGated.map(function (i) { return i.snoozeUntil; })))
               .toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) + "."
-          : "Puts this off for 4 hours — you can do that " + (left > 1 ? left + " more times." : "once more.");
+          : isOwnerUser()
+            ? "Puts this off for 4 hours — no limit on your account."
+            : "Puts this off for 4 hours — you can do that " + (left > 1 ? left + " more times." : "once more.");
         var el = document.createElement("div");
         el.id = "mlNotify";
         el.innerHTML = '<div class="mln-card">' +
