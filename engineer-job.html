@@ -1287,7 +1287,7 @@
     try{
       await patchJob({status:"In Progress",riskAssessment:ra});
       raDone=true; reported=false; chosen="In Progress";
-      if(job){ job.riskAssessment=ra; job.status="In Progress"; }
+      if(job){ job.riskAssessment=ra; job.status="In Progress"; if(job.raBlock)job.raBlock=undefined; }
       $("raModal").classList.remove("show"); $("curstatus").textContent="In Progress";
       drawStatus(); applyLock(); drawTimeline(); toast("Risk assessment skipped — work started");
     }catch(err){ if(err.blocked){ $("raModal").classList.remove("show"); } else { toast("⚠ "+err.message); } }
@@ -1306,7 +1306,7 @@
     try{
       await patchJob({status:"In Progress",riskAssessment:ra});
       raDone=true; reported=false; chosen="In Progress";
-      if(job){ job.riskAssessment=ra; job.status="In Progress"; }
+      if(job){ job.riskAssessment=ra; job.status="In Progress"; if(job.raBlock)job.raBlock=undefined; }
       $("raModal").classList.remove("show"); $("curstatus").textContent="In Progress";
       drawStatus(); applyLock(); drawTimeline(); toast("RA signed — work started");
     }catch(err){ if(err.blocked){ $("raModal").classList.remove("show"); } else { toast("⚠ "+err.message); } }
@@ -1314,6 +1314,12 @@
   $("raReport").onclick=async function(){
     var reason=$("raNotes").value.trim(); if(!reason){ $("raNotes").classList.add("err"); toast("Tell the office what's stopping you"); return; }
     var failed=decls().filter(function(d){return !d.classList.contains("on");}).map(function(d){return d.querySelector("b").textContent;});
+    if(!failed.length){
+      // Everything's confirmed safe — this is almost always a mis-tap for the
+      // "start" button. Don't silently raise an "awaiting office" safety hold.
+      var sure = window.MLUI ? await MLUI.confirm("You've marked every safety check OK. This button is only for when you genuinely CAN'T work safely and need the office to step in — it puts the job on hold waiting for them.\n\nIf it's safe, go back and tap “RA signed — start”.",{title:"Everything's marked safe",okLabel:"Raise to office anyway",danger:true}) : confirm("You've marked every safety check OK. Raise to the office anyway? If it's safe, go back and tap “RA signed — start”.");
+      if(!sure) return;
+    }
     try{
       await jfetch("/jobs/"+encodeURIComponent(jobId)+"/ra-block",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason:reason,items:failed})});
       reported=true; raDone=false; if(job){ job.raBlock={state:"open",reason:reason}; }

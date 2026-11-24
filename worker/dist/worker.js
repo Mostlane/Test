@@ -27943,7 +27943,21 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     job.targetAt = null;
   }
   if (patch.quote !== void 0) job.quote = patch.quote;
-  if (patch.riskAssessment !== void 0) job.riskAssessment = patch.riskAssessment;
+  if (patch.riskAssessment !== void 0) {
+    job.riskAssessment = patch.riskAssessment;
+    const _ra = patch.riskAssessment;
+    const _raSafe = _ra && typeof _ra === "object" && (_ra.skipped === true || _ra.safe === true || _ra.declarations && _ra.declarations.safeToProceed === true);
+    if (_raSafe && job.raBlock && job.raBlock.state === "open") {
+      job.raBlock = Object.assign({}, job.raBlock, {
+        state: "resolved",
+        resolvedBy: patch.changedBy || "system",
+        resolvedAt: now2,
+        resolveNote: "Auto-cleared: the risk assessment was completed and declared safe to proceed"
+      });
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "Safety flag resolved", at: now2, by: patch.changedBy || "system" });
+    }
+  }
   if (patch.hold !== void 0) job.hold = patch.hold;
   if (patch.order !== void 0) job.order = patch.order;
   if (patch.travelStartMileage !== void 0) job.travelStartMileage = patch.travelStartMileage;

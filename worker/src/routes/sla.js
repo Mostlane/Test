@@ -5941,7 +5941,28 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   // Projects never carry a priority level or an SLA target, for any user.
   if (jobIsProject(job)) { job.priority = ""; job.targetAt = null; }
   if (patch.quote !== undefined) job.quote = patch.quote;   // quote pack
-  if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // pre-start RA
+  if (patch.riskAssessment !== undefined) {
+    job.riskAssessment = patch.riskAssessment;  // pre-start RA
+    // A completed, safe-to-proceed risk assessment SUPERSEDES any open "can't
+    // proceed safely" hold on the SAME job. Without this, an engineer who taps
+    // "⚠ I can't proceed safely — tell the office" (raising an raBlock) and then
+    // actually completes the RA as safe leaves a stale raBlock state:"open" — which
+    // the cross-job guard reads as a live safety flag and strands them (Lionel:
+    // REM0197 6 Nov, then CHAP-260730124 24 Nov — both a clean safe RA sitting
+    // under an open hold). The RA is the source of truth: if it declares it safe to
+    // proceed, there is no safety hold to wait on.
+    const _ra = patch.riskAssessment;
+    const _raSafe = _ra && typeof _ra === "object" &&
+      (_ra.skipped === true || _ra.safe === true || (_ra.declarations && _ra.declarations.safeToProceed === true));
+    if (_raSafe && job.raBlock && job.raBlock.state === "open") {
+      job.raBlock = Object.assign({}, job.raBlock, {
+        state: "resolved", resolvedBy: patch.changedBy || "system", resolvedAt: now,
+        resolveNote: "Auto-cleared: the risk assessment was completed and declared safe to proceed"
+      });
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "Safety flag resolved", at: now, by: patch.changedBy || "system" });
+    }
+  }
   if (patch.hold !== undefined) job.hold = patch.hold;      // on-hold pack (reason / needs / resume)
   if (patch.order !== undefined) job.order = patch.order;   // parts-order pack
   if (patch.travelStartMileage !== undefined) job.travelStartMileage = patch.travelStartMileage;  // per-job mileage
