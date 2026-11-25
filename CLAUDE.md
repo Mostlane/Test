@@ -6780,6 +6780,10 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   status select. `typeStatus()` applies the flag for fiveYear, so the Status light/filters/summary/export
   follow the flag colour, not the date. The flags are a drawn SVG (`flagSvg`) — there is no yellow/green flag emoji. Hidden from client logins unless their `flags` tool is on. Test cases
   in test-compliance-links.mjs.
+  **💬 Comments to-do (25 Nov 2026):** Tools → "💬 Comments to-do" on eicr-portal.html (shown only when
+  `/stores` says `canComment` — Full Access + Tanya) lists every row with a comment: search, edit in place
+  (saves on blur via /compliance/store-comment), **✓ Done** = clears the comment (no history kept), ↗ jumps
+  to and highlights the row. Front-end only.
   **Compliance chart 🚩 unsatisfactory flags (fixed 18 Nov 2026):** the flags
   (eicr-portal.html 5-Year cell, stored as one map in app_config
   `compliance:unsat:<scheme>:<tid>`) SAVED fine but never showed after a refresh —
