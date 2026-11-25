@@ -370,20 +370,69 @@ async function openCert(r){
   try { const d = await authFetch("/compliance/file-url?scheme=coop&code="+encodeURIComponent(r.code)+"&type=fiveYear").then(x=>x.json()); if (d && d.url) window.open(d.url, "_blank"); else toast("No 5-year certificate is filed for "+r.code+" yet — upload it."); }
   catch { toast("Couldn't open the certificate."); }
 }
+// Upload a certificate. The certificate's DATE is what rolls the chart's due
+// date on, so it is read from the PDF (the latest date printed on it — the
+// inspection / sign date) and shown for confirming before filing.
+let engineP = null;
+function ensureEngine(){
+  if (window.MLEICR) return Promise.resolve();
+  if (!engineP) engineP = new Promise((res, rej) => { const s = document.createElement("script"); s.src = "eicr-engine.js?v=1"; s.onload = res; s.onerror = () => { engineP = null; rej(new Error("engine")); }; document.head.appendChild(s); });
+  return engineP;
+}
+async function readCertInfo(f){
+  try {
+    if (!/pdf$/i.test(f.type || "") && !/\.pdf$/i.test(f.name || "")) return {};
+    await ensureEngine();
+    const pages = await MLEICR.readPdf(f);
+    const a = MLEICR.analyze(pages) || {};
+    // The latest date that isn't in the future — a cert also prints its
+    // "next inspection due" date, which must not be taken as the cert date.
+    const flat = pages.map(p => p.join("\n")).join("\n");
+    const today = new Date(); today.setHours(23,59,59,0);
+    let best = null; const re = /\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})\b/g; let m;
+    while ((m = re.exec(flat))) {
+      let y = +m[3]; if (y < 100) y += 2000;
+      const d = new Date(y, +m[2]-1, +m[1]);
+      if (isNaN(d) || d.getDate() !== +m[1] || y < 2015 || d > today) continue;
+      if (!best || d > best) best = d;
+    }
+    const iso = best ? `${best.getFullYear()}-${String(best.getMonth()+1).padStart(2,"0")}-${String(best.getDate()).padStart(2,"0")}` : "";
+    return { date: iso, outcome: a.outcome || "", ref: a.ref || "" };
+  } catch { return {}; }
+}
 function uploadCert(r){
   const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,image/*";
   inp.onchange = async () => {
     const f = inp.files && inp.files[0]; if (!f) return;
-    const form = new FormData(); form.append("file", f); form.append("code", r.code); form.append("type", "fiveYear"); form.append("filename", f.name);
-    // A test's certificate starts the new 5-year cycle (rolls the due date); an
-    // updated certificate after remedials is linked to it and doesn't.
-    if (r.status==="cert_update") { form.append("label", "Updated after remedials — "+f.name); form.append("link", "1"); }
-    else form.append("bump", "1");
-    try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); toast("Certificate filed for "+r.code); load(); }
-    catch(e){ toast("Upload failed: "+(e.message||e)); }
+    const isUpdate = r.status === "cert_update";
+    openModal(`<h3>⬆ ${isUpdate ? "Updated certificate" : "Certificate"} — ${esc(r.code)} ${esc(r.name)}</h3>
+      <div class="sub" id="ucRead">Reading the certificate…</div>
+      <label>Certificate date</label><input type="date" id="ucDate">
+      <div class="sub" id="ucNote">${isUpdate ? "Filed alongside the original certificate — the due date is not moved on for an update after remedials." : "The chart's next 5-year due date is worked out from this date."}</div>
+      <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn g" id="ucGo">File certificate</button></div><div class="sub" id="ucMsg"></div>`);
+    const info = await readCertInfo(f);
+    const dEl = g("ucDate"); if (!dEl) return;
+    if (info.date) dEl.value = info.date;
+    g("ucRead").textContent = info.date
+      ? `Read from the certificate: ${fmtD(info.date)}${info.outcome ? " · " + info.outcome : ""}${info.ref ? " · no. " + info.ref : ""}. Check the date is right.`
+      : "Couldn't read a date from this file — type the certificate date.";
+    g("ucGo").onclick = async () => {
+      const date = dEl.value;
+      if (!isUpdate && !date) { g("ucMsg").textContent = "Enter the certificate date so the chart can be updated."; return; }
+      const form = new FormData(); form.append("file", f); form.append("code", r.code); form.append("type", "fiveYear"); form.append("filename", f.name);
+      if (date) form.append("date", date);
+      // A test's certificate starts the new 5-year cycle (rolls the due date); an
+      // updated certificate after remedials is linked to it and doesn't.
+      if (isUpdate) { form.append("label", "Updated after remedials — "+f.name); form.append("link", "1"); }
+      else form.append("bump", "1");
+      g("ucGo").disabled = true; g("ucMsg").textContent = "Filing…";
+      try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); closeModal(); toast("Certificate filed for "+r.code+(isUpdate || !date ? "" : " — next due "+fmtD(addYearsIso(date,5)))); load(); }
+      catch(e){ g("ucGo").disabled = false; g("ucMsg").textContent = "Upload failed: "+(e.message||e); }
+    };
   };
   inp.click();
 }
+function addYearsIso(iso, n){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||""); return m ? `${+m[1]+n}-${m[2]}-${m[3]}` : ""; }
 async function signOff(r){
   const warn = r.certFiledSinceTest ? "" : "\n\nNo 5-year certificate has been filed on the chart since the test — upload it first if you haven't.";
   const ok = await confirmBox((r.status==="cert_update"?"Updated certificate for ":"Certificate for ")+r.code+" "+r.name+" checked and signed off?"+warn, { title:"Sign off", okLabel:"✓ Sign off" });

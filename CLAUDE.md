@@ -4055,6 +4055,11 @@ five-year-remedials.html stays reachable via "Old 5-year page").
   the remedials used to hide the client order, which must be after the test). The order number is also taken from the
   works job's `orderNumber` or an R#####/REM#### in the test job's reference. First seen at 0127 Forton Road; 9 sites at
   the time (0622 0754 0667 0681 0125 0682 0687 0193 0127).
+- **Upload reads the certificate date (25 Nov 2026):** the tracker's ⬆ Upload used to send no `date`, so
+  /compliance/file's bump did nothing and the chart's due date never rolled (0383 Addlestone). It now reads the PDF
+  in the browser (eicr-engine.js readPdf) and pre-fills a confirm box with the LATEST date that is NOT in the future
+  (a cert also prints its next-inspection date); a test cert needs a date (bump → due + 5 years), an updated cert
+  after remedials is filed linked with no bump.
 - Test `node --no-warnings worker/tools/test-eicr.mjs` (51). portal-config `?v=51`, SW `mostlane-v155`.
 - **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
   `maybeOpenFiveYearRemedial` still writes the old register (harmless).
