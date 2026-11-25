@@ -76,6 +76,7 @@ export function resolveComplianceAccess(profile, perms) {
 export const CLIENT_TOOLS = [
   { key: "viewCerts",   label: "Open certificates (📄)",                 def: true  },
   { key: "sitePack",    label: "Download a store's pack (📦)",           def: true  },
+  { key: "extras",      label: "Extra documents ticked 📦 In pack (manuals etc.)", def: false },
   { key: "wholePack",   label: "Whole-estate compliance pack",          def: false },
   { key: "export",      label: "Export the chart to Excel",             def: false },
   { key: "summary",     label: "％ Summary",                             def: true  },

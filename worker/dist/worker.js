@@ -383,6 +383,7 @@ var init_complianceaccess = __esm({
     CLIENT_TOOLS = [
       { key: "viewCerts", label: "Open certificates (\u{1F4C4})", def: true },
       { key: "sitePack", label: "Download a store's pack (\u{1F4E6})", def: true },
+      { key: "extras", label: "Extra documents ticked \u{1F4E6} In pack (manuals etc.)", def: false },
       { key: "wholePack", label: "Whole-estate compliance pack", def: false },
       { key: "export", label: "Export the chart to Excel", def: false },
       { key: "summary", label: "\uFF05 Summary", def: true },
@@ -15506,6 +15507,10 @@ async function handle8(request, env, ctx, url, sess) {
     ).bind(...oneCode ? [tid, oneCode] : [tid]).all();
     if (oneCode && !(srows || []).length) return jr2({ error: "That store isn't on the live chart" }, headers, 404);
     const plan = buildPackPlan(stores, frows || []);
+    if (toolOff("extras")) for (const st of plan) {
+      st.extras = [];
+      for (const t of Object.values(st.types)) delete t.hasExtras;
+    }
     for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
       delete f.r2_key;
@@ -15520,7 +15525,8 @@ async function handle8(request, env, ctx, url, sess) {
     const internal = viaToken || level === "edit";
     if (!internal) {
       for (const t of Object.keys(byType)) {
-        byType[t] = byType[t].filter((f) => f.inPack || f.current && t !== "other");
+        const extrasOk = !toolOff("extras");
+        byType[t] = byType[t].filter((f) => f.current && t !== "other" || extrasOk && f.inPack);
         if (!byType[t].length) delete byType[t];
       }
     }
@@ -15976,11 +15982,14 @@ async function handle8(request, env, ctx, url, sess) {
     if (!code) return jr2({ error: "code required" }, headers, 400);
     const key = "compliance:unsat:" + scheme + ":" + tid;
     const path = '$."' + code + '"';
+    const FLAG_STATES = ["unsat", "quoted", "ordered"];
+    const st = FLAG_STATES.includes(b.status) ? b.status : "unsat";
+    const val2 = JSON.stringify({ s: st, at: (/* @__PURE__ */ new Date()).toISOString(), by: me });
     try {
       if (b.on) {
         await env.DB.prepare(
-          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, 1)) ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, 1)"
-        ).bind(tid, key, code, path).run();
+          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, json(?))) ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, json(?))"
+        ).bind(tid, key, code, val2, path, val2).run();
       } else {
         await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
       }
@@ -15991,11 +16000,11 @@ async function handle8(request, env, ctx, url, sess) {
         codes = JSON.parse(row && row.value || "{}") || {};
       } catch {
       }
-      if (b.on) codes[code] = 1;
+      if (b.on) codes[code] = JSON.parse(val2);
       else delete codes[code];
       await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
     }
-    return jr2({ ok: true, code, on: !!b.on }, headers);
+    return jr2({ ok: true, code, on: !!b.on, status: b.on ? st : null }, headers);
   }
   if (sub === "/store-comment" && method === "POST") {
     if (!await canCommentGate()) return jr2({ error: "Not allowed" }, headers, 403);
