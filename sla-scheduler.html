@@ -337,6 +337,7 @@
       </div>
       <div class="controls-group">
         <label style="cursor:pointer;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="showOfficeChk"> <span>Show office staff</span></label>
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px;" title="Standby / occasional engineers are hidden by default"><input type="checkbox" id="showStandbyChk"> <span>Show standby</span></label>
       </div>
       <div class="controls-group">
         <span class="tag">Drag jobs to move them — time updates for every engineer on the job</span>
@@ -768,6 +769,13 @@ let engineerFilter = "all";
 let showOffice = false;
 try { showOffice = localStorage.getItem("mlSchedShowOffice") === "1"; } catch (e) {}
 function isFieldEng(e){ return String(e.staffType || "field") !== "office"; }
+// Standby / occasional engineers (profile.standby) are active + assignable but
+// hidden from the scheduler + auto-planning by default, until "Show standby" is
+// ticked (remembered per user). A specific dropdown pick still shows them, and a
+// standby engineer who actually has a job on the shown day/range is never hidden.
+let showStandby = false;
+try { showStandby = localStorage.getItem("mlSchedShowStandby") === "1"; } catch (e) {}
+function isStandby(e){ return !!(e && e.standby); }
 
 // ── Instant paint (Oct 2026) ──────────────────────────────────────────────
 // The scheduler should appear the instant it's tapped. The last snapshot of
@@ -820,6 +828,7 @@ async function loadEngineers(){
       username: u.Username,
       name: ((u.FirstName||"")+" "+(u.LastName||"")).trim() || u.Username,
       staffType: u.StaffType || "field",
+      standby: u.Standby === true || p.standby === true,
       homePostcode: (p.homePostcode || "").toUpperCase().replace(/\s+/g," ").trim(),
       homeLat: isFinite(hl) ? hl : null,
       homeLng: isFinite(hn) ? hn : null
@@ -996,16 +1005,20 @@ function ensureHolidays(){
 
 function getFilteredEngineers(){
   if(engineerFilter !== "all") return engineers.filter(e => e.username === engineerFilter);
-  return showOffice ? engineers : engineers.filter(isFieldEng);
+  let list = showOffice ? engineers : engineers.filter(isFieldEng);
+  if(!showStandby) list = list.filter(e => !isStandby(e));   // standby hidden by default
+  return list;
 }
-// Rebuild the Engineer dropdown to match the field/office filter (keeps the
-// current pick if it's still listed).
+// Rebuild the Engineer dropdown to match the field/office/standby filter (keeps
+// the current pick if it's still listed).
 function populateEngineerFilter(){
   const sel = $("engineerFilter"); if(!sel) return;
   const prev = sel.value;
   sel.innerHTML = "";
   const all = document.createElement("option"); all.value = "all"; all.textContent = "All engineers"; sel.appendChild(all);
-  (showOffice ? engineers : engineers.filter(isFieldEng)).forEach(e => {
+  let base = showOffice ? engineers : engineers.filter(isFieldEng);
+  if(!showStandby) base = base.filter(e => !isStandby(e));
+  base.forEach(e => {
     const opt = document.createElement("option"); opt.value = e.username; opt.textContent = e.name; sel.appendChild(opt);
   });
   if(prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
@@ -2226,7 +2239,7 @@ let fillThreshold = 20, fillRejected = new Set();
 function engName(username){ const e = engineers.find(x => (x.username || "").toLowerCase() === (username || "").toLowerCase()); return e ? e.name : username; }
 function openFillins(){
   $("fillDate").textContent = "Loose jobs for " + selectedDate.toDateString();
-  const rows = engineers.map(e => {
+  const rows = engineers.filter(e => showStandby || !isStandby(e)).map(e => {
     const hasHome = (e.homeLat != null) || !!e.homePostcode;
     return `<label class="fill-eng${hasHome ? "" : " nohome"}">
       <input type="checkbox" class="fill-eng-cb" value="${escapeAttr(e.username)}" ${hasHome ? "checked" : "disabled"}>
@@ -2340,7 +2353,10 @@ function autoEngPayload(usernames, date){
   return engineers.filter(e =>
     (!usernames || usernames.includes(e.username)) &&
     !holFor(e.username, date || selectedDate) &&
-    (usernames || e.staffType === "field")
+    // Whole-team mode: field staff only, and standby engineers are left out
+    // unless "Show standby" is on. An explicit per-engineer pick (usernames set)
+    // always goes through, standby or not.
+    (usernames || (e.staffType === "field" && (showStandby || !isStandby(e))))
   ).map(e => {
     const hasHome = (e.homeLat && e.homeLng) || !!e.homePostcode;
     return { username:e.username, name:e.name,
@@ -3113,8 +3129,11 @@ function focusJobBlock(jobId){
   const el = document.querySelector('.day-job[data-job-id="' + CSS.escape(jobId) + '"]');
   const job = jobs.find(j => j.id === jobId);
   if(!el){
-    if(job && job.assignedEngineers.length && !showOffice && engineers.some(e => !isFieldEng(e) && job.assignedEngineers.map(a => a.toLowerCase()).includes(String(e.username).toLowerCase())))
+    const assignedLc = job ? job.assignedEngineers.map(a => a.toLowerCase()) : [];
+    if(job && job.assignedEngineers.length && !showOffice && engineers.some(e => !isFieldEng(e) && assignedLc.includes(String(e.username).toLowerCase())))
       setStatus("Job saved — its engineer is office staff. Tick “Show office staff” to see it.", true);
+    else if(job && job.assignedEngineers.length && !showStandby && engineers.some(e => isStandby(e) && assignedLc.includes(String(e.username).toLowerCase())))
+      setStatus("Job saved — its engineer is on standby. Tick “Show standby” to see it.", true);
     else if(job) setStatus("Job saved (" + (job.ref || job.id) + ") — it has no slot on this day.", true);
     return;
   }
@@ -3205,6 +3224,18 @@ async function init(){
       render();
     });
   }
+  const ssc = $("showStandbyChk");
+  if(ssc){
+    ssc.checked = showStandby;
+    ssc.addEventListener("change", () => {
+      showStandby = ssc.checked;
+      try { localStorage.setItem("mlSchedShowStandby", showStandby ? "1" : "0"); } catch(e){}
+      // Mirror to the server so the preference follows the user across devices.
+      try { authFetch("/prefs", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ schedShowStandby: showStandby }) }); } catch(e){}
+      populateEngineerFilter();
+      render();
+    });
+  }
 
   // Needs-scheduling tray: reinstate hidden jobs + collapse/expand.
   $("trayReinstate").addEventListener("click", () => { saveTrayHidden(new Set()); renderTray(); });
@@ -3263,6 +3294,11 @@ async function init(){
         showOffice = p.schedShowOffice;
         try { localStorage.setItem("mlSchedShowOffice", showOffice ? "1" : "0"); } catch(e){}
         const c = $("showOfficeChk"); if(c) c.checked = showOffice;
+      }
+      if(p && typeof p.schedShowStandby === "boolean"){
+        showStandby = p.schedShowStandby;
+        try { localStorage.setItem("mlSchedShowStandby", showStandby ? "1" : "0"); } catch(e){}
+        const c = $("showStandbyChk"); if(c) c.checked = showStandby;
       }
     } catch(e){}
     populateEngineerFilter();

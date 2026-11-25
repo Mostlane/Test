@@ -498,9 +498,12 @@ function isActiveStatus(s) {
 function shapeUser(u, perms, level = "full") {
   let profile = {};
   try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch { profile = {}; }
+  // Capture flags BEFORE the per-level profile trim so they survive at every
+  // level (the slim copy below only keeps a whitelist of profile keys).
+  const standby = profile.standby === true;
   if (level !== "full") {
     const keep = level === "sla"
-      ? ["staffType", "sortOrder", "areas", "clientOrg", "homePostcode", "homeLat", "homeLng"]
+      ? ["staffType", "sortOrder", "areas", "clientOrg", "homePostcode", "homeLat", "homeLng", "standby"]
       : ["staffType", "sortOrder", "areas", "clientOrg"];
     const slim = {};
     for (const k of keep) if (profile[k] !== undefined) slim[k] = profile[k];
@@ -525,6 +528,9 @@ function shapeUser(u, perms, level = "full") {
     // else "jobs" = the full client jobs portal. "" for staff.
     ClientRole: profile.staffType === "client" ? (profile.clientRole === "compliance" ? "compliance" : "jobs") : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
+    // Standby/occasional engineer: an active, assignable user who is hidden from
+    // the scheduler + auto-planning by default (they rarely have work booked).
+    Standby: standby,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the
     // Users-admin picker pre-fills each page's dropdown with the current level.
