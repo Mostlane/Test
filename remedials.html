@@ -23,6 +23,8 @@
     .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
     .chip .n{background:rgba(0,0,0,.08);border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;}
     .chip.on .n{background:rgba(255,255,255,.25);}
+    .chip.skipall{background:var(--warn);color:#fff;border-color:var(--warn);}
+    .chip.skipall .n{background:rgba(255,255,255,.28);}
     .tblwrap{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);overflow-x:auto;}
     table{border-collapse:collapse;width:100%;font-size:13px;}
     thead th{background:var(--brand);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:9px 10px;white-space:nowrap;position:sticky;top:0;z-index:2;}
@@ -204,6 +206,9 @@
       const coded = (r.lines||[]).map(l=>String(l.code||"").toUpperCase().replace(/[^A-Z0-9]/g,"")).filter(c=>["C1","C2","C3","FI"].includes(c));
       return coded.length>0 && coded.every(c=>c==="C3");
     }
+    // A C3-only site not yet priced/ordered/done — eligible for one-tap "skip pricing".
+    // Same gate as the per-row ⏭ Skip button, so the bulk count always matches the buttons.
+    function canSkip(r){ return isC3Only(r) && !r.worksJobId && !["awaiting_cert","done","satisfactory"].includes(effStatus(r)); }
     // Does an order's text actually read as electrical remedial works? (keeps a
     // ram-raid / door / worktop / PAT order off the remedials list.)
     function looksElec(t){ t=String(t||"").toLowerCase(); return /(rcd|rcbo|ip[-\s]?rat|ip[0-9]x|distribution board|\bdb[0-9]|consumer unit|socket|circuit|cable|isolat|earth|bond|\bmcb\b|\bfuse|eicr|electric|remedial|blank plate|intumescent|fire seal|crimp|conductor|patress|\bspd\b|afdd|wiring|rewire|\bcpc\b|\bzs\b)/.test(t); }
@@ -348,11 +353,13 @@
       // chips — the cross-cutting views (the per-stage views live on the timeline)
       const chip = (f,label,n) => '<button class="chip'+(FILTER===f?' on':'')+'" data-f="'+f+'">'+label+(n!=null?'<span class="n">'+n+'</span>':'')+'</button>';
       const live = c.to_price+c.priced+c.ordered+c.in_works+c.awaiting_cert;
+      const skipN = ROWS.filter(canSkip).length;
       g("chips").innerHTML = [
         chip("live","Live",live),
         chip("c3only","C3 only",c.c3only),
         chip("satisfactory","Satisfactory",c.satisfactory),
-        chip("all","All",ROWS.length)
+        chip("all","All",ROWS.length),
+        skipN ? '<button class="chip skipall" data-skipall="1" title="Move every C3-only site (recommendations only) straight to Awaiting cert in one go">⏭ Skip pricing on all C3-only<span class="n">'+skipN+'</span></button>' : ''
       ].join("");
 
       const q = g("search").value.trim().toLowerCase();
@@ -466,6 +473,25 @@
         (window.MLUI?MLUI.toast:alert)((res && res.error) || "Couldn't update.");
         if(btn) btn.disabled = false;
       }catch{ (window.MLUI?MLUI.toast:alert)("Couldn't update — check your signal."); if(btn) btn.disabled = false; }
+    }
+
+    // One tap for the lot: move EVERY C3-only pre-pricing site to "Awaiting cert".
+    async function skipAllC3(btn){
+      const rows = ROWS.filter(canSkip);
+      if(!rows.length){ if(window.MLUI&&MLUI.toast) MLUI.toast("No C3-only sites to skip"); return; }
+      const ok = window.MLUI ? await MLUI.confirm("Skip pricing on all "+rows.length+" C3-only site"+(rows.length===1?"":"s")+"? They move straight to “Awaiting cert” — recommendations only, nothing to price, quote or order.", { title:"Skip pricing on all C3-only", okLabel:"Skip all → Awaiting cert" }) : confirm("Skip pricing on "+rows.length+" C3-only sites?");
+      if(!ok) return;
+      if(btn){ btn.disabled=true; btn.textContent="Skipping…"; }
+      let done=0, failed=0;
+      for(const r of rows){
+        try{
+          const res = await authFetch("/certs/five-year/manual", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, stage:"awaiting_cert" }) }).then(x=>x.json());
+          if(res && res.ok){ r.manualStage = res.manualStage || "awaiting_cert"; done++; }
+          else failed++;
+        }catch{ failed++; }
+      }
+      render();
+      if(window.MLUI && MLUI.toast) MLUI.toast(done+" moved to Awaiting cert"+(failed?(" · "+failed+" couldn’t update — try again"):""));
     }
 
     // ── Works-job picker ── choose which remedials go onto the job sent to the engineer.
@@ -608,7 +634,7 @@
     g("qov").addEventListener("click", e => { if(e.target===g("qov")) closeQuote(); });
     g("refreshBtn").onclick = load;
     g("timeline").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
-    g("chips").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
+    g("chips").addEventListener("click", e => { const sa=e.target.closest("[data-skipall]"); if(sa){ skipAllC3(sa); return; } const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
     g("tbody").addEventListener("click", e => {
       const qb = e.target.closest("[data-quote]");
       if (qb){ openQuote(qb.getAttribute("data-quote")); return; }
