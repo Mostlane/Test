@@ -7,6 +7,7 @@
   <script src="/portal-config.js?v=51"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
+  <script src="docviewer.js?v=7"></script>
   <style>
     :root{ --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; --muted:#6b7a90; }
     *{box-sizing:border-box;}
@@ -366,9 +367,32 @@ async function createWorks(r){
     catch(e){ g("wkMsg").textContent = e.message; g("wkGo").disabled = false; }
   };
 }
+// 📄 Cert = what the CHART holds right now for this store's 5-year: the current
+// certificate(s) (a linked set shows together), the certificate date it was
+// filed with and the due date that gives — so an upload can be checked at once.
 async function openCert(r){
-  try { const d = await authFetch("/compliance/file-url?scheme=coop&code="+encodeURIComponent(r.code)+"&type=fiveYear").then(x=>x.json()); if (d && d.url) window.open(d.url, "_blank"); else toast("No 5-year certificate is filed for "+r.code+" yet — upload it."); }
-  catch { toast("Couldn't open the certificate."); }
+  openModal(`<h3>📄 5-year certificate — ${esc(r.code)} ${esc(r.name)}</h3><div class="sub">Loading…</div>`);
+  let files = [];
+  try {
+    const d = await authFetch("/compliance/files?scheme=coop&code="+encodeURIComponent(r.code)).then(x=>x.json());
+    files = (d && d.files && d.files.fiveYear) || [];
+  } catch { g("mc").innerHTML = `<h3>📄 5-year certificate</h3><div class="sub">Couldn't load the certificates — check your connection.</div><div class="mact"><button class="btn l" data-close>Close</button></div>`; return; }
+  const cur = files.filter(f => f.current), prev = files.filter(f => !f.current);
+  const row = (f, i, isCur) => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:9px 10px;border:1px solid ${isCur?"#86efac":"#e2e8f0"};background:${isCur?"#f0fdf4":"#fff"};border-radius:10px;margin:6px 0">
+      <div style="min-width:0"><div style="font-weight:600;word-break:break-word">${isCur?"✅ ":""}${esc(f.label||f.filename||"Certificate")}</div>
+      <div class="sub">Certificate date: <b>${f.date && f.uploadedAt && String(f.date)!==String(f.uploadedAt) ? esc(fmtD(f.date)) : '<span style="color:#b45309">not set</span>'}</b> · uploaded ${esc(fmtDT(f.uploadedAt))}${f.pinned?" · 🔗 linked":""}</div></div>
+      <button class="btn ${isCur?"g":"l"}" data-open="${isCur?"c":"p"}${i}">Open</button></div>`;
+  const dueTxt = r.due ? `Chart's next 5-year due date: <b>${esc(fmtD(r.due))}</b>` : `<span style="color:#b45309">The chart has no 5-year due date for this store.</span>`;
+  g("mc").innerHTML = `<h3>📄 5-year certificate — ${esc(r.code)} ${esc(r.name)}</h3>
+    <div class="sub" style="margin-bottom:6px">${dueTxt}</div>
+    ${cur.length ? `<div style="font-weight:700;margin-top:8px">Current on the chart${cur.length>1?" ("+cur.length+" linked)":""}</div>${cur.map((f,i)=>row(f,i,true)).join("")}` : `<div class="sub">No 5-year certificate is filed for ${esc(r.code)} yet — use ⬆ Upload.</div>`}
+    ${prev.length ? `<details style="margin-top:8px"><summary class="sub" style="cursor:pointer">Older versions (${prev.length})</summary>${prev.map((f,i)=>row(f,i,false)).join("")}</details>` : ""}
+    <div class="mact"><button class="btn l" data-close>Close</button></div>`;
+  g("mc").querySelectorAll("[data-open]").forEach(btn => btn.onclick = () => {
+    const k = btn.dataset.open, f = (k[0]==="c" ? cur : prev)[+k.slice(1)]; if (!f || !f.url) return;
+    if (window.MLDocViewer) MLDocViewer.open({ url:f.url, name:f.label||f.filename||"Certificate", downloadUrl:f.url });
+    else window.open(f.url, "_blank");
+  });
 }
 // Upload a certificate. The certificate's DATE is what rolls the chart's due
 // date on, so it is read from the PDF (the latest date printed on it — the
