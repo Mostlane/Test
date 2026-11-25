@@ -4007,6 +4007,63 @@ it straight onto the compliance chart (rolling the next-due date).
     fresh order arrives. TODO/next: raise the works job from a 5-year remedial (like the
     EM one-tap); fold into the client-orders auto-match so a new order advances the stage.
 
+## EICR TRACKER — one case per site per 5-year cycle (routes/eicr.js + eicr-tracker.html — 25 Nov 2026)
+Jamie: "electrical tests are slipping through the net… plan a system". Diagnosis from live data: 41 elec test
+jobs, 28 with C1/C2/FI, only 4 ever got a works job; the office had parked 26 of them in custom DONE categories
+("Jamie/Tanya", "Compliance Complete") so they read finished; two registers (five_year_remedials 78 rows,
+concerto_cases 46) + 5 tabs disagreed. **This replaces all of that with ONE table `eicr_cases`** (self-migrating,
+tenant_id INTEGER) and ONE page **eicr-tracker.html** (⚡ tile `FiveYear` + sidebar "EICR tracker"; the old
+five-year-remedials.html stays reachable via "Old 5-year page").
+- **Due list = the compliance chart** (coop `compliance_stores.due.fiveYear`, closed stores dropped). Each store
+  has at most ONE open case; no case = a virtual "due" row.
+- **Statuses** (`STATUSES`): due → booked → **cert_signoff** (C3 only / no remedials) → done; or booked →
+  **to_quote** (any C1/C2/FI, or an UNCODED item — safe side) → quoted → ordered → works_booked →
+  **cert_update** (Jamie edits the original cert after remedials) → done.
+- **Stored status, moved by evidence on every board load** (`reconcile`): every elecTest job is linked to a case;
+  the test job finishing (built-in done OR a custom `done:true` category) sets the outcome; an electrical client
+  order for the store after the test (matched elec/fiveyear, or EICR/remedial wording; EM excluded) fills the order
+  number; the works job (`createWorksJobFromRemedials`, test photos copied) → works_booked; finished → cert_update.
+  **A manual status holds**: evidence only moves a case when the evidence itself CHANGED since last look
+  (`ev_status`), never backwards, and a C3 reading never drags a case off the quote path (`nextStatus`).
+- **Sign-off = Full Access only** (`/eicr/signoff`). **Invoicing is separate**: TEST invoice due once the test is
+  done; WORKS invoice due once the updated cert is signed off. A case CLOSES when done + every needed invoice is
+  ticked; the store then shows its next chart due date as "due".
+- **Late flags** (working days in status): to_quote 5, ordered 5, cert_signoff/cert_update 2 (red), quoted 20
+  (amber); booked/works_booked red once the visit date passes unfinished; due red once overdue, amber ≤60 days.
+- **Page tabs**: To do (office: book / booked / to quote / awaiting order / book works / works booked), Sign off,
+  Invoicing, All sites (status filter), **Concerto check** (`/eicr/exceptions`: due on portal not Concerto; due on
+  Concerto not portal — incl. released PPMs; on Concerto not on chart; chart with no date; unmapped refs; 12-month
+  horizon). Row click = everything on the case + edit status/order/quote/notes + log.
+- **Routes** (`/eicr/*`, office = FullAccess|SLAAdmin|Compliance; £ only canSeeMoney): GET board, exceptions,
+  case, quote-text; POST book (creates the elecTest job, dayBefore release), link-job, status, update, quote-sent,
+  create-works, signoff, invoice (+undo), reopen, migrate.
+- **One-off migration** (`migrateOld`, runs automatically on the first board load, flag app_config
+  `eicr:migrated:<tid>`): old concerto_cases stage12 (open ones) → status/quote/notes; old five_year_remedials
+  stages → status + order number, flagged "Imported … check it is still outstanding" when no portal test job (a
+  portal test job always wins — only its order number is carried).
+- **📅 Concerto <year> tab (default, 25 Nov 2026, Jamie: "full date order of the Concerto schedule from Jan 2026, to
+  see the status of all jobs done this year")**: every store whose Concerto **next OR last** date falls in the chosen
+  year (Concerto rolls a tested site's next date on 5 years — 60 of the 118 2026 sites now read 2031, their 2026 date
+  survives as `last_date`), sorted by that date with month headers, year selector + status chips. Status: the open
+  case's; else "✓ Done & invoiced" (a closed case — the board now sends `lastClosed` per store), "📄 Certificate on
+  file — not in the tracker" (a fiveYear cert with a doc/upload date in the year; board sends `certDocDate`), or
+  "⚠ Concerto moved it on — no test found here" (rolled, no case, no cert). Concerto row carries `last` too.
+- **Remedials done ON the test job (25 Nov 2026):** the office often sends the remedial electrician (Lionel) back on
+  the TEST job instead of the works job — re-opened or just re-assigned, and he taps Complete again. `testReusedForWorks`
+  = a "Complete" ≥5 days after the test first finished → the case moves to cert_update (logged "check"); rows carry
+  `worksOnTestJob {date,by}`. The test date is the FIRST completion (`testDoneAt`), not scheduledAt (a re-schedule for
+  the remedials used to hide the client order, which must be after the test). The order number is also taken from the
+  works job's `orderNumber` or an R#####/REM#### in the test job's reference. First seen at 0127 Forton Road; 9 sites at
+  the time (0622 0754 0667 0681 0125 0682 0687 0193 0127).
+- **Upload reads the certificate date (25 Nov 2026):** the tracker's ⬆ Upload used to send no `date`, so
+  /compliance/file's bump did nothing and the chart's due date never rolled (0383 Addlestone). It now reads the PDF
+  in the browser (eicr-engine.js readPdf) and pre-fills a confirm box with the LATEST date that is NOT in the future
+  (a cert also prints its next-inspection date); a test cert needs a date (bump → due + 5 years), an updated cert
+  after remedials is filed linked with no bump.
+- Test `node --no-warnings worker/tools/test-eicr.mjs` (51). portal-config `?v=51`, SW `mostlane-v155`.
+- **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
+  `maybeOpenFiveYearRemedial` still writes the old register (harmless).
+
 ## Southern Co-op CLIENT COMPLIANCE PACK (compliance-pack.html + lib/compliancepack.js — 25 Nov 2026)
 Hand-over pack of the LATEST certificate per store per type for the client. eicr-portal 🛠 Tools → "📦 Client
 compliance pack" (download+ access). **GET /compliance/export?scheme=coop** (download|edit level, coop only) →
@@ -6773,13 +6830,24 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   runs the migration itself until one completes. Same fix for the timesheets
   `PO_PROBE`. Module-level caches must hold VALUES, never promises.
   **5-year flag STATUSES (25 Nov 2026, Jamie):** the 🚩 on a 5-Year cell is now a 3-state flag, stored
-  `{s, at, by}` in the same `compliance:unsat:<scheme>:<tid>` map (legacy `1` = unsat): **🚩 unsat** (red —
-  remedials to quote) · **📨 quoted** (amber — quote sent, awaiting the client's order) · **📦 ordered** (green —
+  `{s, at, by}` in the same `compliance:unsat:<scheme>:<tid>` map (legacy `1` = unsat): **red flag = unsat** (red —
+  remedials to quote) · **yellow flag = quoted** (amber — quote sent, awaiting the client's order) · **green flag = ordered** (green —
   order received, works to do). POST /compliance/unsat-flag `{code,on,status}`. Tapping the icon (edit users)
   opens a picker; Tools → **🚩 Unsatisfactory EICRs** lists every flagged store with status chips + an inline
   status select. `typeStatus()` applies the flag for fiveYear, so the Status light/filters/summary/export
-  follow the flag colour, not the date. Hidden from client logins unless their `flags` tool is on. Test cases
+  follow the flag colour, not the date. The flags are a drawn SVG (`flagSvg`) — there is no yellow/green flag emoji. Hidden from client logins unless their `flags` tool is on. Test cases
   in test-compliance-links.mjs.
+  **💬 Comments to-do (25 Nov 2026):** Tools → "💬 Comments to-do" on eicr-portal.html (shown only when
+  `/stores` says `canComment` — Full Access + Tanya) lists every row with a comment: search, edit in place
+  (saves on blur via /compliance/store-comment), **✓ Done** = clears the comment (no history kept), ↗ jumps
+  to and highlights the row. Front-end only.
+  **🔧 Remedial works required marker (25 Nov 2026):** a spanner inside the Store Code cell of each row on
+  eicr-portal.html — faint for edit users (tap to mark), amber badge when marked (tap to clear); view users only
+  see it when marked. Independent of the 5-year flag. Map `{code:{at,by}}` in app_config
+  `compliance:works:<scheme>:<tid>`; GET /compliance/works-flags (hidden from clients unless their `flags` tool
+  is on), POST /compliance/works-flag `{code,on}` (edit). Tools → "🔧 Remedial works required" lists them with
+  the 5-year flag status, ✓ Works done (clears) and ↗ (jump to the row). NB saveEditInstant now reads the code
+  from `tr.dataset.code` because the cell holds the button.
   **Compliance chart 🚩 unsatisfactory flags (fixed 18 Nov 2026):** the flags
   (eicr-portal.html 5-Year cell, stored as one map in app_config
   `compliance:unsat:<scheme>:<tid>`) SAVED fine but never showed after a refresh —

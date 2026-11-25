@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Project</title>
-  <script src="/portal-config.js?v=50"></script>
+  <script src="/portal-config.js?v=51"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="docviewer.js?v=7"></script>
@@ -249,6 +249,7 @@
       if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
         return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>`
           + ` <button class="btn small" data-valsheet="1" title="Build a line-item valuation sheet with retention + PDF/Excel export">📊 Valuation sheet</button>`
+          + (CAN ? ` <button class="btn small ghost" data-docpick="valuations">📎 Add / link</button>` : "")
           + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
       if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="var el=document.getElementById('docsCardEl');if(el){el.setAttribute('open','');el.scrollIntoView({behavior:'smooth'});}return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
       return "";
@@ -752,6 +753,17 @@
           match: (x, q) => (String(x.ref || "") + " " + String(x.site || "")).toLowerCase().includes(q),
         },
       },
+      valuations: {
+        title: "📊 Valuations", build: () => openValuationSheet(), buildLabel: "Build a valuation sheet",
+        portal: {
+          label: "…or link a valuation sheet you made separately:", single: true, linkKind: "valuation",
+          list: async () => (await authFetch("/val/list").then(r => r.json()).catch(() => ({}))).valuations || [],
+          linked: () => (P.valuation && P.valuation.id) ? [P.valuation.id] : [],
+          name: x => x.title || x.ref || x.id,
+          sub: x => [x.ref, x.contractTotal ? ("£" + Number(x.contractTotal).toLocaleString()) : "", (x.projectId && x.projectId !== PID) ? "⚠ linked to another project" : "", x.status].filter(Boolean).join(" · "),
+          match: (x, q) => (String(x.title || "") + " " + String(x.ref || "") + " " + String(x.client || "")).toLowerCase().includes(q),
+        },
+      },
     };
 
     // Linked-doc pills on each to-do row (programme / rams / cpp).
@@ -886,7 +898,7 @@
       try {
         if (cfg.portal) {
           if (cfg.portal.single) {
-            const chosen = [...DP.portalSel][0] || "", cur = (P.links && P.links.programmeId) || "";
+            const chosen = [...DP.portalSel][0] || "", cur = (cfg.portal.linked()[0]) || "";
             if (chosen !== cur) await link({ kind: cfg.portal.linkKind, value: chosen });
           } else {
             const before = new Set(cfg.portal.linked());

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Monthly Pump Maintenance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <script src="/portal-config.js?v=51"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root{ --brand:#1A4F8F; --blue:#0071CE; --ink:#0f2438; --mute:#64748b; --line:#d5dde5;
+      --bg:#f4f6f9; --red:#dc2626; --amber:#b45309; --green:#16a34a; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:var(--ink);
+      background:transparent; }
+    .wrap{ max-width:820px; margin:0 auto; padding:14px 16px 60px; }
+    header.page{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+    header.page h1{ font-size:19px; margin:0; color:var(--brand); }
+    .intro{ color:var(--mute); font-size:13.5px; line-height:1.5; margin:4px 0 6px; }
+    .byline{ color:var(--mute); font-size:12.5px; margin:0 0 14px; }
+    .byline b{ color:var(--ink); }
+
+    .card{ background:#fff; border:1px solid var(--line); border-radius:14px; margin-bottom:12px;
+      box-shadow:0 1px 3px rgba(16,36,56,.05); overflow:hidden; }
+    .chead{ display:flex; align-items:center; gap:12px; padding:13px 15px; cursor:pointer; }
+    .chead:hover{ background:#f8fafc; }
+    .cname{ font-weight:700; font-size:15.5px; }
+    .ccode{ color:var(--mute); font-weight:600; font-size:12.5px; }
+    .cmeta{ margin-left:auto; text-align:right; font-size:12px; line-height:1.5; }
+    .pill{ display:inline-block; border-radius:999px; padding:2px 9px; font-size:11.5px; font-weight:700; }
+    .pill.red{ background:#fef2f2; color:var(--red); border:1px solid #f6caca; }
+    .pill.amber{ background:#fff7ed; color:var(--amber); border:1px solid #f3d9b4; }
+    .pill.green{ background:#f0fdf4; color:var(--green); border:1px solid #bbf7d0; }
+    .pill.grey{ background:#f1f5f9; color:var(--mute); border:1px solid #e2e8f0; }
+    .last{ color:var(--mute); font-size:12px; margin-top:2px; }
+    .chev{ color:var(--mute); font-size:13px; transition:transform .15s; }
+    .card.open .chev{ transform:rotate(90deg); }
+
+    .body{ display:none; padding:4px 15px 16px; border-top:1px solid #eef2f6; }
+    .card.open .body{ display:block; }
+    .row{ margin:12px 0; }
+    .row label.lab{ display:block; font-weight:700; font-size:13px; margin-bottom:5px; }
+    input[type=date], textarea{ width:100%; border:1px solid var(--line); border-radius:9px;
+      padding:9px 11px; font:inherit; font-size:14px; color:var(--ink); background:#fff; }
+    textarea{ min-height:62px; resize:vertical; }
+    .hint{ color:var(--mute); font-size:12px; margin-top:4px; }
+
+    .addbtn{ display:inline-flex; align-items:center; gap:7px; background:#eef3f9; color:var(--brand);
+      border:1px dashed #9db8d6; border-radius:10px; padding:10px 14px; font-weight:700; font-size:13.5px; cursor:pointer; }
+    .addbtn:hover{ background:#e3edf7; }
+    .thumbs{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .thumb{ position:relative; width:84px; height:84px; border-radius:9px; overflow:hidden;
+      border:1px solid var(--line); background:#f1f5f9; }
+    .thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+    .thumb .x{ position:absolute; top:3px; right:3px; width:20px; height:20px; border-radius:50%;
+      background:rgba(15,36,56,.78); color:#fff; border:0; cursor:pointer; font-size:13px; line-height:20px; padding:0; }
+    .thumb.reuse{ opacity:.9; }
+    .thumb .tag{ position:absolute; left:0; right:0; bottom:0; background:rgba(26,79,143,.82); color:#fff;
+      font-size:9px; font-weight:700; text-align:center; padding:1px 0; letter-spacing:.3px; }
+
+    .reuse-box{ display:flex; align-items:flex-start; gap:9px; background:#f8fafc; border:1px solid #e7eef6;
+      border-radius:10px; padding:11px 13px; margin-top:10px; }
+    .reuse-box input{ margin-top:2px; width:17px; height:17px; }
+    .reuse-box .t{ font-size:13px; }
+    .reuse-box .t b{ color:var(--ink); }
+
+    .actions{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:16px; }
+    .btn{ border:0; border-radius:10px; padding:11px 16px; font-weight:700; font-size:14px; cursor:pointer; }
+    .btn.go{ background:var(--green); color:#fff; }
+    .btn.go:disabled{ opacity:.55; cursor:default; }
+    .btn.cancel{ background:#eef2f6; color:var(--mute); }
+    .status{ font-size:13px; color:var(--mute); }
+    .status.err{ color:var(--red); font-weight:600; }
+    .status.ok{ color:var(--green); font-weight:600; }
+
+    .msg{ padding:16px; text-align:center; color:var(--mute); }
+    .ml-back{ } /* styling forced by portal-config */
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="page">
+      <a class="ml-back" href="eicr-portal.html" title="Back to the compliance chart">‹ Back</a>
+      <h1>🚰 Monthly pump maintenance</h1>
+    </header>
+    <p class="intro">Log this month's sump-pump service for each site, then file it straight to the Southern Co-op
+      compliance chart (this rolls the pump due date on a month). Pick the date, add the photos — or reuse last
+      month's — add a note only if something wasn't right, and press <b>Create &amp; file</b>.</p>
+    <p class="byline" id="byline"></p>
+    <div id="list"><p class="msg">Loading pump sites…</p></div>
+  </div>
+
+<script>
+function mlToken(){ try{ return localStorage.getItem('mostlaneToken') || ''; }catch(e){ return ''; } }
+function authFetch(path, opts){
+  opts = opts || {};
+  const h = Object.assign({}, opts.headers || {});
+  const t = mlToken(); if (t) h['Authorization'] = 'Bearer ' + t;
+  return fetch((window.MOSTLANE_API || '') + path, Object.assign({}, opts, { headers:h }));
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toast(m){ try{ if(window.MLUI && MLUI.toast) return MLUI.toast(m); }catch(e){} alert(m); }
+async function confirmBox(m){ try{ if(window.MLUI && MLUI.confirm) return await MLUI.confirm(m,{okLabel:'File anyway',danger:true}); }catch(e){} return confirm(m); }
+
+function todayISO(){ const d=new Date(), z=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+function parseD(s){ s=String(s||'').trim(); if(!s) return null;
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return new Date(+m[1], +m[2]-1, +m[3]);
+  m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/); if(m){ let y=+m[3]; if(y<100) y+=2000; return new Date(y, +m[2]-1, +m[1]); }
+  const d=new Date(s); return isNaN(d)?null:d; }
+function fmtD(d){ if(!d) return ''; const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return d.getDate()+' '+mo[d.getMonth()]+' '+String(d.getFullYear()).slice(2); }
+function dueInfo(s){ const d=parseD(s); if(!d) return {cls:'grey', text:'No due date'};
+  const days=Math.round((d - new Date())/86400000);
+  if(days<0) return {cls:'red', text:'Overdue · was due '+fmtD(d)};
+  if(days<=14) return {cls:'amber', text:'Due '+fmtD(d)};
+  return {cls:'green', text:'Due '+fmtD(d)}; }
+
+let STORES = [];
+let openId = null;          // which store card is expanded
+let newFiles = [];          // File[] selected for the open card
+
+async function load(){
+  const list = document.getElementById('list');
+  let r;
+  try { r = await authFetch('/pump/monthly'); }
+  catch(e){ list.innerHTML = '<p class="msg">Couldn’t reach the server. Check your connection and try again.</p>'; return; }
+  if (r.status === 403){ list.innerHTML = '<p class="msg">You don’t have access to pump maintenance. Ask the office for Compliance access.</p>'; return; }
+  if (!r.ok){ list.innerHTML = '<p class="msg">Couldn’t load pump sites ('+r.status+').</p>'; return; }
+  const j = await r.json();
+  STORES = (j && j.stores) || [];
+  document.getElementById('byline').innerHTML = 'Records are filed as an office record, signed off as <b>'+esc(j.recordedBy||'you')+'</b>.';
+  render();
+}
+
+function render(){
+  const list = document.getElementById('list');
+  if (!STORES.length){ list.innerHTML = '<p class="msg">No pump sites are configured.</p>'; return; }
+  list.innerHTML = STORES.map(s => {
+    const di = dueInfo(s.pumpDue);
+    const last = s.last ? ('Last logged '+esc(fmtD(parseD(s.last.date))||s.last.date)+' · '+s.last.photoN+' photo'+(s.last.photoN===1?'':'s')) : 'No record yet';
+    return '<div class="card" data-id="'+esc(s.id)+'">'+
+      '<div class="chead" data-act="toggle">'+
+        '<div><div class="cname">'+esc(s.name)+'</div>'+
+          '<div class="ccode">'+(s.siteCode?('Store '+esc(s.siteCode)):'')+'</div></div>'+
+        '<div class="cmeta"><span class="pill '+di.cls+'">'+esc(di.text)+'</span>'+
+          '<div class="last">'+last+'</div></div>'+
+        '<span class="chev">▸</span>'+
+      '</div>'+
+      '<div class="body" data-body></div>'+
+    '</div>';
+  }).join('');
+}
+
+function bodyHtml(s){
+  const hasLast = s.last && s.last.photoN > 0;
+  const reuse = hasLast
+    ? '<div class="reuse-box"><input type="checkbox" id="reuse"><label for="reuse" class="t">'+
+        '<b>Use last month’s '+s.last.photoN+' photo'+(s.last.photoN===1?'':'s')+'</b> '+
+        '(from '+esc(fmtD(parseD(s.last.date))||s.last.date)+') — copied across to this record.'+
+      '</label></div>'+
+      '<div class="thumbs" id="lastThumbs">'+ (s.last.photos||[]).map(p =>
+          '<div class="thumb reuse"><img loading="lazy" src="'+esc(p.url||'')+'" alt=""><span class="tag">LAST MONTH</span></div>'
+        ).join('') + '</div>'
+    : '';
+  return ''+
+    '<div class="row"><label class="lab" for="d">Date of this month’s service</label>'+
+      '<input type="date" id="d" value="'+todayISO()+'" max="'+todayISO()+'"></div>'+
+    '<div class="row"><label class="lab">Photos</label>'+
+      '<button type="button" class="addbtn" data-act="pick">📷 Add photos</button>'+
+      '<input type="file" accept="image/*" multiple id="file" style="display:none">'+
+      '<div class="thumbs" id="newThumbs"></div>'+
+      reuse+
+      '<div class="hint">Photos are the evidence the monthly check was done. JPEG/PNG; iPhone HEIC should be shared as a photo (JPEG).</div>'+
+    '</div>'+
+    '<div class="row"><label class="lab" for="note">Anything to flag? (optional)</label>'+
+      '<textarea id="note" placeholder="Leave blank if the pump and alarm were all in good working order."></textarea></div>'+
+    '<div class="actions">'+
+      '<button type="button" class="btn go" data-act="create">✅ Create &amp; file to compliance</button>'+
+      '<button type="button" class="btn cancel" data-act="toggle">Cancel</button>'+
+      '<span class="status" data-status></span>'+
+    '</div>';
+}
+
+function openCard(s, cardEl){
+  openId = s.id; newFiles = [];
+  const body = cardEl.querySelector('[data-body]');
+  body.innerHTML = bodyHtml(s);
+  cardEl.classList.add('open');
+}
+function closeCard(cardEl){ openId = null; newFiles = []; cardEl.classList.remove('open'); const b=cardEl.querySelector('[data-body]'); if(b) b.innerHTML=''; }
+
+function renderNewThumbs(cardEl){
+  const host = cardEl.querySelector('#newThumbs'); if(!host) return;
+  host.innerHTML = newFiles.map((f,i) =>
+    '<div class="thumb"><img src="'+URL.createObjectURL(f)+'" alt=""><button type="button" class="x" data-rm="'+i+'" title="Remove">✕</button></div>'
+  ).join('');
+}
+
+async function doCreate(s, cardEl){
+  const body = cardEl.querySelector('[data-body]');
+  const date = (body.querySelector('#d')||{}).value || todayISO();
+  const note = (body.querySelector('#note')||{}).value || '';
+  const reuse = !!(body.querySelector('#reuse') && body.querySelector('#reuse').checked);
+  const status = body.querySelector('[data-status]');
+  const goBtn = body.querySelector('[data-act="create"]');
+  const setS = (t,cls)=>{ status.textContent=t; status.className='status'+(cls?' '+cls:''); };
+
+  const totalPhotos = newFiles.length + (reuse && s.last ? s.last.photoN : 0);
+  if (totalPhotos === 0){
+    const ok = await confirmBox('No photos attached to this pump record. File it anyway?');
+    if (!ok) return;
+  }
+  goBtn.disabled = true;
+  try{
+    setS('Creating record…');
+    let r = await authFetch('/pump/office-create', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ store:s.id, date, note }) });
+    let j = await r.json().catch(()=>({}));
+    if (!r.ok || !j.ok) throw new Error((j&&j.error)||('create failed ('+r.status+')'));
+    const id = j.record.id;
+
+    for (let i=0;i<newFiles.length;i++){
+      setS('Uploading photo '+(i+1)+' of '+newFiles.length+'…');
+      const fd = new FormData(); fd.append('id', id); fd.append('kind','photo'); fd.append('file', newFiles[i]);
+      const u = await authFetch('/pump/media', { method:'POST', body: fd });
+      if (!u.ok){ const ej = await u.json().catch(()=>({})); throw new Error((ej&&ej.error)||('photo upload failed ('+u.status+')')); }
+    }
+    if (reuse && s.last && s.last.id){
+      setS('Copying last month’s photos…');
+      const c = await authFetch('/pump/media-copy', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id, fromId: s.last.id }) });
+      if (!c.ok){ const ej = await c.json().catch(()=>({})); throw new Error((ej&&ej.error)||('couldn’t copy last month’s photos ('+c.status+')')); }
+    }
+    setS('Filing to the compliance chart…');
+    const f = await authFetch('/pump/finalise', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id }) });
+    const fj = await f.json().catch(()=>({}));
+    if (!f.ok || !fj.ok) throw new Error((fj&&fj.error)||('finalise failed ('+f.status+')'));
+
+    setS('Filed ✓', 'ok');
+    toast(fj.filedToSite
+      ? (s.name + ' pump record filed — the pump due date has rolled on a month.')
+      : (s.name + ' pump record saved (this store isn’t linked to a chart site, so it wasn’t filed to the chart).'));
+    await load();
+  }catch(e){
+    setS(String(e && e.message || e), 'err');
+    goBtn.disabled = false;
+  }
+}
+
+document.getElementById('list').addEventListener('click', async (ev)=>{
+  const card = ev.target.closest('.card'); if(!card) return;
+  const s = STORES.find(x => x.id === card.dataset.id); if(!s) return;
+  const act = (ev.target.closest('[data-act]')||{}).dataset ? ev.target.closest('[data-act]').dataset.act : null;
+  const rm = ev.target.closest('[data-rm]');
+
+  if (rm){ newFiles.splice(+rm.dataset.rm, 1); renderNewThumbs(card); return; }
+  if (act === 'pick'){ const fi = card.querySelector('#file'); if(fi) fi.click(); return; }
+  if (act === 'create'){ doCreate(s, card); return; }
+  if (act === 'toggle'){
+    if (card.classList.contains('open')) { closeCard(card); return; }
+    // close any other open card first
+    document.querySelectorAll('.card.open').forEach(c => closeCard(c));
+    openCard(s, card);
+    return;
+  }
+});
+// file selection (change bubbles via capture)
+document.getElementById('list').addEventListener('change', (ev)=>{
+  if (ev.target && ev.target.id === 'file'){
+    const card = ev.target.closest('.card'); if(!card) return;
+    const files = Array.from(ev.target.files||[]).filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.name||''));
+    newFiles = newFiles.concat(files);
+    ev.target.value = '';
+    renderNewThumbs(card);
+  }
+});
+
+load();
+</script>
+</body>
+</html>
