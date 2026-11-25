@@ -133,6 +133,17 @@
     </div>
   </div>
 
+  <!-- Works-job picker: pick which remedials go onto the job sent to the engineer.
+       Untick anything already done; C1/C2/FI ticked, C3 off by default. -->
+  <div class="qov" id="wov">
+    <div class="qcard">
+      <div class="qhead"><b id="wtitle"></b><button class="qx" id="wx" title="Close">✕</button></div>
+      <div class="c3row" style="display:block;cursor:default;padding:4px 16px 8px">Tick the works to send to the engineer. <b>Untick anything already done.</b> C3 recommendations are off by default — the engineer photographs each item as it's done.</div>
+      <div id="witems" style="overflow:auto;padding:0 16px;flex:1;min-height:80px"></div>
+      <div class="qfoot"><span class="sub" id="wmsg" style="color:#b00020"></span><button class="act" id="wall" type="button">Tick all</button><button class="act primary" id="wgo">🔧 Create &amp; open</button></div>
+    </div>
+  </div>
+
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
@@ -211,7 +222,12 @@
       const c3badge = isC3Only(r) ? ' <span class="c3tag" title="All observations are C3 (recommendations only)">C3 only</span>' : '';
       const mflag = r.manualStage ? ' <span class="mflag" title="Status set manually'+(r.manualBy?(' by '+esc(r.manualBy)):'')+(r.manualAt?(' on '+esc(fmtD(r.manualAt))):'')+'">✎</span>' : '';
       const nflag = r.note ? ' <span class="nflag" title="'+esc(r.note)+'">📝</span>' : '';
-      const val = (r.order && r.order.value!=null && r.order.value!=="") ? r.order.value : (r.budgetCost || "");
+      // Value: his OWN quote (what he sent the client) wins, then the client order
+      // value, then the imported Concerto estimate — each labelled so it's clear which.
+      let val = "", valHint = "";
+      if (r.quoteValue!=null && r.quoteValue!=="") { val = r.quoteValue; valHint = "our quote"; }
+      else if (r.order && r.order.value!=null && r.order.value!=="") { val = r.order.value; valHint = "order"; }
+      else if (r.budgetCost) { val = r.budgetCost; valHint = "est."; }
       // REM number cell
       let rem = '';
       if (r.order && r.order.number) {
@@ -223,7 +239,10 @@
       // Actions
       const acts = [];
       if (r.worksJobId) acts.push('<a class="act primary" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Open works job →</a>');
-      else if (s==="ordered") acts.push('<button class="act primary" data-mk="'+esc(r.key)+'">Create works job</button>');
+      else if (s==="ordered") acts.push('<button class="act primary" data-mk="'+esc(r.key)+'">🔧 Create works job</button>');
+      // Send the works to an engineer BEFORE the client's order (Jamie): any priced/
+      // to-price row with a linked EICR test job can raise the works job now.
+      else if ((s==="priced"||s==="to_price") && r.jobId) acts.push('<button class="act" data-mk="'+esc(r.key)+'" title="Send the works to an engineer now — you can leave out anything already done">🔧 Create works job</button>');
       if (s==="awaiting_cert") acts.push('<button class="act" data-cert="'+esc(r.key)+'" title="Mark the EICR certificate as re-issued — moves this to Done">✓ Cert updated</button>');
       acts.push('<button class="act" data-edit="'+esc(r.key)+'" title="Change status / add a note">✏️ Status</button>');
       if (r.jobId) acts.push('<a class="act" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job</a>');
@@ -233,7 +252,7 @@
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span>'+off+'<div class="site">'+esc(r.siteName||"")+'</div></td>'
         + '<td>'+needCell(r)+'</td>'
         + '<td>'+pill+c3badge+mflag+nflag+'</td>'
-        + '<td class="val">'+esc(gbp(val))+'</td>'
+        + '<td class="val">'+esc(gbp(val))+(val!==""&&valHint?'<div class="sub">'+valHint+'</div>':'')+'</td>'
         + '<td>'+rem+'</td>'
         + '<td><div class="acts">'+(acts.join("")||'<span class="sub">—</span>')+'</div></td></tr>';
     }
@@ -248,9 +267,23 @@
       const meta = r.manualStage
         ? '<span class="semeta">Set manually'+(r.manualBy?(' by '+esc(r.manualBy)):'')+(r.manualAt?(' · '+esc(fmtD(r.manualAt))):'')+'</span>'
         : '<span class="semeta">Following the job automatically</span>';
+      // Quote figure: what the office sent the client. Saving it records the £ AND
+      // marks the remedial "Priced" (so the amount + status move together).
+      const qv = (r.quoteValue!=null && r.quoteValue!=="") ? esc(String(r.quoteValue)) : "";
+      const qmeta = (r.quoteValue!=null && r.quoteValue!=="") ? '<span class="semeta">Quoted'+(r.quoteBy?' by '+esc(r.quoteBy):'')+(r.quoteAt?' · '+esc(fmtD(r.quoteAt)):'')+'</span>' : '';
+      const quoteBlock = r.satisfactory ? '' : (
+          '<div class="selab">Quote sent to the client (£)</div>'
+        + '<div class="serow">'
+        +   '<span>£ <input type="number" step="0.01" min="0" class="qamt" data-qamt="'+esc(r.key)+'" value="'+qv+'" placeholder="0.00" style="width:120px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:9px;font:inherit"></span>'
+        +   '<span>Ref <input type="text" class="qref" data-qref="'+esc(r.key)+'" value="'+esc(r.quoteRef||"")+'" placeholder="optional" style="width:150px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:9px;font:inherit"></span>'
+        +   '<button class="act primary" data-saveq="'+esc(r.key)+'">💷 Save quote</button>'
+        +   '<span class="sesave" data-qmsg="'+esc(r.key)+'"></span> '+qmeta
+        + '</div>'
+        + '<div class="semeta" style="margin:3px 0 4px">Saving the quote marks this <b>Priced</b>.</div>' );
       return '<div class="statusedit">'
         + '<div class="selab">Set status manually</div>'
         + '<div class="schips">'+chips+auto+'</div>'
+        + quoteBlock
         + '<div class="selab">Notes</div>'
         + '<textarea class="noteta" data-noteta="'+esc(r.key)+'" placeholder="Add a note for this site…">'+esc(r.note||"")+'</textarea>'
         + '<div class="serow"><button class="act primary" data-savenote="'+esc(r.key)+'">Save note</button> <span class="sesave" data-savemsg="'+esc(r.key)+'"></span> '+meta+'</div>'
@@ -324,6 +357,7 @@
         lines: r.lines||[], stage: r.stage, worksJobId: r.worksJobId||"", jobId: r.jobId||"",
         order: r.order||null, orderNote: r.orderNote||"", liveStage: r.liveStage||"", worksStatus: r.worksStatus||"", budgetCost: r.budgetCost, quoteDate: r.quoteDate, source: r.source,
         manualStage: r.manualStage||"", note: r.note||"", manualBy: r.manualBy||"", manualAt: r.manualAt||"",
+        quoteValue: (r.quoteValue!=null?r.quoteValue:null), quoteRef: r.quoteRef||"", quoteBy: r.quoteBy||"", quoteAt: r.quoteAt||"",
         photoCount: r.photoCount||0, offRegister:false,
         satisfactory: !!r.satisfactory, storeType: r.storeType||"",
       }));
@@ -378,6 +412,77 @@
       } catch(e){
         alert("Couldn't create the works job."); if (btn){ btn.disabled = false; btn.textContent = "Create works job"; }
       }
+    }
+
+    // Which remedial lines can be ticked individually (they carry an id from the EICR
+    // test job). A row with these opens the picker; a row without creates all works.
+    function worksLines(r){ return (r.lines||[]).filter(l => l && l.id); }
+    // Entry point from a "Create works job" button. Pre-order rows (no client order yet)
+    // with itemisable works open the picker so the office can drop anything already done;
+    // an ordered row keeps the existing order-linkage path (createWorks).
+    function startWorks(r, btn){ if (!(r.order && r.order.id) && worksLines(r).length) openWorksPicker(r); else createWorks(r, btn); }
+
+    // ── Works-job picker ── choose which remedials go onto the job sent to the engineer.
+    let WKEY = null;
+    function worksItemRows(r){
+      return worksLines(r).map(l => {
+        const code = String(l.code||"").toUpperCase().replace(/\s/g,"");
+        const c3 = code === "C3";
+        const d = remDesc(l) || String(l.action||"").trim();
+        const ph = (l.photos && l.photos.length) ? ' <span class="sub">📷'+l.photos.length+'</span>' : '';
+        return '<label style="display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #eef2f6;font-size:13.5px;cursor:pointer">'
+          + '<input type="checkbox" class="wkit" value="'+esc(l.id)+'"'+(c3?'':' checked')+' style="width:18px;height:18px;margin-top:1px;flex:none">'
+          + '<span>'+(code&&["C1","C2","C3","FI"].includes(code)?'<span class="codepill c'+esc(code)+'">'+esc(code)+'</span> ':'')+esc(d)+ph+'</span></label>';
+      }).join("");
+    }
+    function openWorksPicker(r){
+      WKEY = r.key;
+      g("wtitle").textContent = (r.storeCode?r.storeCode+" ":"") + (r.siteName||"");
+      g("witems").innerHTML = worksItemRows(r) || '<div class="sub" style="padding:12px 0">No itemised remedials — the job will be built from all logged works.</div>';
+      g("wmsg").textContent = ""; g("wgo").disabled = false;
+      g("wov").classList.add("show");
+    }
+    function closeWorksPicker(){ g("wov").classList.remove("show"); WKEY = null; }
+    async function submitWorksPicker(){
+      const r = ROWS.find(x=>x.key===WKEY); if(!r) return;
+      const ticks = [...document.querySelectorAll("#witems .wkit")];
+      const ids = ticks.filter(x=>x.checked).map(x=>x.value);
+      if (ticks.length && !ids.length) { g("wmsg").textContent = "Tick at least one remedial to send."; return; }
+      g("wgo").disabled = true; g("wmsg").textContent = "";
+      try {
+        const payload = { id: r.id };
+        if (ticks.length) payload.itemIds = ids;                 // omit itemIds = all items
+        const res = await authFetch("/certs/five-year/create-works", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) }).then(x=>x.json());
+        const jid = res && (res.worksJobId || res.jobId);
+        if (res && res.ok && jid) {
+          if (window.MLUI && MLUI.toast) MLUI.toast(res.existing ? "That site already has a works job — opening it" : "Works job created — opening to allocate");
+          location.href = "/job-view.html?jobId=" + encodeURIComponent(jid);
+          return;
+        }
+        g("wmsg").textContent = (res && (res.error || res.note)) || "Couldn't create the works job."; g("wgo").disabled = false;
+      } catch { g("wmsg").textContent = "Couldn't create — check your signal."; g("wgo").disabled = false; }
+    }
+
+    // Save the office's own quote figure (£ + optional ref). Records it and marks Priced.
+    async function saveQuoteAmt(key, btn){
+      const r = ROWS.find(x=>x.key===key); if(!r) return;
+      const sel = key.replace(/"/g,'\\"');
+      const amtEl = document.querySelector('[data-qamt="'+sel+'"]'), refEl = document.querySelector('[data-qref="'+sel+'"]');
+      const raw = amtEl ? amtEl.value.trim() : "", ref = refEl ? refEl.value.trim() : "";
+      const msg = document.querySelector('[data-qmsg="'+sel+'"]');
+      if (raw !== "" && !(Number(raw) >= 0)) { if(msg){ msg.style.color="#b00020"; msg.textContent="Enter a number"; } return; }
+      if (btn) btn.disabled = true;
+      try {
+        const res = await authFetch("/certs/five-year/manual", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, quoteValue: raw==="" ? "" : Number(raw), quoteRef: ref }) }).then(x=>x.json());
+        if (res && res.ok) {
+          r.quoteValue = (res.quoteValue!=null ? res.quoteValue : null); r.quoteRef = res.quoteRef||""; r.quoteBy = res.quoteBy||""; r.quoteAt = res.quoteAt||"";
+          if (res.manualStage) r.manualStage = res.manualStage;
+          if (msg){ msg.style.color="#16a34a"; msg.textContent="Saved ✓"; }
+          setTimeout(render, 650);
+          return;
+        }
+        (window.MLUI?MLUI.toast:alert)((res && res.error) || "Couldn't save the quote."); if(btn) btn.disabled=false;
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the quote."); if(btn) btn.disabled=false; }
     }
 
     // Mark the EICR cert re-issued → moves an "Awaiting cert" row to Done.
@@ -472,8 +577,16 @@
       const sn = e.target.closest("[data-savenote]");
       if (sn){ saveNoteFor(sn.getAttribute("data-savenote"), sn); return; }
       const mk = e.target.closest("[data-mk]");
-      if (mk){ const r = ROWS.find(x=>x.key===mk.getAttribute("data-mk")); if(r) createWorks(r, mk); return; }
+      if (mk){ const r = ROWS.find(x=>x.key===mk.getAttribute("data-mk")); if(r) startWorks(r, mk); return; }
+      const sq = e.target.closest("[data-saveq]");
+      if (sq){ saveQuoteAmt(sq.getAttribute("data-saveq"), sq); return; }
     });
+
+    // Works-job picker wiring.
+    g("wx").onclick = closeWorksPicker;
+    g("wov").addEventListener("click", e => { if(e.target===g("wov")) closeWorksPicker(); });
+    g("wgo").onclick = submitWorksPicker;
+    g("wall").onclick = () => document.querySelectorAll("#witems .wkit").forEach(x => { x.checked = true; });
 
     (async () => {
       try {

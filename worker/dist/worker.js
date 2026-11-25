@@ -20151,6 +20151,8 @@ async function upsertFiveYearFromJob(env, tid, job, opts) {
   const store = fyrCode(job.siteCode) || String(job.siteCode || "").trim();
   const siteName = String(job.siteName || job.helpdeskRef || job.reference || "").slice(0, 200);
   const lines = rems.map((r) => ({
+    id: r.id,
+    // the test job's remedial id — lets the works-job picker drop individual items
     action: (r.code ? `[${r.code}] ` : "") + String(r.description || "").trim(),
     code: r.code || "",
     minutes: Number(r.minutes) || 0,
@@ -22196,6 +22198,11 @@ ${con.tradingTitle || "Mostlane"}`;
         note: d.note || "",
         manualBy: d.manualBy || "",
         manualAt: d.manualAt || "",
+        // The office's OWN quote figure (£ sent to the client) + optional ref — set when pricing.
+        quoteValue: d.quoteValue != null ? d.quoteValue : null,
+        quoteRef: d.quoteRef || "",
+        quoteBy: d.quoteBy || "",
+        quoteAt: d.quoteAt || "",
         satisfactory: false,
         storeType: ""
       };
@@ -22285,7 +22292,7 @@ ${con.tradingTitle || "Mostlane"}`;
     const b = await request.json().catch(() => ({}));
     const id = String(b.id || "");
     if (!id) return error("id is required", 400, env, request);
-    const row = await env.DB.prepare("SELECT data FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    const row = await env.DB.prepare("SELECT data, stage FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
     if (!row) return error("Not found", 404, env, request);
     let d = {};
     try {
@@ -22318,8 +22325,32 @@ ${con.tradingTitle || "Mostlane"}`;
         delete d.noteAt;
       }
     }
+    if ("quoteValue" in b) {
+      if (b.quoteValue === "" || b.quoteValue == null) {
+        delete d.quoteValue;
+        delete d.quoteBy;
+        delete d.quoteAt;
+      } else {
+        const v = Number(b.quoteValue);
+        if (!Number.isFinite(v) || v < 0) return error("invalid quote value", 400, env, request);
+        d.quoteValue = Math.round(v * 100) / 100;
+        d.quoteBy = me || "office";
+        d.quoteAt = now2;
+        const AHEAD = ["ordered", "in_works", "awaiting_cert", "done", "invoiced", "satisfactory"];
+        if (!AHEAD.includes(d.manualStage || "") && !AHEAD.includes(String(row.stage || ""))) {
+          d.manualStage = "priced";
+          d.manualBy = me || "office";
+          d.manualAt = now2;
+        }
+      }
+    }
+    if ("quoteRef" in b) {
+      const rf = String(b.quoteRef || "").slice(0, 60);
+      if (rf) d.quoteRef = rf;
+      else delete d.quoteRef;
+    }
     await env.DB.prepare("UPDATE five_year_remedials SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), now2, tid, id).run();
-    return json({ ok: true, id, manualStage: d.manualStage || "", note: d.note || "", manualBy: d.manualBy || "", manualAt: d.manualAt || "" }, {}, env, request);
+    return json({ ok: true, id, manualStage: d.manualStage || "", note: d.note || "", manualBy: d.manualBy || "", manualAt: d.manualAt || "", quoteValue: d.quoteValue != null ? d.quoteValue : null, quoteRef: d.quoteRef || "", quoteBy: d.quoteBy || "", quoteAt: d.quoteAt || "" }, {}, env, request);
   }
   if (sub === "/five-year/quote-text" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
