@@ -186,6 +186,20 @@ async function storeOrders(env, tid) {
   } catch {}
   return m;
 }
+// Has a 5-year certificate been filed for THIS cycle? With a test job: uploaded on/after the
+// test. Without one (cases carried over from the old schedule): the certificate's own date is
+// within a year of the cycle's due date, or it was uploaded after the case was opened.
+export function certFiledForCycle(cert, testDate, c) {
+  if (!cert || !cert.uploadedAt) return false;
+  const up = String(cert.uploadedAt).slice(0, 10);
+  if (testDate) return up >= testDate;
+  if (!c) return false;
+  if (cert.docDate && c.cycle_due) {
+    const d = new Date(c.cycle_due + "T00:00:00Z"); d.setUTCFullYear(d.getUTCFullYear() - 1);
+    if (cert.docDate >= d.toISOString().slice(0, 10)) return true;
+  }
+  return !!(c.created_at && String(cert.uploadedAt) >= String(c.created_at));
+}
 async function certFiles(env, tid) {
   const m = new Map();
   try {
@@ -406,7 +420,7 @@ function shapeRow(store, c, ctx, extra) {
     certSigned: c && c.cert_signed_at ? { at: c.cert_signed_at, by: c.cert_signed_by } : null,
     certUpdated: c && c.cert_updated_at ? { at: c.cert_updated_at, by: c.cert_updated_by } : null,
     certFiled: cert ? cert.uploadedAt : "",
-    certFiledSinceTest: !!(cert && testDate && String(cert.uploadedAt).slice(0, 10) >= testDate),
+    certFiledSinceTest: certFiledForCycle(cert, testDate, c),
     invoices: {
       test: need.includes("test") ? { done: !!(c && c.test_inv_at), at: c && c.test_inv_at, by: c && c.test_inv_by, ref: c && c.test_inv_ref } : null,
       works: need.includes("works") ? { done: !!(c && c.works_inv_at), at: c && c.works_inv_at, by: c && c.works_inv_by, ref: c && c.works_inv_ref } : null,

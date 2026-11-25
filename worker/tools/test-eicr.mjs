@@ -190,5 +190,11 @@ ok("working days skip weekends", eicr.workingDaysSince("2026-11-20T10:00:00Z", "
   const d = eicr.deriveStatus({ test_job_id: "t", works_job_id: "w", outcome: "remedials", order_number: "R32814" },
     { jobs: new Map([["t", j], ["w", { status: "Pending" }]]), doneCats: dc });
   ok("reused test job → certificate to update", d.status === "cert_update", d.status);
+  const f = eicr.certFiledForCycle;
+  const cs = { cycle_due: "2026-11-14", created_at: "2026-11-25T11:32:48Z" };
+  ok("no test job: cert dated this cycle counts", f({ uploadedAt: "2026-11-25T13:11:31Z", docDate: "2026-08-25" }, "", cs) === true);
+  ok("no test job: old cert (2021) uploaded before case does not", f({ uploadedAt: "2026-08-14T07:40:58Z", docDate: "2021-11-14" }, "", cs) === false);
+  ok("no test job: undated cert uploaded after case opened counts", f({ uploadedAt: "2026-11-25T13:10:15Z", docDate: "" }, "", cs) === true);
+  ok("test job: upload before test does not count", f({ uploadedAt: "2026-10-01T09:00:00Z", docDate: "2026-11-01" }, "2026-11-01", cs) === false);
 }
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
