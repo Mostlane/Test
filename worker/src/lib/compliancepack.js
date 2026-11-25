@@ -52,20 +52,23 @@ export function storeFolderName(code, name) {
   return safeName(n ? `${code} - ${n}` : String(code), String(code));
 }
 
-const fileDate = (f) => f.doc_date || f.uploaded_at || "";
-
-// The latest certificate(s) of one type: pinned ones if any, else the newest by
-// certificate date (upload date when undated), newest upload breaking a tie.
+// The CURRENT certificate(s) of one type — the exact rule the chart's 🗂
+// Documents modal shows (compliance.js listStoreFiles), so what the office sees
+// as current is what goes in the pack: every PINNED file (a linked set, e.g. an
+// unsatisfactory EICR + the EIC/Minor Works that cleared it), else the most
+// recently uploaded file.
 export function pickLatest(files) {
   if (!files || !files.length) return [];
   const pinned = files.filter((f) => f.pinned);
-  if (pinned.length) return pinned;
-  const sorted = [...files].sort((a, b) => {
-    const d = fileDate(b).localeCompare(fileDate(a));
-    return d || String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || ""));
-  });
+  if (pinned.length) return [...pinned].sort((a, b) => String(a.uploaded_at || "").localeCompare(String(b.uploaded_at || "")));
+  const sorted = [...files].sort((a, b) => String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || "")));
   return [sorted[0]];
 }
+
+const shapeFile = (f) => ({
+  id: f.id, filename: f.filename || "", label: f.label || "", size: f.size || 0,
+  date: f.doc_date || "", uploaded: f.uploaded_at || "", undated: !f.doc_date, r2_key: f.r2_key,
+});
 
 const hasDue = (due, k) => !!(due && due[k] && String(due[k]).trim());
 // Due dates are ISO or legacy dd/mm/yyyy.
@@ -92,10 +95,13 @@ export function buildPackPlan(stores, files, today = new Date().toISOString().sl
     const group = PACK_GROUPS.find((g) => g.toLowerCase() === String(st.category || "").trim().toLowerCase()) || "Uncategorised";
     const mine = byStore.get(st.code) || [];
     const cand = {};
+    const extraFiles = [];
     for (const f of mine) {
+      if (f.type === "other") { if (f.in_pack) extraFiles.push({ key: "other", f }); continue; }
       let k = f.type;
       if (k === "ev" || k === "forecourt") k = f.type === "forecourt" ? "forecourt" : splitEvFile(f, pfs);
       (cand[k] = cand[k] || []).push(f);
+      f._packType = k;
     }
     const dueFor = {
       fiveYear: due.fiveYear, pat: due.pat, em: due.em, pump: due.pump, pv: due.pv,
@@ -118,19 +124,23 @@ export function buildPackPlan(stores, files, today = new Date().toISOString().sl
       else if (!chosen.length) status = "Missing";
       else if (d && d < today) status = "Overdue";
       else status = "Present";
-      types[t.key] = {
-        required, status, due: d,
-        files: chosen.map((f) => ({
-          id: f.id, filename: f.filename || "", label: f.label || "", size: f.size || 0,
-          date: f.doc_date || "", uploaded: f.uploaded_at || "", undated: !f.doc_date, r2_key: f.r2_key,
-        })),
-      };
+      types[t.key] = { required, status, due: d, linked: chosen.length > 1, files: chosen.map(shapeFile) };
+      // older / non-current files of this type the office ticked "include in pack"
+      const chosenIds = new Set(chosen.map((f) => f.id));
+      for (const f of have) if (f.in_pack && !chosenIds.has(f.id)) extraFiles.push({ key: t.key, f });
       if (chosen.some((f) => !f.doc_date)) flags.push(`${t.label}: certificate has no date (upload date used)`);
     }
     if (group === "Uncategorised") flags.push("No store type set on the chart");
+    // Extras go in their type's folder (which is then created even for a type the
+    // store isn't otherwise required to have); "Other" documents get their own.
+    const extras = extraFiles.map(({ key, f }) => {
+      const t = PACK_TYPES.find((x) => x.key === key);
+      if (t && !types[t.key].required) types[t.key].hasExtras = true;
+      return { folder: t ? t.folder : "Other documents", typeKey: key, file: shapeFile(f) };
+    });
     out.push({
       group, code: st.code, name: st.name || "", postcode: st.postcode || "", pfs,
-      folder: storeFolderName(st.code, st.name), types, flags,
+      folder: storeFolderName(st.code, st.name), types, extras, flags,
     });
   }
   out.sort((a, b) => a.group.localeCompare(b.group) || a.code.localeCompare(b.code));

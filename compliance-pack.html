@@ -146,7 +146,7 @@
     if (x.status === "Not required") return '<td class="p-na">—</td>';
     var title = x.files.map(function (f) { return f.filename; }).join("\n");
     var d = x.files.length ? ukDate(x.files[0].date) || "undated" : "";
-    return '<td title="' + esc(title) + '"><span class="pill p-' + x.status + '">' + x.status + '</span> ' + esc(d) + (x.due ? ' <span style="color:var(--muted)">· due ' + esc(ukDate(x.due)) + '</span>' : '') + '</td>';
+    return '<td title="' + esc(title) + '"><span class="pill p-' + x.status + '">' + x.status + '</span>' + (x.linked ? ' 🔗' + x.files.length : '') + ' ' + esc(d) + (x.due ? ' <span style="color:var(--muted)">· due ' + esc(ukDate(x.due)) + '</span>' : '') + '</td>';
   }
 
   function renderTable() {
@@ -197,13 +197,16 @@
       var r = [st.group, st.code, st.name, st.postcode];
       TYPES.forEach(function (t) {
         var x = st.types[t.key], s = status(st, t.key, failed);
-        r.push(s, x.files.length && !failed[st.code + "|" + t.key] ? (ukDate(x.files[0].date) || "undated") : "", ukDate(x.due));
+        r.push(s + (x.linked && s !== "Not required" ? " (" + x.files.length + " linked)" : ""), x.files.length && !failed[st.code + "|" + t.key] ? x.files.map(function (f) { return ukDate(f.date) || "undated"; }).join(" + ") : "", ukDate(x.due));
         if (s === "Overdue" || /^Missing/.test(s)) gaps.push([st.group, st.code, st.name, t.folder, s, ukDate(x.due)]);
         if (!failed[st.code + "|" + t.key]) x.files.forEach(function (f) {
-          files.push([st.group, st.code, st.name, t.folder, f._out || safeName(f.filename, "certificate.pdf"), ukDate(f.date) || "undated", st.group + "/" + st.folder + "/" + t.folder]);
+          files.push([st.group, st.code, st.name, t.folder, f._out || outName(f), ukDate(f.date) || "undated", st.group + "/" + st.folder + "/" + t.folder]);
         });
       });
-      r.push(st.flags.join("; "));
+      (st.extras || []).forEach(function (e) {
+        files.push([st.group, st.code, st.name, e.folder + " (extra)", e.file._out || outName(e.file), ukDate(e.file.date) || "", st.group + "/" + st.folder + "/" + e.folder]);
+      });
+      r.push(st.flags.concat((st.extras || []).length ? [(st.extras.length) + " extra document(s) included"] : []).join("; "));
       tr.push(r);
     });
     return [{ name: "Summary", rows: sum }, { name: "Tracker", rows: tr }, { name: "Missing & overdue", rows: gaps }, { name: "Files in pack", rows: files }];
@@ -215,6 +218,15 @@
   }
 
   // ── Build the folder tree ────────────────────────────────────────────────
+  // File name in the pack: the office's label (sub-folder path stripped) with the
+  // original extension, else the original filename.
+  function outName(f) {
+    var ext = (String(f.filename || "").match(/\.[a-z0-9]{2,5}$/i) || [".pdf"])[0];
+    var lab = String(f.label || "").split(" / ").pop().trim();
+    if (lab) { lab = lab.replace(/\.[a-z0-9]{2,5}$/i, ""); return safeName(lab, "document") + ext; }
+    var n = safeName(f.filename, "document" + ext);
+    return /\.[a-z0-9]{2,5}$/i.test(n) ? n : n + ext;
+  }
   async function exists(dir, name) { try { await dir.getFileHandle(name); return true; } catch (e) { return false; } }
   async function sizeOf(dir, name) { try { return (await (await dir.getFileHandle(name)).getFile()).size; } catch (e) { return -1; } }
 
@@ -231,13 +243,20 @@
       var st = DATA.stores[i];
       var g = await root.getDirectoryHandle(safeName(st.group), { create: true });
       var sd = await g.getDirectoryHandle(st.folder, { create: true });
-      for (var k = 0; k < TYPES.length; k++) {
-        var t = TYPES[k], x = st.types[t.key];
-        if (!x.required) continue;
+      // folder → files: every required type (empty = missing) + any extras ticked "in pack"
+      var plan = [];
+      TYPES.forEach(function (t) { var x = st.types[t.key]; if (x.required || x.hasExtras) plan.push({ folder: t.folder, key: t.key, files: x.files.slice() }); });
+      (st.extras || []).forEach(function (e) {
+        var p = plan.find(function (q) { return q.folder === e.folder; });
+        if (!p) { p = { folder: e.folder, key: e.typeKey, files: [] }; plan.push(p); }
+        p.files.push(e.file);
+      });
+      for (var k = 0; k < plan.length; k++) {
+        var t = { folder: plan[k].folder, key: plan[k].key };
         var td = await sd.getDirectoryHandle(t.folder, { create: true });
         var used = {};
-        x.files.forEach(function (f) {
-          var n = safeName(f.filename, "certificate.pdf"); if (!/\.[a-z0-9]{2,5}$/i.test(n)) n += ".pdf";
+        plan[k].files.forEach(function (f) {
+          var n = outName(f);
           var base = n, j = 2; while (used[n.toLowerCase()]) { n = base.replace(/(\.[^.]+)$/, " (" + j++ + ")$1"); }
           used[n.toLowerCase()] = 1; f._out = n;
           jobs.push({ st: st, t: t, f: f, dir: td });
@@ -304,7 +323,10 @@
       if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
       DATA = j; TYPES = j.types; GROUPS = j.groups;
       var nFiles = 0, mb = 0;
-      j.stores.forEach(function (st) { TYPES.forEach(function (t) { st.types[t.key].files.forEach(function (f) { nFiles++; mb += (f.size || 0) / 1048576; }); }); });
+      j.stores.forEach(function (st) {
+        TYPES.forEach(function (t) { st.types[t.key].files.forEach(function (f) { nFiles++; mb += (f.size || 0) / 1048576; }); });
+        (st.extras || []).forEach(function (e) { nFiles++; mb += (e.file.size || 0) / 1048576; });
+      });
       $("status").textContent = j.stores.length + " active stores · " + nFiles + " certificates to copy (about " + Math.round(mb) + " MB).";
       $("buildBtn").disabled = !supported; $("sheetBtn").disabled = false;
       renderTiles(); renderChips(); renderTable();
