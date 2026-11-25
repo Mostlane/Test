@@ -116,6 +116,24 @@
       color:#0f2438; }
     td.comments-col textarea.cmt:focus{ outline:none; border-color:#0071CE; box-shadow:0 0 0 2px rgba(0,113,206,.18); }
     td.comments-col .cmt-saved{ font-size:11px; color:#16a34a; margin-top:2px; min-height:13px; }
+    /* PV / EV-Forecourt / Pump columns are hidden by default (relevant to only a
+       handful of stores) so the far-right Comments column is reachable without
+       scrolling across. The "Columns" tickboxes above the table show/hide each,
+       remembered per device in localStorage mlCompCols. display:none keeps the
+       cells in the DOM at their original positions, so the index/header-based
+       edit, save and Excel-export paths are unaffected (and an overdue PV /
+       forecourt / pump still turns the row's Status light red via worstStatus). */
+    .col-pv, .col-ev, .col-pump{ display:none; }
+    body.show-col-pv .col-pv,
+    body.show-col-ev .col-ev,
+    body.show-col-pump .col-pump{ display:table-cell; }
+    /* "Columns" tickbox control (above the table). */
+    .colpick{ display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center;
+      justify-content:center; margin:0 0 12px; font-size:13px; color:#334155; }
+    .colpick .cp-label{ font-weight:700; color:#1A4F8F; }
+    .colpick label{ display:inline-flex; align-items:center; gap:5px; cursor:pointer;
+      background:#eef3f9; border:1px solid #d5dde5; border-radius:999px; padding:4px 11px; }
+    .colpick input{ cursor:pointer; margin:0; }
     /* The dominant cause of tall desktop rows was long site names wrapping to a
        second line. Keep the name on one line (left-aligned so it reads naturally);
        the table already scrolls sideways if a column gets wide. */
@@ -383,12 +401,21 @@
       <input class="search-input" id="searchBar" placeholder="Search store name, number or postcode..." />
     </div>
 
+    <!-- Optional columns: hidden by default so the Comments column is reachable
+         without scrolling across; tick to show (remembered per device). -->
+    <div class="colpick" id="colPick">
+      <span class="cp-label">Columns</span>
+      <label><input type="checkbox" data-col="pv"> PV</label>
+      <label><input type="checkbox" data-col="ev"> EV/Forecourt</label>
+      <label><input type="checkbox" data-col="pump"> Pump</label>
+    </div>
+
     <div class="table-wrapper">
       <table>
         <thead>
           <tr>
             <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
-            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV/Forecourt</th><th>Pump</th><th>Docs</th><th class="comments-col">Comments</th>
+            <th>5 Year</th><th>PAT</th><th>EM</th><th class="col-pv">PV</th><th class="col-ev">EV/Forecourt</th><th class="col-pump">Pump</th><th>Docs</th><th class="comments-col">Comments</th>
           </tr>
         </thead>
         <tbody id="tableBody"><tr><td colspan="12" class="loading">Loading data…</td></tr></tbody>
@@ -1467,7 +1494,10 @@ function renderTable(d){
         const fl = flagOf(e.storeCode);
         if (fl) { s = FLAG_INFO[fl.s].cls; extra = ''; }
       }
-      return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
+      // PV / EV-Forecourt / Pump cells carry a column class so they hide/show with
+      // the matching <th> (hidden by default; the "Columns" tickboxes reveal them).
+      const colCls = type === 'pv' ? ' col-pv' : type === 'ev' ? ' col-ev' : type === 'pump' ? ' col-pump' : '';
+      return `<td class="dc${colCls}${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
     if (closed) tr.classList.add('closed-row');
     // Restricted free-text comment (Full Access + Tanya only). The whole column is
@@ -2409,6 +2439,25 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   document.getElementById('exportBtn').onclick = exportExcel;
   document.getElementById('summaryBtn').onclick = openSummaryModal;
+
+  // Optional columns (PV / EV-Forecourt / Pump) are hidden by default so the
+  // Comments column is reachable without scrolling across; these tickboxes show/
+  // hide each, remembered per device (localStorage mlCompCols).
+  (function(){
+    const COLS = ['pv','ev','pump'];
+    let shown = {}; try{ shown = JSON.parse(localStorage.getItem('mlCompCols') || '{}') || {}; }catch(e){ shown = {}; }
+    const apply = col => document.body.classList.toggle('show-col-'+col, !!shown[col]);
+    COLS.forEach(apply);
+    document.querySelectorAll('#colPick input[data-col]').forEach(cb=>{
+      const col = cb.dataset.col;
+      cb.checked = !!shown[col];
+      cb.addEventListener('change', ()=>{
+        shown[col] = cb.checked;
+        apply(col);
+        try{ localStorage.setItem('mlCompCols', JSON.stringify(shown)); }catch(e){}
+      });
+    });
+  })();
 
   // Store type filters
   document.querySelectorAll('#storeTypeFilters .bubble').forEach(b=>{
