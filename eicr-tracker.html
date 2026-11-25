@@ -209,7 +209,7 @@ function table(list, tab){
       <td>${esc(r.name)}${r.flag?`<div class="flag">⚑ ${esc(r.flag)}</div>`:""}${!r.onChart?'<div class="flag">Not on the compliance chart</div>':""}</td>
       <td class="due">${esc(fmtD(r.due))||'<span class="sub">no date</span>'}</td>
       <td>${statusCell(r)}</td>
-      <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.quote&&r.quote.ref?`<div class="sub">Quote ${esc(r.quote.ref)}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
+      <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${r.worksOnTestJob?`<div class="sub">🔧 Remedials done on the test job ${esc(fmtD(r.worksOnTestJob))}</div>`:jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.quote&&r.quote.ref?`<div class="sub">Quote ${esc(r.quote.ref)}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
       <td class="act">${actions(r, tab)}</td></tr>`).join("")
     + `</tbody></table></div>`;
 }
@@ -260,7 +260,7 @@ function renderYear(){
       <td>${esc(r.name)}${r.flag?`<div class="flag">⚑ ${esc(r.flag)}</div>`:""}</td>
       <td class="due hide-s">${esc(fmtD(r.due))||'<span class="sub">no date</span>'}</td>
       <td><span class="pill ${x.ys.cls}">${esc(x.ys.label)}</span>${r.caseId&&r.daysInStatus!=null&&r.status!=="due"?`<div class="sub">${r.daysInStatus} working day${r.daysInStatus===1?"":"s"}</div>`:""}${r.caseId&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:(!r.caseId&&x.ys.key==="due"&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:"")}${!r.caseId&&lc&&x.ys.key==="closed"?`<div class="sub">closed ${esc(fmtD(lc.closedAt))}</div>`:""}</td>
-      <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.invoices&&r.invoices.test?`<div class="sub">Test ${r.invoices.test.done?"✓ invoiced":"not invoiced"}${r.invoices.works?" · works "+(r.invoices.works.done?"✓ invoiced":"not invoiced"):""}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
+      <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${r.worksOnTestJob?`<div class="sub">🔧 Remedials done on the test job ${esc(fmtD(r.worksOnTestJob))}</div>`:jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.invoices&&r.invoices.test?`<div class="sub">Test ${r.invoices.test.done?"✓ invoiced":"not invoiced"}${r.invoices.works?" · works "+(r.invoices.works.done?"✓ invoiced":"not invoiced"):""}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
       <td class="act">${(r.caseId || x.ys.key==="due" || x.ys.key==="rolled") ? actions(r, "office") : ""}</td></tr>`;
   });
   html += list.length ? "" : `<tr><td colspan="7" class="empty">Nothing on Concerto's ${YEAR} schedule${YF?" with that status":""}.</td></tr>`;
@@ -410,7 +410,7 @@ async function openDetail(r){
       <b>Status</b><span>${statusCell(r)}</span>
       <b>Test job</b><span>${link(r.test,"Test")}</span>
       <b>Remedials</b><span>${codesHtml(r.remedials)||'<span class="sub">none recorded</span>'}</span>
-      <b>Works job</b><span>${link(r.works,"Works")}</span>
+      <b>Works job</b><span>${r.worksOnTestJob?"Done on the test job ("+esc(fmtD(r.worksOnTestJob))+") — "+link(r.test,"Test"):link(r.works,"Works")}</span>
       <b>Certificate</b><span>${r.certFiled?"last filed "+esc(fmtDT(r.certFiled)):"none filed"} <a href="#" data-cert="1">open</a>${r.certSigned?` · signed off ${esc(fmtDT(r.certSigned.at))} by ${esc(r.certSigned.by)}`:""}${r.certUpdated?` · update signed off ${esc(fmtDT(r.certUpdated.at))} by ${esc(r.certUpdated.by)}`:""}</span>
       <b>Test invoice</b><span>${inv(r.invoices.test,"test")}</span>
       <b>Works invoice</b><span>${inv(r.invoices.works,"works")}</span>

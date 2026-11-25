@@ -97,6 +97,30 @@ export function jobFinished(job, doneCats) {
   return FIN_BUILTIN.has(s) || !!(doneCats && doneCats.has(s));
 }
 const jobCancelled = j => /cancel/i.test(String((j && j.status) || ""));
+// When the test itself first finished (the original test day) — later reopens
+// for the remedials don't move it. Falls back to the job's created date.
+export function testDoneAt(job, doneCats) {
+  const h = Array.isArray(job && job.statusHistory) ? job.statusHistory : [];
+  for (const e of h) { const s = String((e && e.status) || "").toLowerCase(); if (FIN_BUILTIN.has(s) || (doneCats && doneCats.has(s))) return e.at || ""; }
+  return (job && (job.createdAt || job.scheduledAt)) || "";
+}
+// The office sometimes RE-OPENS the test job and sends the engineer back on it to
+// do the remedials (instead of using the separate works job). Spot that: the job
+// finished, was re-opened (a live status), and is finished again now.
+export function testReusedForWorks(job, doneCats) {
+  if (!job || !jobFinished(job, doneCats)) return null;
+  const h = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+  const fin = e => { const s = String((e && e.status) || "").toLowerCase(); return FIN_BUILTIN.has(s) || !!(doneCats && doneCats.has(s)); };
+  let phase = 0, doneAt = "";
+  for (const e of h) {
+    const s = String((e && e.status) || "");
+    if (phase === 0 && fin(e)) phase = 1;
+    else if (phase === 1 && !fin(e) && !/cancel/i.test(s)) phase = 2;
+    else if (phase === 2 && fin(e)) { phase = 3; doneAt = e.at || ""; }
+  }
+  return phase === 3 ? (doneAt || "yes") : null;
+}
+const ORDER_RE = /\b(REM\d{3,}|R\d{4,})\b/i;
 // Remedials found on the test: "remedials" when any C1/C2/FI — or an UNCODED
 // item (safe side: it might be serious) — else "c3" (only C3s, or nothing).
 export function testOutcome(job) {
@@ -189,6 +213,7 @@ export function deriveStatus(c, ctx) {
     if (c.quote_at) st = maxRank(st, "quoted");
     if (c.order_number) st = maxRank(st, "ordered");
     if (w && !jobCancelled(w)) st = maxRank(st, jobFinished(w, ctx.doneCats) ? "cert_update" : "works_booked");
+    if (t && testReusedForWorks(t, ctx.doneCats)) st = maxRank(st, "cert_update");
     if (c.cert_updated_at) st = "done";
   } else if (c.cert_signed_at) st = "done";
   return { status: st, outcome };
@@ -285,8 +310,20 @@ async function reconcile(env, tid, opts) {
     // 3) an electrical client order for the store after the test → the order.
     const t2 = c.test_job_id && jobs.get(c.test_job_id);
     const out3 = c.outcome || (t2 && jobFinished(t2, doneCats) ? testOutcome(t2) : "");
+    // the order number written on the jobs themselves (the office types it into
+    // the test job's reference, or the order linked onto the works job).
+    if (!c.order_number && out3 === "remedials") {
+      const w2 = c.works_job_id && jobs.get(c.works_job_id);
+      const num = (w2 && w2.orderNumber) || (t2 && (t2.orderNumber || (String(t2.helpdeskRef || "").match(ORDER_RE) || [])[1])) || "";
+      if (num) {
+        const o = (orders.get(c.store_code) || []).find(x => String(x.number).toUpperCase() === String(num).toUpperCase());
+        c.order_number = String(num).toUpperCase(); c.order_value = o ? (o.value ?? null) : ((w2 && w2.orderValue) ?? null); c.order_at = (o && o.at) || nowIso(); c.order_id = o ? o.id : null;
+        if (o) usedOrders.add(o.id);
+        logPush(c, "system", `Order ${c.order_number} picked up from the job`); changed.add(c);
+      }
+    }
     if (!c.order_number && (out3 === "remedials" || QUOTE_PATH.has(c.status))) {
-      const since = String((t2 && (t2.scheduledAt || t2.createdAt)) || "").slice(0, 10);
+      const since = String((t2 && testDoneAt(t2, doneCats)) || "").slice(0, 10);
       const list = (orders.get(c.store_code) || []).filter(o => !usedOrders.has(o.id) && (!since || String(o.at).slice(0, 10) >= since)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
       if (list.length) {
         const o = list[0];
@@ -344,7 +381,8 @@ function shapeRow(store, c, ctx, extra) {
   const need = c ? invoicesNeeded(c) : [];
   const conc = extra.concerto.get(store ? store.code : (c && c.store_code));
   const cert = extra.certs.get(store ? store.code : (c && c.store_code));
-  const testDate = t ? String(t.scheduledAt || t.createdAt || "").slice(0, 10) : "";
+  const testDate = t ? String(testDoneAt(t, ctx.doneCats) || t.scheduledAt || "").slice(0, 10) : "";
+  const reused = t ? testReusedForWorks(t, ctx.doneCats) : null;
   return {
     code: store ? store.code : c.store_code,
     name: (store && store.name) || (c && c.site_name) || "",
@@ -356,6 +394,7 @@ function shapeRow(store, c, ctx, extra) {
     alert, alertText,
     outcome: c ? c.outcome || "" : "",
     test: jobView(t), works: jobView(w),
+    worksOnTestJob: reused ? String(reused).slice(0, 10) : null,
     remedials: t ? remSummary(t) : null,
     quote: c && (c.quote_at || c.quote_ref) ? { ref: c.quote_ref || "", value: extra.money ? c.quote_value : undefined, at: c.quote_at } : null,
     order: c && c.order_number ? { number: c.order_number, value: extra.money ? c.order_value : undefined, at: c.order_at } : null,
