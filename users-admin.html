@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=49"></script>
+  <script src="/portal-config.js?v=50"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -324,7 +324,7 @@
           </div>
           <div id="clientOrgWrap" style="display:none;">
             <label>Client organisation</label>
-            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
+            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option><option value="coop">The Southern Co-op (compliance chart)</option></select>
             <label style="margin-top:8px;">What can they see</label>
             <select id="f_clientRole">
               <option value="compliance">Compliance chart only</option>
@@ -890,7 +890,7 @@
     // Permissions that make someone an "Admin" (manage an area for everyone).
     const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
     // A person's headline access level (highest wins).
-    const ORG_LABELS = { fbc: "FBC" };
+    const ORG_LABELS = { fbc: "FBC", coop: "Southern Co-op" };
     function levelOf(u) {
       if (u.StaffType === "client") return { label: "Client", cls: "lvl-client" };
       if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
@@ -1420,7 +1420,7 @@
           + (isClient
              ? `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Client organisation</label>
                 <select id="wiz_clientOrg" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
-                  <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option></select>
+                  <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option><option value="coop"${W.clientOrg === "coop" ? " selected" : ""}>The Southern Co-op (compliance chart)</option></select>
                 <label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">What can they see</label>
                 <select id="wiz_clientRole" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
                   <option value="compliance"${(W.clientRole || "compliance") !== "jobs" ? " selected" : ""}>Compliance chart only</option>

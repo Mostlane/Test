@@ -80,4 +80,31 @@ const ex = await (await compliance.handle(new Request(eu, { headers: H }), env, 
 const st = ex.stores[0];
 ok(st.types.fiveYear.linked && st.types.fiveYear.files.length === 2, "export: linked pair");
 ok(st.extras.length === 1 && st.extras[0].folder === "Other documents" && st.extras[0].file.url, "export: PV manual as extra with a link");
+// ── Client login (Southern Co-op, compliance-only) ─────────────────────────
+db.exec(`CREATE TABLE users (tenant_id INTEGER, username TEXT, profile TEXT);
+  CREATE TABLE user_permissions (tenant_id INTEGER, username TEXT, permission TEXT, value INTEGER);
+  INSERT INTO users VALUES (1,'Client Co','{"staffType":"client","clientOrg":"coop","clientRole":"compliance"}');
+  INSERT INTO users VALUES (1,'Viewer','{"staffType":"field","complianceAccess":{"coop":"view"}}');`);
+const sessOf = (u) => ({ tenantId: 1, user: { username: u } });
+async function getAs(user, path) {
+  const url = new URL("https://x/compliance" + path);
+  const res = await compliance.handle(new Request(url), env, null, url, sessOf(user));
+  return { status: res.status, j: await res.json() };
+}
+let g = await getAs("Client Co", "/files?scheme=coop&code=0200");
+const visible = Object.values(g.j.files).flat().map(x => x.filename).sort().join(",");
+ok(g.status === 200 && g.j.internal === false, "client: /files answers, marked not internal");
+ok(visible === "PV-OM.pdf,eicr-2031.pdf,eicr-unsat.pdf", "client sees only current + in-pack docs: " + visible);
+g = await getAs("Client Co", "/export?scheme=coop&code=0200");
+ok(g.status === 200 && g.j.stores.length === 1 && g.j.stores[0].types.fiveYear.files.length === 2, "client: per-site pack");
+g = await getAs("Viewer", "/export?scheme=coop&code=0200");
+ok(g.status === 200 && g.j.stores.length === 1, "view-level staff: per-site pack allowed");
+g = await getAs("Viewer", "/export?scheme=coop");
+ok(g.status === 403, "view-level staff: whole-estate pack refused");
+g = await getAs("Client Co", "/export?scheme=coop&code=9999");
+ok(g.status === 404, "unknown store → 404");
+g = await getAs("Client Co", "/files?scheme=fareham&code=0200");
+ok(g.status === 403, "Co-op client can't read the Fareham chart");
+g = await getAs("Client Co", "/site-files?site=0200");
+ok(g.status === 403, "client refused on cross-scheme /site-files");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

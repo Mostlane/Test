@@ -25,7 +25,7 @@ export const COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
 // A CLIENT login (staffType "client") is tied to one client org and may only
 // ever see that org's compliance chart, read-only + download. This maps a client
 // org key → its compliance scheme. Extend as more clients get a portal login.
-export const ORG_SCHEME = { fbc: "fareham" };
+export const ORG_SCHEME = { fbc: "fareham", coop: "coop" };
 
 function parseProfile(profile) {
   if (!profile) return {};

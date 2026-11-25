@@ -371,7 +371,7 @@ var init_complianceaccess = __esm({
       { key: "projects", label: "Projects" }
     ];
     COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
-    ORG_SCHEME = { fbc: "fareham" };
+    ORG_SCHEME = { fbc: "fareham", coop: "coop" };
   }
 });
 
@@ -15447,7 +15447,8 @@ async function handle8(request, env, ctx, url, sess) {
   }
   if (sub === "/export" && method === "GET") {
     if (scheme !== "coop") return jr2({ error: "The compliance pack is for the Southern Co-op chart" }, headers, 400);
-    if (!(viaToken || level === "download" || level === "edit")) return jr2({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
+    const oneCode = q.get("code") ? pad4(q.get("code")) : "";
+    if (!oneCode && !(viaToken || level === "download" || level === "edit")) return jr2({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
     const { results: srows } = await env.DB.prepare(
       `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, s.site_name AS sname, s.postcode AS spost
          FROM compliance_stores cs
@@ -15456,8 +15457,8 @@ async function handle8(request, env, ctx, url, sess) {
              OR (s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*'
                  AND COALESCE(NULLIF(cs.site_number, ''), cs.code) NOT GLOB '*[^0-9]*'
                  AND CAST(s.site_number AS INTEGER) = CAST(COALESCE(NULLIF(cs.site_number, ''), cs.code) AS INTEGER)))
-        WHERE cs.tenant_id = ? AND cs.scheme = 'coop' AND COALESCE(cs.active, 1) = 1`
-    ).bind(tid).all();
+        WHERE cs.tenant_id = ? AND cs.scheme = 'coop' AND COALESCE(cs.active, 1) = 1${oneCode ? " AND cs.code = ?" : ""}`
+    ).bind(...oneCode ? [tid, oneCode] : [tid]).all();
     const byCode = /* @__PURE__ */ new Map();
     for (const r of srows || []) {
       const prev = byCode.get(r.code);
@@ -15472,8 +15473,9 @@ async function handle8(request, env, ctx, url, sess) {
       return { code: r.code, category: r.category || "", name: r.sname || r.cname || "", postcode: r.spost || r.cpost || "", due };
     });
     const { results: frows } = await env.DB.prepare(
-      "SELECT id, code, type, filename, label, pinned, in_pack, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop'"
-    ).bind(tid).all();
+      "SELECT id, code, type, filename, label, pinned, in_pack, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop'" + (oneCode ? " AND code=?" : "")
+    ).bind(...oneCode ? [tid, oneCode] : [tid]).all();
+    if (oneCode && !(srows || []).length) return jr2({ error: "That store isn't on the live chart" }, headers, 404);
     const plan = buildPackPlan(stores, frows || []);
     for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
@@ -15485,9 +15487,25 @@ async function handle8(request, env, ctx, url, sess) {
     const code = pad4(q.get("code"));
     if (!code) return jr2({ error: "code required" }, headers, 400);
     const byType = await listStoreFiles(env, url.origin, tid, scheme, code);
-    return jr2({ ok: true, code, files: byType }, headers);
+    const internal = viaToken || level === "edit";
+    if (!internal) {
+      for (const t of Object.keys(byType)) {
+        byType[t] = byType[t].filter((f) => f.inPack || f.current && t !== "other");
+        if (!byType[t].length) delete byType[t];
+      }
+    }
+    return jr2({ ok: true, code, files: byType, internal }, headers);
   }
   if (sub === "/site-files" && method === "GET") {
+    if (sess) {
+      const urow = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first().catch(() => null);
+      let prof = {};
+      try {
+        prof = JSON.parse(urow && urow.profile || "{}") || {};
+      } catch {
+      }
+      if (prof.staffType === "client") return jr2({ error: "Not available on a client login" }, headers, 403);
+    }
     const site = String(q.get("site") || "").trim();
     if (!site) return jr2({ error: "site required" }, headers, 400);
     const seen = /* @__PURE__ */ new Set();
@@ -54033,7 +54051,7 @@ init_complianceaccess();
 init_sla();
 init_push();
 init_email();
-var ORG_LABEL = { fbc: "Fareham Borough Council" };
+var ORG_LABEL = { fbc: "Fareham Borough Council", coop: "The Southern Co-operative" };
 var URGENCY_PRIORITY = { emergency: "Priority 1", urgent: "Priority 2", routine: "Priority 3" };
 var URGENCY_LABEL = { emergency: "Emergency", urgent: "Urgent", routine: "Routine" };
 function clientStatus(status, scheduledAt) {

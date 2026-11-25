@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=49"></script>
+  <script src="/portal-config.js?v=50"></script>
   <script src="/ml-perms.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -140,7 +140,7 @@
     // get a compliance-only login.
     function mlClientLanding(role, org) {
       role = String(role || "").toLowerCase(); org = String(org || "").toLowerCase();
-      if (role === "compliance") return ({ fbc: "fareham.html" })[org] || "compliance.html";
+      if (role === "compliance") return ({ fbc: "fareham.html", coop: "eicr-portal.html" })[org] || "compliance.html";
       return "client-home.html";
     }
     // Send the user to their chosen landing page (per-user, from /prefs),
