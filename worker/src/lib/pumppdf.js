@@ -191,12 +191,16 @@ function signatureCard(doc, y, rec, meta) {
   if (media) { doc.text(M + CARD_PAD, yy + 2, media, { size: 7.5, color: FAINT }); yy += 14; }
   const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
   pill(doc, M + CARD_PAD, yy + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN : RED, size: 6.5, h: 12 });
-  // two signature blocks (engineer left-of-centre, store DM right)
+  // two signature blocks (engineer left-of-centre, store DM right) — OR, for an
+  // office monthly record logged from the compliance tool (no one on site to
+  // sign), a single "Recorded by (office)" sign-off.
   const bw = 200, y2 = y + h - 54;
-  const blocks = [
-    { x: M + CARD_PAD, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
-    { x: W - M - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" },
-  ];
+  const blocks = rec.officeRecord
+    ? [ { x: M + CARD_PAD, sig: null, name: rec.recordedBy || rec.engineerName, label: "Recorded by (office)" } ]
+    : [
+        { x: M + CARD_PAD, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
+        { x: W - M - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" },
+      ];
   blocks.forEach(b => {
     if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
     doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER, lw: 0.7 });
