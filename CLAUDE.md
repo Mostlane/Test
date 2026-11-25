@@ -4007,6 +4007,21 @@ it straight onto the compliance chart (rolling the next-due date).
     fresh order arrives. TODO/next: raise the works job from a 5-year remedial (like the
     EM one-tap); fold into the client-orders auto-match so a new order advances the stage.
 
+## Southern Co-op CLIENT COMPLIANCE PACK (compliance-pack.html + lib/compliancepack.js — 25 Nov 2026)
+Hand-over pack of the LATEST certificate per store per type for the client. eicr-portal 🛠 Tools → "📦 Client
+compliance pack" (download+ access). **GET /compliance/export?scheme=coop** (download|edit level, coop only) →
+every ACTIVE store + its folder plan + 2-day signed links; selection in pure `lib/compliancepack.js
+buildPackPlan` (test `node --no-warnings worker/tools/test-compliance-pack.mjs`, 25). Layout:
+`<Cobra|ELS|ELS Private|Retail|Uncategorised>/<code> - <name>/<5 Year electrical Test|PAT|EM Lighting|Pump|
+Forecourt 12 monthly|PV|EV>/<file>` + `Compliance tracker.xlsx` (Summary · Tracker · Missing & overdue · Files
+in pack). Latest = all PINNED files, else newest by doc_date (upload date if undated) — NB the chart's 📄 uses
+newest UPLOAD, so the two can differ for a back-filled older cert. 5yr/PAT/EM always required; Pump/PV need a due
+date or a file; **the chart stores forecourt AND EV in one `ev` type** — split by filename (PET_/petrol/forecourt/
+pfs/fuel → Forecourt, ev/charg → EV, else PFS-named store → Forecourt); Forecourt required for any PFS-named store
+(the store's `ev` due date is its forecourt due). Status Present / Overdue (in pack but next due passed) / Missing
+/ Not required. The page writes straight to a folder on the PC (File System Access API — **Chrome/Edge desktop
+only**), 4 download lanes, re-runnable: skips same-size files, optional prune of older files in type folders.
+
 ## Sump Pump Monthly Maintenance (routes/pump.js + lib/pumppdf.js + pump-form.js + pump-review.html — Sep 2026)
 A per-store maintenance form ported from Jamie's Jotform ("Sump Pump Monthly
 Maintenance", form 252242531697055 — read via the **Jotform connector**, which the

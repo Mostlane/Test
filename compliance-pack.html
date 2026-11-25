@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=49"></script>
+  <title>Mostlane • Compliance Pack</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="ml-xlsx.js"></script>
+  <style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#003366;
+         --ok:#166534; --okbg:#dcfce7; --bad:#b91c1c; --badbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; --na:#94a3b8; }
+  *{box-sizing:border-box}
+  html{background:var(--bg)} body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:transparent;color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:160px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .card h2{font-size:15px;margin:0 0 6px;}
+  .sub{font-size:13px;color:var(--muted);line-height:1.5;margin:0 0 12px;}
+  .btn{appearance:none;border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:9px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer;}
+  .btn.ghost{background:#fff;color:var(--ink);border-color:var(--line);}
+  .btn.danger{background:#fff;color:var(--bad);border-color:#fecaca;}
+  .btn[disabled]{opacity:.5;cursor:default;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .prog{height:12px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:12px 0 6px;}
+  .prog>span{display:block;height:100%;background:var(--brand);width:0;transition:width .2s;}
+  .status{font-size:13px;color:var(--muted);min-height:18px;}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+  .tile{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff;}
+  .tile b{display:block;font-size:22px;} .tile span{font-size:12px;color:var(--muted);}
+  .tile.bad b{color:var(--bad)} .tile.warn b{color:var(--warn)} .tile.ok b{color:var(--ok)}
+  .tblwrap{overflow:auto;max-height:65vh;border:1px solid var(--line);border-radius:10px;}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;}
+  th,td{padding:6px 8px;border-bottom:1px solid #eef2f6;text-align:left;white-space:nowrap;}
+  thead th{position:sticky;top:0;background:var(--brand);color:#fff;z-index:2;font-weight:600;}
+  td.store{position:sticky;left:0;background:#fff;z-index:1;max-width:280px;overflow:hidden;text-overflow:ellipsis;}
+  tr:nth-child(even) td{background:#fafbfd} tr:nth-child(even) td.store{background:#fafbfd}
+  .pill{display:inline-block;border-radius:999px;padding:2px 8px;font-weight:600;font-size:11.5px;}
+  .p-Present{background:var(--okbg);color:var(--ok)} .p-Overdue{background:var(--warnbg);color:var(--warn)}
+  .p-Missing{background:var(--badbg);color:var(--bad)} .p-na{color:var(--na)}
+  .chip{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+  .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+  input[type=search]{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:220px;}
+  .note{background:var(--warnbg);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;}
+  .errs{font-size:12.5px;color:var(--bad);max-height:160px;overflow:auto;margin-top:8px;}
+  label.tick{font-size:13px;display:flex;gap:6px;align-items:center;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="eicr-portal.html" title="Back">‹ Back</a>
+    <h1>📦 Southern Co-op compliance pack</h1>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <h2>What this builds</h2>
+      <p class="sub">A folder for each store type (<b>Cobra · ELS · ELS Private · Retail</b>). Inside each one there is a folder per store named
+        "<b>code - store name</b>", and inside that a folder per compliance type holding <b>only the latest certificate</b>.
+        Pump, Forecourt, PV and EV folders only appear where the store needs them. A <b>Compliance tracker.xlsx</b> goes at the top
+        showing what's there, what's missing and what's overdue. Active stores only.</p>
+      <div id="unsupported" class="note" hidden>Writing folders to your computer needs <b>Chrome or Edge on a desktop/laptop</b>.
+        You can still download the tracker spreadsheet below.</div>
+      <div class="row">
+        <button class="btn" id="buildBtn" disabled>📁 Choose a folder &amp; build the pack</button>
+        <button class="btn ghost" id="sheetBtn" disabled>⬇ Download tracker only</button>
+        <button class="btn danger" id="stopBtn" hidden>⏹ Stop</button>
+        <label class="tick"><input type="checkbox" id="prune" checked> Remove older certificates left by a previous export</label>
+      </div>
+      <div class="prog" id="prog" hidden><span></span></div>
+      <div class="status" id="status">Loading…</div>
+      <div class="errs" id="errs"></div>
+    </div>
+
+    <div class="card">
+      <h2>Summary</h2>
+      <div class="tiles" id="tiles"></div>
+    </div>
+
+    <div class="card">
+      <h2>Store by store</h2>
+      <div class="row" style="margin-bottom:10px">
+        <div id="groupChips" class="row"></div>
+        <button class="chip" id="gapsChip">Only gaps</button>
+        <input type="search" id="q" placeholder="Search code or name">
+      </div>
+      <div class="tblwrap"><table id="tbl"></table></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function mlToken() { try { return localStorage.getItem("mostlaneToken") || ""; } catch (e) { return ""; } }
+  function authFetch(path, opts) {
+    opts = opts || {};
+    var h = Object.assign({}, opts.headers || {});
+    var t = mlToken(); if (t) h["Authorization"] = "Bearer " + t;
+    return fetch((window.MOSTLANE_API || "") + path, Object.assign({}, opts, { headers: h }));
+  }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function ukDate(iso) { if (!iso) return ""; var m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + "/" + m[2] + "/" + m[1] : iso; }
+  function safeName(s, fb) {
+    var t = String(s == null ? "" : s).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/g, "");
+    return (t || fb || "file").slice(0, 150);
+  }
+
+  var DATA = null, TYPES = [], GROUPS = [], GROUP = "all", GAPS = false, STOP = false;
+  var supported = typeof window.showDirectoryPicker === "function";
+  if (!supported) $("unsupported").hidden = false;
+
+  function isGap(st) { return TYPES.some(function (t) { var s = st.types[t.key].status; return s === "Missing" || s === "Overdue"; }); }
+
+  function counts() {
+    var c = { stores: DATA.stores.length, byGroup: {}, byType: {} };
+    TYPES.forEach(function (t) { c.byType[t.key] = { Present: 0, Overdue: 0, Missing: 0, files: 0 }; });
+    DATA.stores.forEach(function (st) {
+      c.byGroup[st.group] = (c.byGroup[st.group] || 0) + 1;
+      TYPES.forEach(function (t) { var x = st.types[t.key]; if (x.status !== "Not required") c.byType[t.key][x.status]++; c.byType[t.key].files += x.files.length; });
+    });
+    return c;
+  }
+
+  function renderTiles() {
+    var c = counts(), h = "";
+    h += '<div class="tile"><b>' + c.stores + '</b><span>Active stores</span></div>';
+    Object.keys(c.byGroup).sort().forEach(function (g) { h += '<div class="tile' + (g === "Uncategorised" ? " bad" : "") + '"><b>' + c.byGroup[g] + '</b><span>' + esc(g) + '</span></div>'; });
+    TYPES.forEach(function (t) {
+      var b = c.byType[t.key], need = b.Present + b.Overdue + b.Missing;
+      h += '<div class="tile ' + (b.Missing ? "bad" : b.Overdue ? "warn" : "ok") + '"><b>' + (b.Present + b.Overdue) + ' / ' + need + '</b><span>' + esc(t.folder) +
+        (b.Missing ? ' · <span style="color:var(--bad)">' + b.Missing + ' missing</span>' : '') +
+        (b.Overdue ? ' · <span style="color:var(--warn)">' + b.Overdue + ' overdue</span>' : '') + '</span></div>';
+    });
+    $("tiles").innerHTML = h;
+  }
+
+  function renderChips() {
+    var gs = ["all"].concat(Object.keys(counts().byGroup).sort());
+    $("groupChips").innerHTML = gs.map(function (g) { return '<button class="chip' + (g === GROUP ? " on" : "") + '" data-g="' + esc(g) + '">' + (g === "all" ? "All" : esc(g)) + '</button>'; }).join("");
+    $("groupChips").querySelectorAll("button").forEach(function (b) { b.onclick = function () { GROUP = b.getAttribute("data-g"); renderChips(); renderTable(); }; });
+  }
+
+  function cell(x) {
+    if (x.status === "Not required") return '<td class="p-na">—</td>';
+    var title = x.files.map(function (f) { return f.filename; }).join("\n");
+    var d = x.files.length ? ukDate(x.files[0].date) || "undated" : "";
+    return '<td title="' + esc(title) + '"><span class="pill p-' + x.status + '">' + x.status + '</span> ' + esc(d) + (x.due ? ' <span style="color:var(--muted)">· due ' + esc(ukDate(x.due)) + '</span>' : '') + '</td>';
+  }
+
+  function renderTable() {
+    var q = $("q").value.trim().toLowerCase();
+    var rows = DATA.stores.filter(function (st) {
+      if (GROUP !== "all" && st.group !== GROUP) return false;
+      if (GAPS && !isGap(st)) return false;
+      if (q && (st.code + " " + st.name).toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+    var h = "<thead><tr><th>Store</th><th>Type</th>" + TYPES.map(function (t) { return "<th>" + esc(t.folder) + "</th>"; }).join("") + "<th>Notes</th></tr></thead><tbody>";
+    rows.forEach(function (st) {
+      h += '<tr><td class="store" title="' + esc(st.folder) + '">' + esc(st.folder) + '</td><td>' + esc(st.group) + '</td>' +
+        TYPES.map(function (t) { return cell(st.types[t.key]); }).join("") + '<td style="color:var(--muted)">' + esc(st.flags.join("; ")) + '</td></tr>';
+    });
+    if (!rows.length) h += '<tr><td colspan="' + (TYPES.length + 3) + '" style="color:var(--muted)">Nothing matches.</td></tr>';
+    $("tbl").innerHTML = h + "</tbody>";
+  }
+
+  // ── The tracker spreadsheet ──────────────────────────────────────────────
+  function trackerSheets(failed) {
+    failed = failed || {};
+    var stamp = new Date().toLocaleString("en-GB");
+    var c = counts();
+    var sum = [[{ v: "Southern Co-op compliance pack — generated " + stamp, bold: true }], [],
+      [{ v: "Store type", bold: true }, { v: "Stores", bold: true }].concat(TYPES.reduce(function (a, t) {
+        return a.concat([{ v: t.folder + " present", bold: true }, { v: t.folder + " overdue", bold: true }, { v: t.folder + " missing", bold: true }]); }, []))];
+    var groups = Object.keys(c.byGroup).sort();
+    groups.concat(["Total"]).forEach(function (g) {
+      var list = g === "Total" ? DATA.stores : DATA.stores.filter(function (s) { return s.group === g; });
+      var row = [{ v: g, bold: g === "Total" }, list.length];
+      TYPES.forEach(function (t) {
+        var p = 0, o = 0, m = 0;
+        list.forEach(function (s) { var x = status(s, t.key, failed); if (x === "Present") p++; else if (x === "Overdue") o++; else if (/^Missing/.test(x)) m++; });
+        row.push(p, o, m);
+      });
+      sum.push(row);
+    });
+    sum.push([], ["Present = latest certificate is in the pack and in date. Overdue = it's in the pack but its next due date has passed. Missing = needed but no certificate on file. Not required = the store doesn't have that system."]);
+
+    var head = [{ v: "Store type", bold: true }, { v: "Store code", bold: true }, { v: "Store name", bold: true }, { v: "Postcode", bold: true }];
+    TYPES.forEach(function (t) { head.push({ v: t.folder, bold: true }, { v: t.folder + " cert date", bold: true }, { v: t.folder + " next due", bold: true }); });
+    head.push({ v: "Notes", bold: true });
+    var tr = [head];
+    var gaps = [[{ v: "Store type", bold: true }, { v: "Store code", bold: true }, { v: "Store name", bold: true }, { v: "Certificate", bold: true }, { v: "Status", bold: true }, { v: "Next due", bold: true }]];
+    var files = [[{ v: "Store type", bold: true }, { v: "Store code", bold: true }, { v: "Store name", bold: true }, { v: "Certificate", bold: true }, { v: "File", bold: true }, { v: "Cert date", bold: true }, { v: "Folder", bold: true }]];
+    DATA.stores.forEach(function (st) {
+      var r = [st.group, st.code, st.name, st.postcode];
+      TYPES.forEach(function (t) {
+        var x = st.types[t.key], s = status(st, t.key, failed);
+        r.push(s, x.files.length && !failed[st.code + "|" + t.key] ? (ukDate(x.files[0].date) || "undated") : "", ukDate(x.due));
+        if (s === "Overdue" || /^Missing/.test(s)) gaps.push([st.group, st.code, st.name, t.folder, s, ukDate(x.due)]);
+        if (!failed[st.code + "|" + t.key]) x.files.forEach(function (f) {
+          files.push([st.group, st.code, st.name, t.folder, f._out || safeName(f.filename, "certificate.pdf"), ukDate(f.date) || "undated", st.group + "/" + st.folder + "/" + t.folder]);
+        });
+      });
+      r.push(st.flags.join("; "));
+      tr.push(r);
+    });
+    return [{ name: "Summary", rows: sum }, { name: "Tracker", rows: tr }, { name: "Missing & overdue", rows: gaps }, { name: "Files in pack", rows: files }];
+  }
+  function status(st, key, failed) {
+    var s = st.types[key].status;
+    if (failed[st.code + "|" + key] && (s === "Present" || s === "Overdue")) return "Missing (download failed)";
+    return s;
+  }
+
+  // ── Build the folder tree ────────────────────────────────────────────────
+  async function exists(dir, name) { try { await dir.getFileHandle(name); return true; } catch (e) { return false; } }
+  async function sizeOf(dir, name) { try { return (await (await dir.getFileHandle(name)).getFile()).size; } catch (e) { return -1; } }
+
+  async function build() {
+    var root;
+    try { root = await window.showDirectoryPicker({ id: "mlCompPack", mode: "readwrite" }); } catch (e) { return; }
+    STOP = false; $("stopBtn").hidden = false; $("buildBtn").disabled = true; $("sheetBtn").disabled = true;
+    $("prog").hidden = false; $("errs").innerHTML = "";
+    var prune = $("prune").checked;
+    var jobs = [], failed = {}, errs = [];
+    $("status").textContent = "Making folders…";
+    // Folders first (sequential — quick), collecting the download jobs.
+    for (var i = 0; i < DATA.stores.length && !STOP; i++) {
+      var st = DATA.stores[i];
+      var g = await root.getDirectoryHandle(safeName(st.group), { create: true });
+      var sd = await g.getDirectoryHandle(st.folder, { create: true });
+      for (var k = 0; k < TYPES.length; k++) {
+        var t = TYPES[k], x = st.types[t.key];
+        if (!x.required) continue;
+        var td = await sd.getDirectoryHandle(t.folder, { create: true });
+        var used = {};
+        x.files.forEach(function (f) {
+          var n = safeName(f.filename, "certificate.pdf"); if (!/\.[a-z0-9]{2,5}$/i.test(n)) n += ".pdf";
+          var base = n, j = 2; while (used[n.toLowerCase()]) { n = base.replace(/(\.[^.]+)$/, " (" + j++ + ")$1"); }
+          used[n.toLowerCase()] = 1; f._out = n;
+          jobs.push({ st: st, t: t, f: f, dir: td });
+        });
+        if (prune) {
+          try {
+            var stale = [];
+            for await (var [name, h] of td.entries()) if (h.kind === "file" && !used[name.toLowerCase()]) stale.push(name);
+            for (var s = 0; s < stale.length; s++) await td.removeEntry(stale[s]);
+          } catch (e) {}
+        }
+      }
+      if (i % 20 === 0) $("status").textContent = "Making folders… " + (i + 1) + " / " + DATA.stores.length;
+    }
+    var total = jobs.length, done = 0, skipped = 0, bytes = 0;
+    function tick() {
+      $("prog").firstElementChild.style.width = (total ? Math.round(done / total * 100) : 100) + "%";
+      $("status").textContent = "Copying certificates… " + done + " / " + total + " (" + Math.round(bytes / 1048576) + " MB" + (skipped ? ", " + skipped + " already there" : "") + ")";
+    }
+    async function lane() {
+      while (jobs.length && !STOP) {
+        var job = jobs.shift();
+        try {
+          if (job.f.size && (await sizeOf(job.dir, job.f._out)) === job.f.size) { skipped++; }
+          else {
+            var r = await fetch(job.f.url);
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            var fh = await job.dir.getFileHandle(job.f._out, { create: true });
+            var w = await fh.createWritable();
+            var blob = await r.blob(); bytes += blob.size;
+            await w.write(blob); await w.close();
+          }
+        } catch (e) {
+          failed[job.st.code + "|" + job.t.key] = 1;
+          errs.push(job.st.folder + " / " + job.t.folder + " / " + job.f.filename + " — " + (e && e.message || e));
+          $("errs").innerHTML = errs.map(esc).join("<br>");
+        }
+        done++; tick();
+      }
+    }
+    tick();
+    await Promise.all([lane(), lane(), lane(), lane()]);
+    try {
+      var bytesX = MLXlsx.build(trackerSheets(failed));
+      var xh = await root.getFileHandle("Compliance tracker.xlsx", { create: true });
+      var xw = await xh.createWritable(); await xw.write(bytesX); await xw.close();
+    } catch (e) { errs.push("Tracker spreadsheet — " + (e && e.message || e)); $("errs").innerHTML = errs.map(esc).join("<br>"); }
+    $("stopBtn").hidden = true; $("buildBtn").disabled = false; $("sheetBtn").disabled = false;
+    $("status").textContent = (STOP ? "Stopped. " : "Done. ") + (done - errs.length) + " certificates in the pack" +
+      (skipped ? " (" + skipped + " were already there)" : "") + (errs.length ? ", " + errs.length + " failed (listed below, marked in the tracker). Run it again to retry them." : ".") +
+      " Compliance tracker.xlsx is in the folder.";
+  }
+
+  $("buildBtn").onclick = build;
+  $("stopBtn").onclick = function () { STOP = true; $("status").textContent = "Stopping after the current files…"; };
+  $("sheetBtn").onclick = function () { MLXlsx.download("Southern Co-op compliance tracker " + new Date().toISOString().slice(0, 10) + ".xlsx", trackerSheets()); };
+  $("gapsChip").onclick = function () { GAPS = !GAPS; this.classList.toggle("on", GAPS); renderTable(); };
+  $("q").oninput = renderTable;
+
+  (async function load() {
+    try {
+      var r = await authFetch("/compliance/export?scheme=coop");
+      var j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+      DATA = j; TYPES = j.types; GROUPS = j.groups;
+      var nFiles = 0, mb = 0;
+      j.stores.forEach(function (st) { TYPES.forEach(function (t) { st.types[t.key].files.forEach(function (f) { nFiles++; mb += (f.size || 0) / 1048576; }); }); });
+      $("status").textContent = j.stores.length + " active stores · " + nFiles + " certificates to copy (about " + Math.round(mb) + " MB).";
+      $("buildBtn").disabled = !supported; $("sheetBtn").disabled = false;
+      renderTiles(); renderChips(); renderTable();
+    } catch (e) { $("status").textContent = "Couldn't load: " + (e && e.message || e); }
+  })();
+})();
+</script>
+</body>
+</html>

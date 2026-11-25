@@ -9903,6 +9903,140 @@ var init_certpdf = __esm({
   }
 });
 
+// src/lib/compliancepack.js
+function splitEvFile(f, storeIsPfs) {
+  const s = String((f.filename || "") + " " + (f.label || "")).toLowerCase();
+  if (/(^|[^a-z])pet([^a-z]|$)|petrol|forecourt|(^|[^a-z])pfs([^a-z]|$)|fuel|dispenser/.test(s)) return "forecourt";
+  if (/(^|[^a-z])ev([^a-z]|$)|charg/.test(s)) return "ev";
+  return storeIsPfs ? "forecourt" : "ev";
+}
+function safeName(s, fallback = "file") {
+  let t = String(s == null ? "" : s).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
+  t = t.replace(/[. ]+$/g, "");
+  if (!t) t = fallback;
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(t)) t = "_" + t;
+  return t.slice(0, 150);
+}
+function storeFolderName(code, name) {
+  let n = String(name || "").trim();
+  const num5 = String(parseInt(code, 10));
+  n = n.replace(new RegExp("^0*" + num5 + "\\s*[-\u2013:]?\\s*"), "").trim();
+  return safeName(n ? `${code} - ${n}` : String(code), String(code));
+}
+function pickLatest(files) {
+  if (!files || !files.length) return [];
+  const pinned = files.filter((f) => f.pinned);
+  if (pinned.length) return pinned;
+  const sorted = [...files].sort((a, b) => {
+    const d = fileDate(b).localeCompare(fileDate(a));
+    return d || String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || ""));
+  });
+  return [sorted[0]];
+}
+function isoDue(v) {
+  const s = String(v || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (m) {
+    const y = m[3].length === 2 ? "20" + m[3] : m[3];
+    return `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  return "";
+}
+function buildPackPlan(stores, files, today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)) {
+  const byStore = /* @__PURE__ */ new Map();
+  for (const f of files || []) {
+    if (!byStore.has(f.code)) byStore.set(f.code, []);
+    byStore.get(f.code).push(f);
+  }
+  const out = [];
+  for (const st of stores || []) {
+    const due = st.due || {};
+    const pfs = isPfsName(st.name);
+    const group = PACK_GROUPS.find((g) => g.toLowerCase() === String(st.category || "").trim().toLowerCase()) || "Uncategorised";
+    const mine = byStore.get(st.code) || [];
+    const cand = {};
+    for (const f of mine) {
+      let k = f.type;
+      if (k === "ev" || k === "forecourt") k = f.type === "forecourt" ? "forecourt" : splitEvFile(f, pfs);
+      (cand[k] = cand[k] || []).push(f);
+    }
+    const dueFor = {
+      fiveYear: due.fiveYear,
+      pat: due.pat,
+      em: due.em,
+      pump: due.pump,
+      pv: due.pv,
+      forecourt: due.forecourt || (pfs ? due.ev : ""),
+      ev: pfs ? "" : due.ev
+    };
+    const types = {};
+    const flags = [];
+    for (const t of PACK_TYPES) {
+      const have = cand[t.key] || [];
+      let required = !!t.always || have.length > 0;
+      if (!required) {
+        if (t.key === "forecourt") required = pfs || hasDue(dueFor, "forecourt");
+        else required = hasDue(dueFor, t.key);
+      }
+      const chosen = pickLatest(have);
+      const d = isoDue(dueFor[t.key]);
+      let status;
+      if (!required) status = "Not required";
+      else if (!chosen.length) status = "Missing";
+      else if (d && d < today) status = "Overdue";
+      else status = "Present";
+      types[t.key] = {
+        required,
+        status,
+        due: d,
+        files: chosen.map((f) => ({
+          id: f.id,
+          filename: f.filename || "",
+          label: f.label || "",
+          size: f.size || 0,
+          date: f.doc_date || "",
+          uploaded: f.uploaded_at || "",
+          undated: !f.doc_date,
+          r2_key: f.r2_key
+        }))
+      };
+      if (chosen.some((f) => !f.doc_date)) flags.push(`${t.label}: certificate has no date (upload date used)`);
+    }
+    if (group === "Uncategorised") flags.push("No store type set on the chart");
+    out.push({
+      group,
+      code: st.code,
+      name: st.name || "",
+      postcode: st.postcode || "",
+      pfs,
+      folder: storeFolderName(st.code, st.name),
+      types,
+      flags
+    });
+  }
+  out.sort((a, b) => a.group.localeCompare(b.group) || a.code.localeCompare(b.code));
+  return out;
+}
+var PACK_TYPES, PACK_GROUPS, isPfsName, fileDate, hasDue;
+var init_compliancepack = __esm({
+  "src/lib/compliancepack.js"() {
+    PACK_TYPES = [
+      { key: "fiveYear", folder: "5 Year electrical Test", label: "5 Year electrical", always: true },
+      { key: "pat", folder: "PAT", label: "PAT", always: true },
+      { key: "em", folder: "EM Lighting", label: "EM Lighting", always: true },
+      { key: "pump", folder: "Pump", label: "Pump" },
+      { key: "forecourt", folder: "Forecourt 12 monthly", label: "Forecourt 12 monthly" },
+      { key: "pv", folder: "PV", label: "PV" },
+      { key: "ev", folder: "EV", label: "EV" }
+    ];
+    PACK_GROUPS = ["Cobra", "ELS", "ELS Private", "Retail"];
+    isPfsName = (n) => /\bpfs\b|petrol|forecourt/i.test(String(n || ""));
+    fileDate = (f) => f.doc_date || f.uploaded_at || "";
+    hasDue = (due, k) => !!(due && due[k] && String(due[k]).trim());
+  }
+});
+
 // src/lib/sitelogtspdf.js
 function fit2(str, size, max) {
   str = String(str == null ? "" : str);
@@ -14394,8 +14528,8 @@ async function handleInner(request, env, ctx) {
     if (!obj) return new Response("File missing", { status: 404, headers: corsFor(request) });
     const headers = corsFor(request);
     headers["Content-Type"] = doc.content_type || "application/octet-stream";
-    const safeName6 = (doc.file_name || "document").replace(/["\\\r\n]/g, "");
-    headers["Content-Disposition"] = (download ? "attachment" : "inline") + '; filename="' + safeName6 + '"';
+    const safeName7 = (doc.file_name || "document").replace(/["\\\r\n]/g, "");
+    headers["Content-Disposition"] = (download ? "attachment" : "inline") + '; filename="' + safeName7 + '"';
     headers["Access-Control-Expose-Headers"] = "Content-Disposition";
     headers["Cache-Control"] = "private, max-age=60";
     return new Response(obj.body, { headers });
@@ -14576,8 +14710,8 @@ async function handle7(request, env, ctx, url, sess) {
     const siteNumber = form && String(form.get("siteNumber") || "").trim();
     const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
     if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName6 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName6}`;
+    const safeName7 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName7}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
     return json({ success: true, url: await imageForView(env, url.origin, `${r2Pub(env)}/${key}`) }, { status: 201 }, env, request);
   }
@@ -15093,7 +15227,7 @@ async function fileCertificatePdf(env, tid, { scheme = "coop", code, type, bytes
   const ty = canonType(type);
   if (!cd || !bytes) throw new Error("code and bytes required");
   const year = docDate ? String(docDate).slice(0, 4) : null;
-  const fn = safeName(filename || ty + ".pdf");
+  const fn = safeName2(filename || ty + ".pdf");
   const key = `compliance/${sc}/${cd}/${ty}/${year || "_"}/${Date.now()}-${fn}`;
   await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
   const at = (/* @__PURE__ */ new Date()).toISOString();
@@ -15275,7 +15409,7 @@ async function handle8(request, env, ctx, url, sess) {
     }
     return _canComment;
   };
-  const SCHEME_READS = /* @__PURE__ */ new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
+  const SCHEME_READS = /* @__PURE__ */ new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr2({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -15292,6 +15426,42 @@ async function handle8(request, env, ctx, url, sess) {
       (map[r.code] = map[r.code] || {})[r.type] = 1;
     }
     return jr2({ ok: true, map, stores: Object.keys(map).length }, headers);
+  }
+  if (sub === "/export" && method === "GET") {
+    if (scheme !== "coop") return jr2({ error: "The compliance pack is for the Southern Co-op chart" }, headers, 400);
+    if (!(viaToken || level === "download" || level === "edit")) return jr2({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
+    const { results: srows } = await env.DB.prepare(
+      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, s.site_name AS sname, s.postcode AS spost
+         FROM compliance_stores cs
+         LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND (
+                s.site_number = COALESCE(NULLIF(cs.site_number, ''), cs.code)
+             OR (s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*'
+                 AND COALESCE(NULLIF(cs.site_number, ''), cs.code) NOT GLOB '*[^0-9]*'
+                 AND CAST(s.site_number AS INTEGER) = CAST(COALESCE(NULLIF(cs.site_number, ''), cs.code) AS INTEGER)))
+        WHERE cs.tenant_id = ? AND cs.scheme = 'coop' AND COALESCE(cs.active, 1) = 1`
+    ).bind(tid).all();
+    const byCode = /* @__PURE__ */ new Map();
+    for (const r of srows || []) {
+      const prev = byCode.get(r.code);
+      if (!prev || !prev.sname && r.sname) byCode.set(r.code, r);
+    }
+    const stores = [...byCode.values()].map((r) => {
+      let due = {};
+      try {
+        due = JSON.parse(r.due || "{}") || {};
+      } catch {
+      }
+      return { code: r.code, category: r.category || "", name: r.sname || r.cname || "", postcode: r.spost || r.cpost || "", due };
+    });
+    const { results: frows } = await env.DB.prepare(
+      "SELECT id, code, type, filename, label, pinned, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND type<>'other'"
+    ).bind(tid).all();
+    const plan = buildPackPlan(stores, frows || []);
+    for (const st of plan) for (const t of Object.values(st.types)) for (const f of t.files) {
+      f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
+      delete f.r2_key;
+    }
+    return jr2({ ok: true, generatedAt: (/* @__PURE__ */ new Date()).toISOString(), types: PACK_TYPES, groups: PACK_GROUPS, stores: plan }, headers);
   }
   if (sub === "/files" && method === "GET") {
     const code = pad4(q.get("code"));
@@ -15368,7 +15538,7 @@ async function handle8(request, env, ctx, url, sess) {
       if (dup) return jr2({ ok: true, duplicate: true, id: dup.id }, headers);
     }
     const year = String(form.get("year") || "").replace(/[^0-9]/g, "").slice(0, 4) || null;
-    const fname = safeName(form.get("filename") || file.name || type + ".pdf");
+    const fname = safeName2(form.get("filename") || file.name || type + ".pdf");
     const label2 = String(form.get("label") || "").slice(0, 160).trim() || null;
     const at = (/* @__PURE__ */ new Date()).toISOString();
     const key = `compliance/${scheme}/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
@@ -15972,7 +16142,7 @@ async function handle8(request, env, ctx, url, sess) {
   }
   return jr2({ error: "Not found: " + sub }, headers, 404);
 }
-var READY2, DUE_YEARS, SCHEME_DEFAULTS, DEFAULT_TYPE_SETTINGS, safeName, pad4, SCHEME_LABELS, schemeLabel, TYPE_LABELS, KNOWN_TYPES, CLIENT_MAP;
+var READY2, DUE_YEARS, SCHEME_DEFAULTS, DEFAULT_TYPE_SETTINGS, safeName2, pad4, SCHEME_LABELS, schemeLabel, TYPE_LABELS, KNOWN_TYPES, CLIENT_MAP;
 var init_compliance = __esm({
   "src/routes/compliance.js"() {
     init_http();
@@ -15980,6 +16150,7 @@ var init_compliance = __esm({
     init_auth();
     init_complianceaccess();
     init_filesign();
+    init_compliancepack();
     init_sites();
     READY2 = false;
     DUE_YEARS = { fiveYear: 5 };
@@ -16030,7 +16201,7 @@ var init_compliance = __esm({
       }
     };
     DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;
-    safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
+    safeName2 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
     pad4 = (v) => {
       const s = String(v ?? "");
       if (/[a-z]/i.test(s)) return "";
@@ -22654,7 +22825,7 @@ async function handle12(request, env, ctx, url, sess) {
         return null;
       }
     };
-    const safeName6 = (s) => String(s || "file").replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 90);
+    const safeName7 = (s) => String(s || "file").replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 90);
     const padRef = (n) => "0".repeat(Math.max(0, 5 - String(n).length)) + n;
     const padRef2 = (n) => String(n).padStart(2, "0");
     if (subpath === "/firestop/config") {
@@ -22724,10 +22895,10 @@ async function handle12(request, env, ctx, url, sess) {
       const mats = await getFsMaterials(env, tenantId);
       const m = mats.find((x) => x.id === pid);
       if (!m) return jsonResponse({ error: "Product not found" }, headers, 404);
-      const key = `firestopspec/${tenantId}/${pid}/${Date.now()}-${safeName6(file.name)}`;
+      const key = `firestopspec/${tenantId}/${pid}/${Date.now()}-${safeName7(file.name)}`;
       await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
       m.docs = m.docs || [];
-      m.docs.push({ id: "doc-" + crypto.randomUUID().slice(0, 8), name: file.name || safeName6(file.name), key });
+      m.docs.push({ id: "doc-" + crypto.randomUUID().slice(0, 8), name: file.name || safeName7(file.name), key });
       await saveFsMaterials(env, tenantId, mats);
       return jsonResponse({ ok: true }, headers);
     }
@@ -22881,7 +23052,7 @@ async function handle12(request, env, ctx, url, sess) {
       const rec = job.firestop || {};
       const pdf = await buildJobPdf(job);
       const refName = rec.ref || job.helpdeskRef || job.id;
-      const files = [{ name: `RIA form ${safeName6(refName)}.pdf`, data: pdf }];
+      const files = [{ name: `RIA form ${safeName7(refName)}.pdf`, data: pdf }];
       const mats = await getFsMaterials(env, tenantId);
       const usedIds = /* @__PURE__ */ new Set();
       (rec.seals || []).forEach((s) => (s.productIds || []).forEach((id) => usedIds.add(id)));
@@ -22894,11 +23065,11 @@ async function handle12(request, env, ctx, url, sess) {
           seen.add(d.key);
           const bytes = await r2Bytes(d.key);
           if (!bytes) continue;
-          files.push({ name: `Product specification/${safeName6([m.manufacturer, m.name].filter(Boolean).join(" "))} - ${safeName6(d.name)}`, data: bytes });
+          files.push({ name: `Product specification/${safeName7([m.manufacturer, m.name].filter(Boolean).join(" "))} - ${safeName7(d.name)}`, data: bytes });
         }
       }
       const zip = buildZip(files);
-      const zn = `Firestopping ${safeName6(refName)}.zip`;
+      const zn = `Firestopping ${safeName7(refName)}.zip`;
       return new Response(zip.buffer, { status: 200, headers: { ...headers, "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${zn.replace(/[^\w.\- ]+/g, "_")}"`, "Cache-Control": "no-store" } });
     }
     return jsonResponse({ error: "Unknown firestop route" }, headers, 404);
@@ -38346,7 +38517,7 @@ async function readJson3(req) {
     return {};
   }
 }
-var safeName2 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_");
+var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_");
 var cleanCat = (s) => String(s || "").replace(/[\/]/g, "-").trim();
 async function isFull(env, tenantId, sess) {
   if (!sess) return false;
@@ -38454,10 +38625,10 @@ async function handle26(request, env, ctx, url, sess) {
     const file = form.get("file");
     if (!file) return jr3({ error: "Missing file" }, headers, 400);
     const base = scope === "company" ? companyPrefix(tenantId) : personalPrefix(tenantId, who);
-    const key = `${base}${category}/${Date.now()}-${safeName2(file.name)}`;
+    const key = `${base}${category}/${Date.now()}-${safeName3(file.name)}`;
     await env.JOB_FILES.put(key, file.stream(), {
       httpMetadata: { contentType: file.type || "application/octet-stream" },
-      customMetadata: { name: file.name || safeName2(file.name), by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
+      customMetadata: { name: file.name || safeName3(file.name), by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
     });
     return jr3({ ok: true, key, url: await signedFileUrl(env, url.origin, "/staff/doc", key) }, headers, 201);
   }
@@ -38543,7 +38714,7 @@ init_push();
 init_once();
 var KINDS = ["qualification", "insurance", "licence", "licence_check"];
 var EXPIRING_DAYS = 30;
-var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
+var safeName4 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
 async function ensureTable__raw3(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_records (
     tenant_id INTEGER, id TEXT PRIMARY KEY, username TEXT, kind TEXT,
@@ -39190,7 +39361,7 @@ async function handle27(request, env, ctx, url, sess) {
     const file = form.get("file");
     if (file && typeof file === "object" && file.size) {
       if (file.size > 25 * 1024 * 1024) return error("File too large (max 25 MB).", 400, env, request);
-      const key = `staffrec/${db.tenantId}/${username}/${recId}/${Date.now()}-${safeName3(file.name)}`;
+      const key = `staffrec/${db.tenantId}/${username}/${recId}/${Date.now()}-${safeName4(file.name)}`;
       await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { by: me, at: now2 } });
       if (docKey && docKey !== key) {
         try {
@@ -39199,7 +39370,7 @@ async function handle27(request, env, ctx, url, sess) {
         }
       }
       docKey = key;
-      docName = file.name || safeName3(file.name);
+      docName = file.name || safeName4(file.name);
     } else if (String(form.get("removeDoc") || "") === "1" && docKey) {
       try {
         await env.JOB_FILES.delete(docKey);
@@ -44729,7 +44900,7 @@ async function readJson6(r) {
   }
 }
 var lc2 = (s) => String(s || "").toLowerCase();
-var safeName4 = (s) => String(s || "memo").replace(/[^\w.\-]+/g, "_").slice(0, 60);
+var safeName5 = (s) => String(s || "memo").replace(/[^\w.\-]+/g, "_").slice(0, 60);
 async function isFull2(env, tid, me) {
   try {
     const p = await permissionsFor(env, tid, me);
@@ -45048,14 +45219,14 @@ async function handle32(request, env, ctx, url, sess) {
       const mm = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
       if (mm) {
         const bin = Uint8Array.from(atob(mm[2]), (c) => c.charCodeAt(0));
-        sigKey = `memos/${tid}/${id}/${safeName4(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
+        sigKey = `memos/${tid}/${id}/${safeName5(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
         await env.JOB_FILES.put(sigKey, bin, { httpMetadata: { contentType: "image/" + mm[1] } });
         if (mm[1] === "jpeg") sigJpeg = bin;
       }
     } catch {
     }
     const pdf = buildMemoPdf(memo, signerName, at, { sigJpeg, ip });
-    const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName4(memo.m_re || "memo")}.pdf`;
+    const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName5(memo.m_re || "memo")}.pdf`;
     await env.JOB_FILES.put(docKey, pdf, {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: "Memo \u2014 " + (memo.m_re || "Company memo"), by: "Signed acknowledgement" }
@@ -45417,7 +45588,7 @@ async function readJson7(r) {
   }
 }
 var lc3 = (s) => String(s || "").toLowerCase();
-var safeName5 = (s) => String(s || "document").replace(/[^\w.\-]+/g, "_").slice(0, 60);
+var safeName6 = (s) => String(s || "document").replace(/[^\w.\-]+/g, "_").slice(0, 60);
 async function isFull3(env, tid, me) {
   try {
     const p = await permissionsFor(env, tid, me);
@@ -45525,7 +45696,7 @@ async function handle33(request, env, ctx, url, sess) {
     const b = await readJson7(request);
     const p = parseDataUrl(b.signature);
     if (!p) return jr7({ error: "A drawn signature is required" }, headers, 400);
-    const key = `docsig/${tid}/issuer/${safeName5(me)}.${p.ext}`;
+    const key = `docsig/${tid}/issuer/${safeName6(me)}.${p.ext}`;
     await env.JOB_FILES.put(key, p.bytes, { httpMetadata: { contentType: "image/" + (p.isJpeg ? "jpeg" : "png") } });
     await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, issuerCfgKey(me), key).run();
     return jr7({ ok: true }, headers);
@@ -45641,7 +45812,7 @@ async function handle33(request, env, ctx, url, sess) {
     let sigKey = null, signerJpeg = null;
     const p = parseDataUrl(b.signature);
     if (p) {
-      sigKey = `docsig/${tid}/sign/${id}/${safeName5(me)}.${p.ext}`;
+      sigKey = `docsig/${tid}/sign/${id}/${safeName6(me)}.${p.ext}`;
       try {
         await env.JOB_FILES.put(sigKey, p.bytes, { httpMetadata: { contentType: "image/" + (p.isJpeg ? "jpeg" : "png") } });
         if (p.isJpeg) signerJpeg = p.bytes;
@@ -45660,7 +45831,7 @@ async function handle33(request, env, ctx, url, sess) {
       signerIp: ip,
       signerUa: ua
     });
-    const docKey = `staffdocs/${tid}/user/${me}/Agreements/${ts}-${safeName5(s.title_snapshot || "document")}.pdf`;
+    const docKey = `staffdocs/${tid}/user/${me}/Agreements/${ts}-${safeName6(s.title_snapshot || "document")}.pdf`;
     await env.JOB_FILES.put(docKey, pdf, {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: (s.title_snapshot || "Document") + " \u2014 signed", by: "Signed " + at }
