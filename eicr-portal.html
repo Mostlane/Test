@@ -116,6 +116,15 @@
       color:#0f2438; }
     td.comments-col textarea.cmt:focus{ outline:none; border-color:#0071CE; box-shadow:0 0 0 2px rgba(0,113,206,.18); }
     td.comments-col .cmt-saved{ font-size:11px; color:#16a34a; margin-top:2px; min-height:13px; }
+    /* EV/Forecourt + Pump columns are hidden by default (they're relevant to only
+       a handful of stores) so the far-right Comments column is reachable without
+       scrolling across. The 🛠 Tools "Show EV/Pump columns" toggle reveals them,
+       remembered per device in localStorage mlShowEvPump. display:none keeps the
+       cells in the DOM at their original positions, so the index/header-based
+       edit, save and Excel-export paths are unaffected (and an overdue forecourt/
+       pump still turns the row's Status light red via worstStatus). */
+    .col-ev, .col-pump{ display:none; }
+    body.show-evpump .col-ev, body.show-evpump .col-pump{ display:table-cell; }
     /* The dominant cause of tall desktop rows was long site names wrapping to a
        second line. Keep the name on one line (left-aligned so it reads naturally);
        the table already scrolls sideways if a column gets wide. */
@@ -326,6 +335,7 @@
           <button class="bubble" id="reviewBtn" onclick="location.href='compliance-review.html'" title="Verify all stored 5-year certificates">🔍 Run compliance checks</button>
           <button class="bubble" id="concertoBtn" onclick="location.href='concerto-ppm.html'" title="The client's official PPM list from Concerto, reconciled against this chart">📋 Concerto PPM list</button>
           <button class="bubble" id="closedSitesBtn">🗄 Closed sites</button>
+          <button class="bubble" id="evPumpBtn" title="Show or hide the EV/Forecourt and Pump columns (hidden by default so Comments is reachable without scrolling across)">👁 Show EV/Pump columns</button>
           <button class="bubble" id="clearBtn">✕ Clear filters</button>
 
           <!-- Edit-mode tools (shown once Edit is on) -->
@@ -388,7 +398,7 @@
         <thead>
           <tr>
             <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
-            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV/Forecourt</th><th>Pump</th><th>Docs</th><th class="comments-col">Comments</th>
+            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th class="col-ev">EV/Forecourt</th><th class="col-pump">Pump</th><th>Docs</th><th class="comments-col">Comments</th>
           </tr>
         </thead>
         <tbody id="tableBody"><tr><td colspan="12" class="loading">Loading data…</td></tr></tbody>
@@ -1467,7 +1477,10 @@ function renderTable(d){
         const fl = flagOf(e.storeCode);
         if (fl) { s = FLAG_INFO[fl.s].cls; extra = ''; }
       }
-      return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
+      // EV/Forecourt + Pump cells carry a column class so they hide/show with the
+      // matching <th> (hidden by default; the Tools toggle reveals them).
+      const colCls = type === 'ev' ? ' col-ev' : type === 'pump' ? ' col-pump' : '';
+      return `<td class="dc${colCls}${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
     if (closed) tr.classList.add('closed-row');
     // Restricted free-text comment (Full Access + Tanya only). The whole column is
@@ -2409,6 +2422,24 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   document.getElementById('exportBtn').onclick = exportExcel;
   document.getElementById('summaryBtn').onclick = openSummaryModal;
+
+  // EV/Forecourt + Pump columns are hidden by default so the Comments column is
+  // reachable without scrolling across; this toggle shows/hides them and the
+  // choice is remembered per device (localStorage mlShowEvPump).
+  (function(){
+    const btn = document.getElementById('evPumpBtn');
+    if (!btn) return;
+    const setLabel = on => { btn.textContent = on ? '🙈 Hide EV/Pump columns' : '👁 Show EV/Pump columns'; };
+    let on = false; try{ on = localStorage.getItem('mlShowEvPump') === '1'; }catch(e){}
+    document.body.classList.toggle('show-evpump', on);
+    setLabel(on);
+    btn.onclick = ()=>{
+      const now = !document.body.classList.contains('show-evpump');
+      document.body.classList.toggle('show-evpump', now);
+      try{ localStorage.setItem('mlShowEvPump', now ? '1' : '0'); }catch(e){}
+      setLabel(now);
+    };
+  })();
 
   // Store type filters
   document.querySelectorAll('#storeTypeFilters .bubble').forEach(b=>{
