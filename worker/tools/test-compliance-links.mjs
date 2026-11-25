@@ -152,4 +152,11 @@ await post("/unsat-flag", { code: "0202", on: true, status: "bogus" });
 fm = await flags(); ok(fm["0202"].s === "unsat", "flag: unknown status → unsatisfactory");
 await post("/unsat-flag", { code: "0201", on: false });
 fm = await flags(); ok(!fm["0201"] && fm["0202"], "flag: cleared");
+// 🔧 remedial works marker
+await post("/works-flag", { code: "0200", on: true });
+let wm = JSON.parse(db.prepare("SELECT value FROM app_config WHERE key='compliance:works:coop:1'").get().value);
+ok(wm["0200"] && wm["0200"].by === "import-bot", "works: marked with who/when");
+await post("/works-flag", { code: "0200", on: false });
+wm = JSON.parse(db.prepare("SELECT value FROM app_config WHERE key='compliance:works:coop:1'").get().value);
+ok(!wm["0200"], "works: cleared");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

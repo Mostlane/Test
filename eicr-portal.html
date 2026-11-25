@@ -175,6 +175,10 @@
     .unsat-flag:hover{ opacity:.7; }
     .unsat-flag.on{ opacity:1; filter:none; }
     .unsat-flag[disabled]{ cursor:default; }
+    .works-btn{ border:0; background:none; padding:0 5px 0 0; cursor:pointer; font-size:1em; line-height:1; vertical-align:baseline; opacity:.22; filter:grayscale(1); }
+    .works-btn:hover{ opacity:.6; }
+    .works-btn.on{ opacity:1; filter:none; background:#f59e0b; border-radius:6px; padding:1px 4px; margin-right:4px; box-shadow:0 0 0 1px #b45309 inset; }
+    .works-btn[disabled]{ cursor:default; }
     .flagsvg{ vertical-align:-0.15em; }
     .flagpick{ display:flex; flex-direction:column; gap:8px; margin:12px 0 4px; }
     .flagpick button{ text-align:left; border:2px solid #e2e8f0; background:#fff; border-radius:10px; padding:10px 12px; font-size:15px; cursor:pointer; }
@@ -314,6 +318,8 @@
         <div class="toolmenu" id="toolsMenu" hidden>
           <button class="bubble" id="searchModalBtn">🔎 Search by date / type</button>
           <button class="bubble" id="summaryBtn">％ Summary</button>
+          <button class="bubble" id="commentListBtn" onclick="openCommentList()" style="display:none" title="Every row with a comment, as a to-do list">💬 Comments to-do</button>
+          <button class="bubble" id="worksListBtn" onclick="openWorksList()" title="Every store marked 🔧 remedial works required">🔧 Remedial works required</button>
           <button class="bubble" id="flagListBtn" onclick="openFlagList()" title="Every site flagged unsatisfactory, awaiting order or order received">🚩 Unsatisfactory EICRs</button>
           <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
           <button class="bubble" id="packBtn" onclick="location.href='compliance-pack.html'" title="Folder pack of the latest certificate per store for the client, plus a tracker spreadsheet">📦 Client compliance pack</button>
@@ -523,7 +529,7 @@ function tool(k){ return !CLIENT_TOOLS || !!CLIENT_TOOLS[k]; }
 function applyClientTools(){
   const hide = (id, k) => { const el = document.getElementById(id); if (el && !tool(k)) el.style.display = 'none'; };
   hide('packBtn','wholePack'); hide('exportBtn','export'); hide('summaryBtn','summary');
-  hide('searchModalBtn','search'); hide('closedSitesBtn','closedSites'); hide('flagListBtn','flags');
+  hide('searchModalBtn','search'); hide('closedSitesBtn','closedSites'); hide('flagListBtn','flags'); hide('worksListBtn','flags');
 }
 let storeFiles = {};   // code -> { type: [ {url,current,date,filename}, … ] } (lazy-loaded)
 const CERT_TYPE = { fiveYear:'fiveYear', pat:'pat', em:'em', pv:'pv', ev:'ev', pump:'pump' };
@@ -575,6 +581,90 @@ async function loadUnsatFlags(){
     if (allData.length) applyFilters();
   } catch(e){ /* non-critical */ }
 }
+// 🔧 store code → {at,by} when remedial works are required at that store
+// (a spanner beside the store code, tapped on/off by edit users).
+let worksFlags = {};
+async function loadWorksFlags(){
+  try {
+    const r = await authFetch('/compliance/works-flags?scheme=' + COMPLIANCE_SCHEME);
+    if (!r.ok) return;
+    const j = await r.json();
+    worksFlags = (j && j.codes) ? j.codes : {};
+    if (allData.length) applyFilters();
+    if (window._worksListRefresh) window._worksListRefresh();
+  } catch(e){}
+}
+function worksBtn(code){
+  const k = pad4(code), on = !!worksFlags[k], ed = canEditCompliance();
+  if (!on && !ed) return '';
+  const w = worksFlags[k] || {};
+  const tip = on ? ('Remedial works required' + (w.at ? ' — marked ' + fmtDue(String(w.at).slice(0,10)) : '') + (w.by ? ' by ' + w.by : '') + (ed ? ' (tap to clear)' : ''))
+                 : 'Mark: remedial works required';
+  return `<button type="button" class="works-btn${on?' on':''}" data-code="${esc(code)}" title="${escAttr(tip)}"${ed?'':' disabled'}>🔧</button>`;
+}
+async function setWorks(code, on){
+  const k = pad4(code), prev = worksFlags[k];
+  if (on) worksFlags[k] = { at: new Date().toISOString(), by: '' }; else delete worksFlags[k];
+  applyFilters(); if (window._worksListRefresh) window._worksListRefresh();
+  try {
+    const r = await authFetch('/compliance/works-flag?scheme=' + COMPLIANCE_SCHEME, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: k, on: !!on })
+    });
+    if (!r.ok) throw 0;
+  } catch(e){
+    if (prev) worksFlags[k] = prev; else delete worksFlags[k];
+    applyFilters(); if (window._worksListRefresh) window._worksListRefresh();
+    alert("Couldn't save — check your connection and try again.");
+  }
+}
+function openWorksList(){
+  const modal = document.createElement('div'); modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-content" style="max-width:760px">
+    <h2 style="margin:0 0 6px;">🔧 Remedial works required</h2>
+    <div class="wl-count" style="color:#64748b;font-size:13px;margin-bottom:6px;"></div>
+    <div style="max-height:62vh;overflow:auto;"><table class="fl-table"><thead><tr><th>Store</th><th>Site</th><th>5-year status</th><th>Marked</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="actions"><button class="btn" style="background:#ccc;color:#000;" data-x="1">Close</button></div>
+  </div>`;
+  document.body.appendChild(modal); modal.style.display = 'block';
+  const ed = canEditCompliance();
+  function render(){
+    const byCode = {}; (allData || []).forEach(e => { byCode[pad4(e.storeCode)] = e; });
+    const list = Object.keys(worksFlags).filter(c => byCode[c]).sort();
+    modal.querySelector('.wl-count').textContent = list.length + ' store' + (list.length === 1 ? '' : 's');
+    modal.querySelector('tbody').innerHTML = list.length ? list.map(c => {
+      const e = byCode[c], w = worksFlags[c] || {}, fl = flagOf(c);
+      return `<tr><td><b>${esc(c)}</b></td><td>${esc(e.siteName||'')}</td>
+        <td>${fl ? FLAG_INFO[fl.s].icon + ' ' + esc(FLAG_INFO[fl.s].short) : '<span style="color:#94a3b8">—</span>'}</td>
+        <td style="color:#64748b;font-size:12.5px;">${w.at ? esc(fmtDue(String(w.at).slice(0,10))) : ''}${w.by ? ' · ' + esc(w.by) : ''}</td>
+        <td style="white-space:nowrap">${ed ? `<button type="button" class="btn" data-clear="${esc(c)}" style="background:#16a34a;padding:6px 10px;">✓ Works done</button> ` : ''}<button type="button" class="btn" data-go="${esc(c)}" title="Show this row on the chart" style="background:#e2e8f0;color:#0f172a;padding:6px 9px;">↗</button></td></tr>`;
+    }).join('') : `<tr><td colspan="5" style="padding:14px;color:#64748b;">No stores marked. Tap the faint 🔧 beside a store code to mark one.</td></tr>`;
+  }
+  window._worksListRefresh = render;
+  const close = () => { window._worksListRefresh = null; modal.remove(); };
+  modal.addEventListener('click', async ev => {
+    if (ev.target === modal || ev.target.closest('[data-x]')) { close(); return; }
+    const cl = ev.target.closest('[data-clear]');
+    if (cl) {
+      const msg = 'Remedial works done at ' + cl.dataset.clear + '? The 🔧 will be removed.';
+      const ok = window.MLUI ? await MLUI.confirm(msg, { title:'Works done', okLabel:'✓ Works done' }) : confirm(msg);
+      if (ok) setWorks(cl.dataset.clear, false);
+      return;
+    }
+    const g = ev.target.closest('[data-go]');
+    if (g) { const code = g.dataset.go; close(); goToRow(code); }
+  });
+  render();
+}
+function goToRow(code){
+  setTimeout(() => {
+    const tr = [...document.querySelectorAll('#tableBody tr[data-code]')].find(t => pad4(t.dataset.code) === pad4(code));
+    if (!tr) { alert(code + " isn't in the current view — clear the filters and try again."); return; }
+    document.querySelectorAll('tr.row-sel').forEach(r => r.classList.remove('row-sel'));
+    tr.classList.add('row-sel'); selectedCode = tr.dataset.code;
+    tr.scrollIntoView({ block:'center', behavior:'smooth' });
+  }, 60);
+}
+
 // A flag's status: 'unsat' (red — unsatisfactory, nothing sent yet), 'quoted'
 // (amber — quote sent, awaiting the client's order) or 'ordered' (green — order
 // received, works to do). Legacy value 1 = 'unsat'. null = no flag.
@@ -1133,6 +1223,83 @@ function openFlagList(){
   render();
 }
 
+/* All row comments as a to-do list (Full Access + Tanya only — same as the column).
+   Edit in place (saves on leaving the box), ✓ Done clears the comment, ↗ jumps
+   to the row on the chart. */
+async function saveStoreComment(code, text){
+  const r = await authFetch('/compliance/store-comment', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code, comment: text })
+  });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok || !j.ok) throw new Error(j.error || 'save failed');
+  const rec = allData.find(x => x.storeCode === code);
+  if (rec) rec.comment = j.comment != null ? j.comment : text;
+  return true;
+}
+function openCommentList(){
+  if (!canComment) return;
+  let q = '';
+  const modal = document.createElement('div'); modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-content" style="max-width:900px">
+    <h2 style="margin:0 0 6px;">💬 Comments to-do</h2>
+    <input type="search" class="cl-q" placeholder="Search store, site or comment…" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;margin-bottom:8px;">
+    <div class="cl-count" style="color:#64748b;font-size:13px;margin-bottom:6px;"></div>
+    <div style="max-height:62vh;overflow:auto;"><table class="fl-table"><thead><tr><th style="width:70px">Store</th><th style="width:22%">Site</th><th>Comment</th><th style="width:120px"></th></tr></thead><tbody></tbody></table></div>
+    <div class="actions"><button class="btn" style="background:#ccc;color:#000;" data-x="1">Close</button></div>
+  </div>`;
+  document.body.appendChild(modal); modal.style.display = 'block';
+  const close = () => { modal.remove(); applyFilters(); };
+  function render(){
+    const ql = q.toLowerCase();
+    const list = (allData || []).filter(e => (e.comment || '').trim())
+      .filter(e => !ql || (e.storeCode + ' ' + (e.siteName||'') + ' ' + e.comment).toLowerCase().includes(ql))
+      .sort((a,b) => String(a.storeCode).localeCompare(String(b.storeCode)));
+    modal.querySelector('.cl-count').textContent = list.length + ' comment' + (list.length === 1 ? '' : 's');
+    modal.querySelector('tbody').innerHTML = list.length ? list.map(e => `<tr>
+      <td><b>${esc(e.storeCode)}</b></td><td>${esc(e.siteName||'')}</td>
+      <td><textarea class="cl-ta" data-code="${esc(e.storeCode)}" rows="2" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font:inherit;font-size:14px;resize:vertical;">${esc(e.comment)}</textarea><div class="cl-saved" style="font-size:11px;min-height:13px;"></div></td>
+      <td style="white-space:nowrap"><button type="button" class="btn" data-done="${esc(e.storeCode)}" style="background:#16a34a;padding:6px 10px;">✓ Done</button>
+        <button type="button" class="btn" data-go="${esc(e.storeCode)}" title="Show this row on the chart" style="background:#e2e8f0;color:#0f172a;padding:6px 9px;">↗</button></td></tr>`).join('')
+      : `<tr><td colspan="4" style="padding:14px;color:#64748b;">${q ? 'No comments match.' : 'No comments — all clear. 🎉'}</td></tr>`;
+  }
+  modal.querySelector('.cl-q').addEventListener('input', ev => { q = ev.target.value.trim(); render(); });
+  modal.addEventListener('focusout', async ev => {
+    const ta = ev.target.closest('.cl-ta'); if (!ta) return;
+    const code = ta.dataset.code, rec = allData.find(x => x.storeCode === code);
+    if (rec && (rec.comment || '') === ta.value) return;
+    const el = ta.parentElement.querySelector('.cl-saved');
+    el.style.color = '#64748b'; el.textContent = 'Saving…';
+    try { await saveStoreComment(code, ta.value); el.style.color = '#16a34a'; el.textContent = 'Saved ✓'; }
+    catch(e){ el.style.color = '#dc2626'; el.textContent = "Couldn't save — try again"; }
+  });
+  modal.addEventListener('click', async ev => {
+    if (ev.target === modal || ev.target.closest('[data-x]')) { close(); return; }
+    const d = ev.target.closest('[data-done]');
+    if (d) {
+      const code = d.dataset.done;
+      const ok = window.MLUI ? await MLUI.confirm('Mark the comment on ' + code + ' as done? It will be removed.', { title:'Comment done', okLabel:'✓ Done' }) : confirm('Mark the comment on ' + code + ' as done? It will be removed.');
+      if (!ok) return;
+      d.disabled = true;
+      try { await saveStoreComment(code, ''); render(); }
+      catch(e){ d.disabled = false; alert("Couldn't save — check your connection and try again."); }
+      return;
+    }
+    const g = ev.target.closest('[data-go]');
+    if (g) {
+      const code = g.dataset.go; close();
+      setTimeout(() => {
+        const tr = document.querySelector('#tableBody tr[data-code="' + CSS.escape(code) + '"]');
+        if (!tr) { alert(code + ' isn\'t in the current view — clear the filters and try again.'); return; }
+        document.querySelectorAll('tr.row-sel').forEach(r => r.classList.remove('row-sel'));
+        tr.classList.add('row-sel'); selectedCode = code;
+        tr.scrollIntoView({ block:'center', behavior:'smooth' });
+      }, 60);
+    }
+  });
+  render();
+  setTimeout(() => modal.querySelector('.cl-q').focus(), 50);
+}
+
 /* HTML for a date cell, with a 📄 link appended when a cert is on file. */
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
@@ -1310,7 +1477,7 @@ function renderTable(d){
       ? `<td class="comments-col"><textarea class="cmt" data-code="${esc(e.storeCode)}" rows="2" placeholder="Add a comment…">${esc(e.comment || '')}</textarea><div class="cmt-saved" data-code="${esc(e.storeCode)}"></div></td>`
       : `<td class="comments-col"></td>`;
     tr.innerHTML = `
-      <td>${esc(e.storeCode)}</td><td class="site">${esc(e.siteName)}${closedBadge}</td><td>${esc(e.storeType)}</td>
+      <td>${worksBtn(e.storeCode)}${esc(e.storeCode)}</td><td class="site">${esc(e.siteName)}${closedBadge}</td><td>${esc(e.storeType)}</td>
       <td>${esc(e.postcode)}</td><td class="${ws?'st-'+ws:''}">${closed ? '' : statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('pat')}${dtd('em')}
       ${dtd('pv')}${dtd('ev')}${dtd('pump')}
@@ -1498,6 +1665,7 @@ async function loadFromPortal(){
     CLIENT_TOOLS = j.clientTools || null;
     applyClientTools();
     document.body.classList.toggle('can-comment', canComment);
+    { const cb = document.getElementById('commentListBtn'); if (cb) cb.style.display = canComment ? '' : 'none'; }
   }catch(e){
     console.error('loadFromPortal', e);
     // On a background refresh, keep what's on screen rather than blanking it.
@@ -1536,6 +1704,7 @@ async function loadFromPortal(){
   // fetch them on every chart load. (They were only loaded by the retired
   // loadComplianceIndex(), so a flag saved fine but vanished on refresh.)
   loadUnsatFlags();
+  loadWorksFlags();
 }
 
 /* One-time migration: read the old mostlane-pos store list BROWSER-SIDE (it's
@@ -1625,7 +1794,7 @@ function normaliseTypeLabel(label) {
 /* Save the edited due dates to the portal (compliance_stores overlay on the
    canonical site) — replaces the old mostlane-pos KV write. */
 async function saveEditInstant(row){
-  const code = row.children[0].textContent.trim();
+  const code = row.dataset.code || row.children[0].textContent.trim();
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
@@ -2312,6 +2481,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const tb = document.getElementById('tableBody');
   // 📄 certificate links + 📎 upload / 🗂 view (event-delegated, survives re-render)
   tb.addEventListener('click', (ev)=>{
+    const wb = ev.target.closest('.works-btn');
+    if (wb && !editMode && canEditCompliance()){ ev.preventDefault(); ev.stopPropagation(); setWorks(wb.dataset.code, !worksFlags[pad4(wb.dataset.code)]); return; }
     const uf = ev.target.closest('.unsat-flag');
     if (uf && !editMode && canEditCompliance()){ ev.preventDefault(); ev.stopPropagation(); openFlagPicker(uf.dataset.code); return; }
     const cert = ev.target.closest('.cert-link');
