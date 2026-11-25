@@ -14,6 +14,7 @@ import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor, requireSession } from "../lib/auth.js";
 import { resolveComplianceAccess } from "../lib/complianceaccess.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { buildPackPlan, PACK_TYPES, PACK_GROUPS } from "../lib/compliancepack.js";
 import { syncSiteToSiteLog } from "./sites.js";
 
 let READY = false;
@@ -471,7 +472,7 @@ export async function handle(request, env, ctx, url, sess) {
   // Reads for a scheme's chart require at least "view" on that scheme. The public
   // /file GET (handled above, signature-gated) and the cross-scheme /site-files
   // path (site-folder, used by engineers) are deliberately NOT gated here.
-  const SCHEME_READS = new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
+  const SCHEME_READS = new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -490,6 +491,44 @@ export async function handle(request, env, ctx, url, sess) {
     const map = {};
     for (const r of results || []) { (map[r.code] = map[r.code] || {})[r.type] = 1; }
     return jr({ ok: true, map, stores: Object.keys(map).length }, headers);
+  }
+
+  // ── Hand-over COMPLIANCE PACK (Southern Co-op) ──────────────────────────────
+  // Every ACTIVE store with the latest certificate per type (folder plan from
+  // lib/compliancepack.js) + a signed download link for each chosen file. Used by
+  // compliance-pack.html, which writes the folder tree + tracker to the user's PC.
+  // A bulk download, so it needs "download" (or edit) access on the scheme.
+  if (sub === "/export" && method === "GET") {
+    if (scheme !== "coop") return jr({ error: "The compliance pack is for the Southern Co-op chart" }, headers, 400);
+    if (!(viaToken || level === "download" || level === "edit")) return jr({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
+    const { results: srows } = await env.DB.prepare(
+      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, s.site_name AS sname, s.postcode AS spost
+         FROM compliance_stores cs
+         LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND (
+                s.site_number = COALESCE(NULLIF(cs.site_number, ''), cs.code)
+             OR (s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*'
+                 AND COALESCE(NULLIF(cs.site_number, ''), cs.code) NOT GLOB '*[^0-9]*'
+                 AND CAST(s.site_number AS INTEGER) = CAST(COALESCE(NULLIF(cs.site_number, ''), cs.code) AS INTEGER)))
+        WHERE cs.tenant_id = ? AND cs.scheme = 'coop' AND COALESCE(cs.active, 1) = 1`
+    ).bind(tid).all();
+    const byCode = new Map();
+    for (const r of srows || []) {
+      const prev = byCode.get(r.code);
+      if (!prev || (!prev.sname && r.sname)) byCode.set(r.code, r);
+    }
+    const stores = [...byCode.values()].map((r) => {
+      let due = {}; try { due = JSON.parse(r.due || "{}") || {}; } catch {}
+      return { code: r.code, category: r.category || "", name: r.sname || r.cname || "", postcode: r.spost || r.cpost || "", due };
+    });
+    const { results: frows } = await env.DB.prepare(
+      "SELECT id, code, type, filename, label, pinned, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND type<>'other'"
+    ).bind(tid).all();
+    const plan = buildPackPlan(stores, frows || []);
+    for (const st of plan) for (const t of Object.values(st.types)) for (const f of t.files) {
+      f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
+      delete f.r2_key;
+    }
+    return jr({ ok: true, generatedAt: new Date().toISOString(), types: PACK_TYPES, groups: PACK_GROUPS, stores: plan }, headers);
   }
 
   // ── One store's files (grouped by type, newest first, signed URLs) ──────────
