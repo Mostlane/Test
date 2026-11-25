@@ -305,8 +305,12 @@ g("pasteBtn").onclick = async () => { await plLoad(); PL_EDIT = false; plRender(
 // ── Awaiting order: everything quoted and waiting on the client, oldest quote first ──
 function quotedAt(r){ return (r.quote && r.quote.at) || (r.status==="quoted" ? r.statusAt : "") || ""; }
 function awaitTable(list, showQuote){
-  return `<div class="tw"><table><thead><tr><th>Store</th><th>Site</th><th>${showQuote?"Quote sent":"Test found"}</th><th>${showQuote?"Waiting":"Since"}</th><th class="hide-s">Remedials</th><th></th></tr></thead><tbody>`
+  return `<div class="tw"><table><thead><tr><th>Store</th><th>Site</th><th>${showQuote?"Quote sent":"Test found"}</th><th>${showQuote?"Waiting":"Since"}</th><th class="hide-s">Remedials</th><th>Test certificate</th><th></th></tr></thead><tbody>`
     + list.map((r,i) => {
+      const certBtn = (act, label, cls) => `<button class="btn ${cls}" data-act="${act}" data-code="${esc(r.code)}">${label}</button>`;
+      const certCell = r.certFiledSinceTest
+        ? `<span class="sub" style="color:#15803d;font-weight:700">✓ Filed</span> ${certBtn("cert","📄 View","l")}`
+        : certBtn("upload","⬆ Upload cert","l");
       const at = showQuote ? quotedAt(r) : r.statusAt;
       const days = at ? Math.max(0, Math.round((Date.now()-Date.parse(at))/86400000)) : null;
       const tone = days==null ? "" : days>28 ? "red" : days>14 ? "amber" : "";
@@ -316,6 +320,7 @@ function awaitTable(list, showQuote){
       <td>${at?esc(fmtD(at)):'<span class="sub">—</span>'}${showQuote&&r.quote&&r.quote.ref?`<div class="sub">Ref ${esc(r.quote.ref)}</div>`:""}${showQuote&&r.quote&&r.quote.value!=null?`<div class="sub">${money(r.quote.value)}</div>`:""}</td>
       <td>${days==null?"":`<span class="${tone?"alert "+tone:""}">${days} day${days===1?"":"s"}</span>`}</td>
       <td class="hide-s">${codesHtml(r.remedials)}</td>
+      <td class="act" style="white-space:nowrap">${certCell}</td>
       <td class="act">${actions(r, "office")}</td></tr>`; }).join("")
     + `</tbody></table></div>`;
 }
