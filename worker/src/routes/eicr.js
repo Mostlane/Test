@@ -367,7 +367,8 @@ function shapeRow(store, c, ctx, extra) {
       test: need.includes("test") ? { done: !!(c && c.test_inv_at), at: c && c.test_inv_at, by: c && c.test_inv_by, ref: c && c.test_inv_ref } : null,
       works: need.includes("works") ? { done: !!(c && c.works_inv_at), at: c && c.works_inv_at, by: c && c.works_inv_by, ref: c && c.works_inv_ref } : null,
     },
-    concerto: conc ? { next: conc.next, released: conc.released, orderNr: conc.orderNr } : null,
+    concerto: conc ? { next: conc.next, last: conc.last, released: conc.released, orderNr: conc.orderNr } : null,
+    certDocDate: cert ? cert.docDate : "",
     note: c ? c.note || "" : "", flag: c ? c.flag || "" : "", source: c ? c.source || "" : "",
     log: c ? (() => { try { return JSON.parse(c.log || "[]").slice(-12).reverse(); } catch { return []; } })() : [],
   };
@@ -378,13 +379,24 @@ async function buildBoard(env, tid, money) {
   const [conc, certs] = await Promise.all([concertoRows(env, tid), certFiles(env, tid)]);
   const extra = { concerto: conc.byCode, certs, money };
   const ctx = { jobs: r.jobs, doneCats: r.doneCats };
-  const openByCode = new Map(); const doneUninvoiced = [];
-  for (const c of r.cases) if (!c.closed_at) openByCode.set(c.store_code, c);
+  const openByCode = new Map(); const lastClosed = new Map();
+  for (const c of r.cases) {
+    if (!c.closed_at) openByCode.set(c.store_code, c);
+    else { const cur = lastClosed.get(c.store_code); if (!cur || String(c.closed_at) > String(cur.closed_at)) lastClosed.set(c.store_code, c); }
+  }
+  const closedView = (c) => {
+    if (!c) return null;
+    const t = c.test_job_id ? r.jobs.get(c.test_job_id) : null;
+    return { caseId: c.id, closedAt: c.closed_at, testDate: t ? String(t.scheduledAt || t.createdAt || "").slice(0, 10) : "", outcome: c.outcome || "",
+      testInvoiced: c.test_inv_at || null, worksInvoiced: c.works_inv_at || null, orderNumber: c.order_number || "" };
+  };
   const rows = [];
   for (const st of r.stores.values()) {
     const c = openByCode.get(st.code);
     if (st.closed && !c) continue;
-    rows.push(shapeRow(st, c, ctx, extra));
+    const row = shapeRow(st, c, ctx, extra);
+    row.lastClosed = closedView(lastClosed.get(st.code));
+    rows.push(row);
     openByCode.delete(st.code);
   }
   for (const c of openByCode.values()) rows.push(shapeRow(null, c, ctx, extra));   // open case for a store not on the chart

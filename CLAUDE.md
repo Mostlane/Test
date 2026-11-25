@@ -4041,6 +4041,13 @@ five-year-remedials.html stays reachable via "Old 5-year page").
   `eicr:migrated:<tid>`): old concerto_cases stage12 (open ones) → status/quote/notes; old five_year_remedials
   stages → status + order number, flagged "Imported … check it is still outstanding" when no portal test job (a
   portal test job always wins — only its order number is carried).
+- **📅 Concerto <year> tab (default, 25 Nov 2026, Jamie: "full date order of the Concerto schedule from Jan 2026, to
+  see the status of all jobs done this year")**: every store whose Concerto **next OR last** date falls in the chosen
+  year (Concerto rolls a tested site's next date on 5 years — 60 of the 118 2026 sites now read 2031, their 2026 date
+  survives as `last_date`), sorted by that date with month headers, year selector + status chips. Status: the open
+  case's; else "✓ Done & invoiced" (a closed case — the board now sends `lastClosed` per store), "📄 Certificate on
+  file — not in the tracker" (a fiveYear cert with a doc/upload date in the year; board sends `certDocDate`), or
+  "⚠ Concerto moved it on — no test found here" (rolled, no case, no cert). Concerto row carries `last` too.
 - Test `node --no-warnings worker/tools/test-eicr.mjs` (44). portal-config `?v=51`, SW `mostlane-v155`.
 - **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
   `maybeOpenFiveYearRemedial` still writes the old register (harmless).

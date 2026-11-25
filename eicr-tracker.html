@@ -80,6 +80,7 @@
     <div class="toolbar">
       <input id="q" type="search" placeholder="Search store number or site…">
       <select id="allFilter" style="display:none"></select>
+      <select id="yearSel" style="display:none"></select>
       <button class="btn l" id="reload">↻</button>
     </div>
     <div id="body"><div class="empty">Loading the EICR tracker…</div></div>
@@ -98,7 +99,7 @@ function fmtD(iso){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||"")); re
 function fmtDT(iso){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return fmtD(iso); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"2-digit"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); }
 const money = v => (v==null||v==="") ? "" : "£"+Number(v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
 
-let D = null, TAB = "", Q = "", ALLF = "", EX = null, ENGLIST = null;
+let D = null, TAB = "", Q = "", ALLF = "", EX = null, ENGLIST = null, YEAR = new Date().getFullYear(), YF = "";
 const PILL = { due:"", booked:"blue", to_quote:"red", quoted:"amber", ordered:"red", works_booked:"blue", cert_update:"purple", cert_signoff:"purple", done:"green" };
 const SECTIONS = {
   office: [
@@ -126,7 +127,7 @@ async function load(){
     const r = await authFetch("/eicr/board"); const j = await r.json();
     if (!r.ok || !j.ok) throw new Error(j.error || r.status);
     D = j;
-    if (!TAB) TAB = (new URLSearchParams(location.search).get("tab")) || "office";
+    if (!TAB) TAB = (new URLSearchParams(location.search).get("tab")) || "year";
     const sel = g("allFilter");
     sel.innerHTML = '<option value="">All statuses</option>' + D.statuses.map(s=>`<option value="${s.key}">${esc(s.label)}</option>`).join("");
     sel.value = ALLF;
@@ -138,6 +139,7 @@ function count(list){ return D.rows.filter(r => list.some(s=>s.f(r))).length; }
 function redCount(list){ return D.rows.filter(r => list.some(s=>s.f(r)) && r.alert==="red").length; }
 function renderTabs(){
   const t = [
+    ["year","📅 Concerto "+YEAR, yearRows().length, 0],
     ["office","📋 To do (office)", count(SECTIONS.office), redCount(SECTIONS.office)],
     ["signoff","✍️ Sign off", count(SECTIONS.signoff), redCount(SECTIONS.signoff)],
     ["invoice","🧾 Invoicing", count(SECTIONS.invoice), 0],
@@ -146,11 +148,13 @@ function renderTabs(){
   ];
   g("tabs").innerHTML = t.map(([k,l,n,red]) => `<button class="tab${TAB===k?" on":""}" data-tab="${k}">${l}${n!=null?`<span class="n${red?" red":""}">${red?red+" late · ":""}${n}</span>`:""}</button>`).join("");
   g("allFilter").style.display = TAB==="all" ? "" : "none";
+  g("yearSel").style.display = TAB==="year" ? "" : "none";
 }
 function render(){
   if (!D) return;
   renderTabs();
   if (TAB==="concerto") return renderConcerto();
+  if (TAB==="year") return renderYear();
   const rows = D.rows.filter(matchQ);
   let html = "";
   if (TAB==="all") {
@@ -210,6 +214,59 @@ function table(list, tab){
     + `</tbody></table></div>`;
 }
 const rowBy = code => D.rows.find(r => r.code===code);
+
+// ── Concerto year view: every site on Concerto's schedule for the year, in date order ──
+// Concerto rolls a site's date on 5 years once it's tested, so a site belongs to the
+// year when EITHER its next date or its last date falls in it.
+const yr = d => String(d||"").slice(0,4);
+function concDateFor(r){
+  const c = r.concerto; if (!c) return null;
+  if (yr(c.next) === String(YEAR)) return { date:c.next, rolled:false };
+  if (yr(c.last) === String(YEAR)) return { date:c.last, rolled:true, next:c.next };
+  return null;
+}
+function yearRows(){ return D ? D.rows.filter(r => concDateFor(r)) : []; }
+// What to show for a site in the year view.
+function yearStatus(r, cd){
+  if (r.caseId) return { key:r.status, label:r.statusLabel, cls:PILL[r.status]||"" };
+  const lc = r.lastClosed;
+  if (lc && (yr(lc.closedAt) >= String(YEAR) || yr(lc.testDate) === String(YEAR))) return { key:"closed", label:"✓ Done & invoiced", cls:"green" };
+  if (yr(r.certDocDate) === String(YEAR) || yr(r.certFiled) === String(YEAR)) return { key:"certfile", label:"📄 Certificate on file — not in the tracker", cls:"green" };
+  if (cd.rolled) return { key:"rolled", label:"⚠ Concerto moved it on — no test found here", cls:"amber" };
+  return { key:"due", label:r.statusLabel, cls:"" };
+}
+function renderYear(){
+  const ys = g("yearSel"); const now = new Date().getFullYear();
+  if (!ys.options.length) { ys.innerHTML = [now-1, now, now+1, now+2, now+3, now+4].map(y=>`<option value="${y}">${y}</option>`).join(""); }
+  ys.value = String(YEAR);
+  let list = yearRows().filter(matchQ).map(r => { const cd = concDateFor(r); return { r, cd, ys: yearStatus(r, cd) }; });
+  const counts = {}; list.forEach(x => { counts[x.ys.key] = (counts[x.ys.key]||0)+1; });
+  const labelOf = {}; list.forEach(x => { labelOf[x.ys.key] = x.ys.label; });
+  const order = ["due","booked","to_quote","quoted","ordered","works_booked","cert_signoff","cert_update","done","closed","certfile","rolled"];
+  const chips = `<div class="tabs" style="margin-top:2px">${[["", "All", list.length]].concat(order.filter(k=>counts[k]).map(k=>[k, labelOf[k], counts[k]])).map(([k,l,n])=>`<button class="tab${YF===k?" on":""}" data-yf="${k}" style="font-size:12.5px;padding:6px 11px">${esc(l)}<span class="n">${n}</span></button>`).join("")}</div>`;
+  if (YF) list = list.filter(x => x.ys.key === YF);
+  list.sort((a,b)=> String(a.cd.date).localeCompare(String(b.cd.date)) || a.r.code.localeCompare(b.r.code));
+  let html = `<div class="note">Every site on Concerto's ${YEAR} 5-year schedule, in Concerto's date order. Where Concerto has already moved a site on to its next cycle, its ${YEAR} date is shown with the new date underneath.</div>` + chips;
+  html += `<div class="tw"><table><thead><tr><th>Concerto</th><th>Store</th><th>Site</th><th class="hide-s">Our due</th><th>Status</th><th class="hide-s">Details</th><th></th></tr></thead><tbody>`;
+  let month = "";
+  list.forEach((x, i) => {
+    const r = x.r, cd = x.cd;
+    const m = new Date(cd.date+"T12:00:00Z").toLocaleDateString("en-GB",{month:"long",year:"numeric"});
+    if (m !== month) { month = m; html += `<tr><td colspan="7" style="background:#dbe5f0;font-weight:800;color:var(--brand);cursor:default">${esc(m)}</td></tr>`; }
+    const lc = r.lastClosed;
+    html += `<tr class="${i%2?"zeb":""}" data-open="${esc(r.code)}">
+      <td class="due">${esc(fmtD(cd.date))}${cd.rolled?`<div class="sub">now ${esc(fmtD(cd.next))}</div>`:""}${r.concerto&&r.concerto.released?`<div class="sub">${esc(r.concerto.orderNr)}</div>`:""}</td>
+      <td class="code">${esc(r.code)}</td>
+      <td>${esc(r.name)}${r.flag?`<div class="flag">⚑ ${esc(r.flag)}</div>`:""}</td>
+      <td class="due hide-s">${esc(fmtD(r.due))||'<span class="sub">no date</span>'}</td>
+      <td><span class="pill ${x.ys.cls}">${esc(x.ys.label)}</span>${r.caseId&&r.daysInStatus!=null&&r.status!=="due"?`<div class="sub">${r.daysInStatus} working day${r.daysInStatus===1?"":"s"}</div>`:""}${r.caseId&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:(!r.caseId&&x.ys.key==="due"&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:"")}${!r.caseId&&lc&&x.ys.key==="closed"?`<div class="sub">closed ${esc(fmtD(lc.closedAt))}</div>`:""}</td>
+      <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.invoices&&r.invoices.test?`<div class="sub">Test ${r.invoices.test.done?"✓ invoiced":"not invoiced"}${r.invoices.works?" · works "+(r.invoices.works.done?"✓ invoiced":"not invoiced"):""}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
+      <td class="act">${(r.caseId || x.ys.key==="due" || x.ys.key==="rolled") ? actions(r, "office") : ""}</td></tr>`;
+  });
+  html += list.length ? "" : `<tr><td colspan="7" class="empty">Nothing on Concerto's ${YEAR} schedule${YF?" with that status":""}.</td></tr>`;
+  html += `</tbody></table></div>`;
+  g("body").innerHTML = html;
+}
 
 // ── modals ────────────────────────────────────────────────────────────────
 function openModal(html){ g("mc").innerHTML = html; g("mb").classList.add("on"); }
@@ -407,8 +464,10 @@ async function renderConcerto(){
 g("tabs").addEventListener("click", e => { const t = e.target.closest("[data-tab]"); if (!t) return; TAB = t.dataset.tab; history.replaceState(null,"","?tab="+TAB); render(); });
 g("q").addEventListener("input", e => { Q = e.target.value.trim(); render(); });
 g("allFilter").addEventListener("change", e => { ALLF = e.target.value; render(); });
+g("yearSel").addEventListener("change", e => { YEAR = Number(e.target.value); YF = ""; render(); });
 g("reload").addEventListener("click", () => { EX = null; load(); });
 g("body").addEventListener("click", e => {
+  const yf = e.target.closest("[data-yf]"); if (yf) { YF = yf.dataset.yf; render(); return; }
   const b = e.target.closest("[data-act]");
   if (b) {
     e.stopPropagation();
