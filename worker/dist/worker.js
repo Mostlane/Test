@@ -15729,7 +15729,7 @@ async function handle8(request, env, ctx, url, sess) {
         const { results: fbcRows } = await env.DB.prepare(
           "SELECT site_number, site_name, data FROM sites WHERE tenant_id=? AND client='fbc' AND COALESCE(active,1)=1"
         ).bind(tid).all();
-        const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+        const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
         for (const s of fbcRows || []) {
           const code = String(s.site_number || "").trim();
           if (!code) continue;
@@ -15742,7 +15742,7 @@ async function handle8(request, env, ctx, url, sess) {
             `INSERT OR IGNORE INTO compliance_stores
               (tenant_id, scheme, code, name, postcode, site_number, active, due, meta, updated_at)
               VALUES (?, 'fareham', ?, ?, ?, ?, 1, '{}', '{}', ?)`
-          ).bind(tid, code, s.site_name || null, pc, code, nowIso).run();
+          ).bind(tid, code, s.site_name || null, pc, code, nowIso2).run();
         }
       } catch {
       }
@@ -21877,8 +21877,8 @@ PAT: Import certificate number ${num5}-${yr}`;
     rem.failed = true;
     rows[f.i].remedial = rem;
     rec.rows = rows;
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso, tid, certId).run();
+    const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso2, tid, certId).run();
     const isB = rem.kind === "battery";
     await env.DB.prepare("UPDATE em_remedials SET kind=?, light_spec=?, battery_spec=?, battery_qty=?, replaced_on_site=?, status=?, note=? WHERE tenant_id=? AND id=?").bind(
       isB ? "battery" : "light",
@@ -21927,7 +21927,7 @@ PAT: Import certificate number ${num5}-${yr}`;
           hit = true;
         }
         if (hit) {
-          job.updatedAt = nowIso;
+          job.updatedAt = nowIso2;
           await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run();
           jobFixed = true;
         }
@@ -21965,8 +21965,8 @@ PAT: Import certificate number ${num5}-${yr}`;
     rem.failed = true;
     rows[f.i].remedial = rem;
     rec.rows = rows;
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso, tid, certId).run();
+    const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso2, tid, certId).run();
     const keys = rem.photos.map((p) => p && p.key || (typeof p === "string" ? p : "")).filter(Boolean);
     await env.DB.prepare("UPDATE em_remedials SET photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(keys), tid, rowId).run();
     let jobFixed = false;
@@ -21987,7 +21987,7 @@ PAT: Import certificate number ${num5}-${yr}`;
           }
           item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
           item.refPhotos.push(dstKey);
-          job.updatedAt = nowIso;
+          job.updatedAt = nowIso2;
           await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run();
           jobFixed = true;
         }
@@ -36662,12 +36662,12 @@ async function handle20(request, env, ctx, url, sess) {
     if (!b.id) return error("Segment id required", 400, env, request);
     const row = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(b.id, db.tenantId).first();
     if (!row) return error("Segment not found", 404, env, request);
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
     if (b.clear) {
       const date2 = londonDate(new Date(row.clock_in));
       await db.prepare(
         "UPDATE office_shifts SET edited_in=NULL, edited_out=NULL, edit_note=NULL, voided=0, edited_by=?, edited_at=?, date=?, updated_at=? WHERE id=? AND tenant_id=?"
-      ).bind(me, nowIso, date2, nowIso, b.id, db.tenantId).run();
+      ).bind(me, nowIso2, date2, nowIso2, b.id, db.tenantId).run();
       const fresh2 = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(b.id, db.tenantId).first();
       return json({ ok: true, segment: shapeSeg(fresh2) }, {}, env, request);
     }
@@ -36688,7 +36688,7 @@ async function handle20(request, env, ctx, url, sess) {
     const date = londonDate(new Date(fIn));
     await db.prepare(
       "UPDATE office_shifts SET edited_in=?, edited_out=?, edit_note=?, voided=?, edited_by=?, edited_at=?, date=?, updated_at=? WHERE id=? AND tenant_id=?"
-    ).bind(editedIn, editedOut, b.note || null, voided, me, nowIso, date, nowIso, b.id, db.tenantId).run();
+    ).bind(editedIn, editedOut, b.note || null, voided, me, nowIso2, date, nowIso2, b.id, db.tenantId).run();
     const fresh = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(b.id, db.tenantId).first();
     return json({ ok: true, segment: shapeSeg(fresh) }, {}, env, request);
   }
@@ -40933,8 +40933,8 @@ async function buildDay(env, tid, user, date, reg) {
     for (const s of results || []) if (londonDate3(s.started_at) === date) segs.push(s);
   } catch {
   }
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-  const today = londonDate3(nowIso);
+  const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
+  const today = londonDate3(nowIso2);
   for (const s of segs) {
     let end = s.ended_at, flags = [];
     if (s.auto_closed) flags.push("auto-closed");
@@ -40943,7 +40943,7 @@ async function buildDay(env, tid, user, date, reg) {
         end = lazyCloseAt(s.started_at, date);
         flags.push("auto-closed");
       } else {
-        end = nowIso;
+        end = nowIso2;
         flags.push("open");
       }
     }
@@ -43487,22 +43487,22 @@ async function handle30(request, env, ctx, url, sess) {
     const reg = String(b.reg || "").trim();
     if (!reg) return jr4({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
     const who = sess && sess.user && sess.user.username || "";
     const clr = await appConfigJson(env, DEFECTCLR_KEY(tid));
-    clr[rk] = nowIso;
+    clr[rk] = nowIso2;
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(clr)).run();
     const stMap = await appConfigJson(env, DEFECTST_KEY(tid));
     const list = await collectDefects(env, tid, { clearMap: {}, statusMap: stMap });
     let n = 0;
     for (const d of list) {
       if (d.regNorm === rk && d.status !== "resolved") {
-        stMap[d.key] = { status: "resolved", note: stMap[d.key] && stMap[d.key].note || "", by: who, at: nowIso };
+        stMap[d.key] = { status: "resolved", note: stMap[d.key] && stMap[d.key].note || "", by: who, at: nowIso2 };
         n++;
       }
     }
     if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTST_KEY(tid), JSON.stringify(stMap)).run();
-    return jr4({ ok: true, reg, resolvedAt: nowIso, resolved: n }, headers);
+    return jr4({ ok: true, reg, resolvedAt: nowIso2, resolved: n }, headers);
   }
   if (sub === "/vancheck-ack" && method === "POST") {
     const b = await readJson4(request);
@@ -49407,6 +49407,961 @@ async function handle39(request, env, ctx, url, sess) {
   return error("Unknown email-tasks route", 404, env, request);
 }
 
+// src/routes/eicr.js
+init_http();
+init_auth();
+init_sla();
+init_once();
+var STATUSES = [
+  { key: "due", label: "Due \u2014 book the test", who: "office", rank: 0 },
+  { key: "booked", label: "Test booked", who: "engineer", rank: 1 },
+  { key: "to_quote", label: "Remedials to quote", who: "office", rank: 2 },
+  { key: "quoted", label: "Quoted \u2014 awaiting order", who: "client", rank: 3 },
+  { key: "ordered", label: "Order received \u2014 book works", who: "office", rank: 4 },
+  { key: "works_booked", label: "Remedial works booked", who: "engineer", rank: 5 },
+  { key: "cert_update", label: "Update the certificate", who: "signoff", rank: 6 },
+  { key: "cert_signoff", label: "Sign off the certificate", who: "signoff", rank: 6 },
+  { key: "done", label: "Done", who: "", rank: 7 }
+];
+var S4 = Object.fromEntries(STATUSES.map((s) => [s.key, s]));
+var QUOTE_PATH = /* @__PURE__ */ new Set(["to_quote", "quoted", "ordered", "works_booked", "cert_update"]);
+var FIN_BUILTIN = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced"]);
+var WORKS_CODES = /* @__PURE__ */ new Set(["C1", "C2", "FI"]);
+var pad42 = (v) => {
+  const d = String(v ?? "").replace(/\D/g, "");
+  return d ? d.padStart(4, "0") : "";
+};
+var nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
+function londonToday2() {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(/* @__PURE__ */ new Date());
+  const g = (t) => p.find((x) => x.type === t).value;
+  return `${g("year")}-${g("month")}-${g("day")}`;
+}
+function toIso2(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/.exec(s);
+  if (m) {
+    const y = m[3].length === 2 ? "20" + m[3] : m[3];
+    return `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  return "";
+}
+function addMonthsIso(iso, n) {
+  const d = /* @__PURE__ */ new Date(iso + "T12:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+function daysBetween(a, b) {
+  return Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 864e5);
+}
+function workingDaysSince(iso, now2) {
+  if (!iso) return 0;
+  const start = new Date(iso), end = now2 ? new Date(now2) : /* @__PURE__ */ new Date();
+  if (!(start < end)) return 0;
+  let n = 0;
+  const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const e = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  while (d.getTime() < e) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const w = d.getUTCDay();
+    if (w !== 0 && w !== 6) n++;
+  }
+  return n;
+}
+async function ensureTables__raw7(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eicr_cases (
+    tenant_id INTEGER NOT NULL, id TEXT NOT NULL, store_code TEXT NOT NULL, site_name TEXT,
+    cycle_due TEXT, status TEXT, status_at TEXT, status_by TEXT, status_manual INTEGER DEFAULT 0, ev_status TEXT,
+    test_job_id TEXT, works_job_id TEXT, outcome TEXT,
+    quote_ref TEXT, quote_value REAL, quote_at TEXT, quote_by TEXT,
+    order_number TEXT, order_value REAL, order_at TEXT, order_id TEXT,
+    cert_signed_at TEXT, cert_signed_by TEXT, cert_updated_at TEXT, cert_updated_by TEXT,
+    test_inv_at TEXT, test_inv_by TEXT, test_inv_ref TEXT,
+    works_inv_at TEXT, works_inv_by TEXT, works_inv_ref TEXT,
+    note TEXT, log TEXT, source TEXT, flag TEXT,
+    created_at TEXT, updated_at TEXT, closed_at TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS eicr_cases_store ON eicr_cases(tenant_id, store_code)").run();
+  } catch {
+  }
+}
+var ensureTables9 = onceMigration(ensureTables__raw7);
+async function doneCategories(env) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key='sla_categories'").first();
+    const list = JSON.parse(r && r.value || "[]");
+    return new Set(list.filter((c) => c && c.done).map((c) => String(c.name).toLowerCase()));
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+function jobFinished(job, doneCats) {
+  const s = String(job && job.status || "").toLowerCase();
+  return FIN_BUILTIN.has(s) || !!(doneCats && doneCats.has(s));
+}
+var jobCancelled = (j) => /cancel/i.test(String(j && j.status || ""));
+function testOutcome(job) {
+  const rem = Array.isArray(job && job.remedials) ? job.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+  if (rem.some((r) => WORKS_CODES.has(String(r.code || "").toUpperCase()) || !String(r.code || "").trim())) return "remedials";
+  return "c3";
+}
+function remSummary(job) {
+  const rem = Array.isArray(job && job.remedials) ? job.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+  const c = { C1: 0, C2: 0, FI: 0, C3: 0, uncoded: 0, total: rem.length, photos: 0 };
+  for (const r of rem) {
+    const k = String(r.code || "").toUpperCase();
+    if (c[k] !== void 0) c[k]++;
+    else c.uncoded++;
+    c.photos += (r.photos || []).length;
+  }
+  return c;
+}
+async function chartStores2(env, tid) {
+  const { results } = await env.DB.prepare(`SELECT cs.code, cs.category, cs.due, cs.active, cs.name,
+      (SELECT s.site_name FROM sites s WHERE s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*' AND CAST(s.site_number AS INTEGER)=CAST(cs.code AS INTEGER) ORDER BY LENGTH(s.site_number) LIMIT 1) AS site_name
+    FROM compliance_stores cs WHERE cs.tenant_id=? AND cs.scheme='coop' AND cs.code <> '' AND cs.code NOT GLOB '*[^0-9]*'`).bind(tid).all();
+  const m = /* @__PURE__ */ new Map();
+  for (const r of results || []) {
+    let due = {};
+    try {
+      due = JSON.parse(r.due || "{}") || {};
+    } catch {
+    }
+    const closed = r.active === 0 || /closed/i.test(String(r.name || r.site_name || "")) || /closed/i.test(String(due.fiveYear || ""));
+    m.set(pad42(r.code), { code: pad42(r.code), category: r.category || "", name: r.site_name || r.name || "", due: toIso2(due.fiveYear), closed });
+  }
+  return m;
+}
+async function loadCases(env, tid) {
+  const { results } = await env.DB.prepare("SELECT * FROM eicr_cases WHERE tenant_id=?").bind(tid).all();
+  return results || [];
+}
+async function concertoRows(env, tid) {
+  try {
+    const { results } = await env.DB.prepare("SELECT id, store_code, site_name, next_date, planned_date, last_date, order_nr, status FROM concerto_ppm WHERE ppm_type='fiveYear' AND COALESCE(status,'open')<>'gone'").bind().all();
+    const m = /* @__PURE__ */ new Map();
+    const unmapped = [];
+    for (const r of results || []) {
+      const code = pad42(r.store_code);
+      if (!code) {
+        unmapped.push(r);
+        continue;
+      }
+      const cur = m.get(code);
+      const next = toIso2(r.next_date || r.planned_date);
+      if (!cur || next && (!cur.next || next < cur.next)) m.set(code, { next, released: !!String(r.order_nr || "").trim(), orderNr: r.order_nr || "", last: toIso2(r.last_date), id: r.id });
+    }
+    return { byCode: m, unmapped };
+  } catch {
+    return { byCode: /* @__PURE__ */ new Map(), unmapped: [] };
+  }
+}
+async function storeOrders(env, tid) {
+  const m = /* @__PURE__ */ new Map();
+  try {
+    const { results } = await env.DB.prepare(`SELECT id, order_number, order_value, store_code, matched_kind, status, title, description, notified_at, created_at
+      FROM client_orders WHERE COALESCE(status,'') <> 'dismissed'`).bind().all();
+    for (const o of results || []) {
+      const code = pad42(o.store_code);
+      if (!code) continue;
+      if (o.matched_kind === "em") continue;
+      const txt = `${o.title || ""} ${o.description || ""}`;
+      const elec = o.matched_kind === "elec" || o.matched_kind === "fiveyear" || /eicr|5\s*-?\s*year|five\s*year|fixed\s*wire|electrical|remedial|C1|C2/i.test(txt);
+      if (!elec) continue;
+      const at = o.notified_at || o.created_at || "";
+      if (!m.has(code)) m.set(code, []);
+      m.get(code).push({ id: o.id, number: o.order_number || "", value: o.order_value, at });
+    }
+  } catch {
+  }
+  return m;
+}
+async function certFiles(env, tid) {
+  const m = /* @__PURE__ */ new Map();
+  try {
+    const { results } = await env.DB.prepare(`SELECT code, MAX(COALESCE(uploaded_at,'')) up, MAX(COALESCE(doc_date,'')) dd FROM compliance_files
+      WHERE scheme='coop' AND type='fiveYear' GROUP BY code`).bind().all();
+    for (const r of results || []) m.set(pad42(r.code), { uploadedAt: r.up || "", docDate: r.dd || "" });
+  } catch {
+  }
+  return m;
+}
+function deriveStatus(c, ctx) {
+  const t = c.test_job_id ? ctx.jobs.get(c.test_job_id) : null;
+  const w = c.works_job_id ? ctx.jobs.get(c.works_job_id) : null;
+  let outcome = c.outcome || "";
+  let st = "due";
+  if (t && !jobCancelled(t)) {
+    st = "booked";
+    if (jobFinished(t, ctx.doneCats)) {
+      if (!outcome) outcome = testOutcome(t);
+      st = outcome === "remedials" ? "to_quote" : "cert_signoff";
+    }
+  }
+  if (outcome === "remedials") {
+    if (c.quote_at) st = maxRank(st, "quoted");
+    if (c.order_number) st = maxRank(st, "ordered");
+    if (w && !jobCancelled(w)) st = maxRank(st, jobFinished(w, ctx.doneCats) ? "cert_update" : "works_booked");
+    if (c.cert_updated_at) st = "done";
+  } else if (c.cert_signed_at) st = "done";
+  return { status: st, outcome };
+}
+function maxRank(a, b) {
+  return (S4[b] ? S4[b].rank : 0) > (S4[a] ? S4[a].rank : 0) ? b : a;
+}
+function nextStatus(c, derived) {
+  const cur = c.status || "due";
+  if (derived === c.ev_status) return cur;
+  if (derived === "cert_signoff" && QUOTE_PATH.has(cur)) return cur;
+  if (cur === "done") return cur;
+  return S4[derived].rank > (S4[cur] ? S4[cur].rank : 0) ? derived : cur;
+}
+function invoicesNeeded(c) {
+  const out = [];
+  const testDone = c.test_job_id && c._testFinished;
+  if (testDone || ["to_quote", "quoted", "ordered", "works_booked", "cert_update", "cert_signoff", "done"].includes(c.status)) out.push("test");
+  if (c.outcome === "remedials" && (c.status === "done" || c.cert_updated_at)) out.push("works");
+  return out;
+}
+function isClosable(c) {
+  if (c.status !== "done") return false;
+  const need = invoicesNeeded(c);
+  if (need.includes("test") && !c.test_inv_at) return false;
+  if (need.includes("works") && !c.works_inv_at) return false;
+  return true;
+}
+function logPush(c, by, text) {
+  let log = [];
+  try {
+    log = JSON.parse(c.log || "[]");
+  } catch {
+  }
+  log.push({ at: nowIso(), by: by || "", text });
+  c.log = JSON.stringify(log.slice(-80));
+}
+var COLS3 = ["store_code", "site_name", "cycle_due", "status", "status_at", "status_by", "status_manual", "ev_status", "test_job_id", "works_job_id", "outcome", "quote_ref", "quote_value", "quote_at", "quote_by", "order_number", "order_value", "order_at", "order_id", "cert_signed_at", "cert_signed_by", "cert_updated_at", "cert_updated_by", "test_inv_at", "test_inv_by", "test_inv_ref", "works_inv_at", "works_inv_by", "works_inv_ref", "note", "log", "source", "flag", "created_at", "updated_at", "closed_at"];
+async function saveCase(env, tid, c) {
+  c.updated_at = nowIso();
+  const vals = COLS3.map((k) => c[k] === void 0 ? null : c[k]);
+  await env.DB.prepare(`INSERT INTO eicr_cases (tenant_id, id, ${COLS3.join(",")}) VALUES (?, ?, ${COLS3.map(() => "?").join(",")})
+    ON CONFLICT(tenant_id, id) DO UPDATE SET ${COLS3.map((k) => `${k}=excluded.${k}`).join(",")}`).bind(tid, c.id, ...vals).run();
+}
+function newCase(code, name, due, by, source) {
+  return {
+    id: "EC-" + code + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    store_code: code,
+    site_name: name || "",
+    cycle_due: due || "",
+    status: "due",
+    status_at: nowIso(),
+    status_by: by || "",
+    status_manual: 0,
+    ev_status: null,
+    log: "[]",
+    source: source || "",
+    created_at: nowIso()
+  };
+}
+async function reconcile(env, tid, opts) {
+  await ensureTables9(env);
+  const [stores, casesRaw, allJobs, doneCats, orders] = await Promise.all([
+    chartStores2(env, tid),
+    loadCases(env, tid),
+    listJobs(env, tid).catch(() => []),
+    doneCategories(env),
+    storeOrders(env, tid)
+  ]);
+  const jobs = new Map(allJobs.map((j) => [j.id, j]));
+  const ctx = { jobs, doneCats };
+  const cases = casesRaw.map((c) => ({ ...c }));
+  const openByCode = /* @__PURE__ */ new Map();
+  for (const c of cases) if (!c.closed_at) openByCode.set(c.store_code, c);
+  const usedTestJobs = new Set(cases.map((c) => c.test_job_id).filter(Boolean));
+  const usedOrders = new Set(cases.map((c) => c.order_id).filter(Boolean));
+  const changed = /* @__PURE__ */ new Set();
+  const tests = allJobs.filter((j) => j.elecTest && !jobCancelled(j) && pad42(j.siteCode));
+  tests.sort((a, b) => String(a.createdAt || a.scheduledAt || "").localeCompare(String(b.createdAt || b.scheduledAt || "")));
+  for (const j of tests) {
+    if (usedTestJobs.has(j.id)) continue;
+    const code = pad42(j.siteCode);
+    let c = openByCode.get(code);
+    if (c && c.test_job_id && c.test_job_id !== j.id) {
+      if (c.status !== "done") continue;
+      c.closed_at = c.closed_at || nowIso();
+      changed.add(c);
+      c = null;
+    }
+    if (!c) {
+      const st = stores.get(code);
+      c = newCase(code, st && st.name || j.siteName || "", st && st.due, "system", "test job");
+      cases.push(c);
+      openByCode.set(code, c);
+    }
+    c.test_job_id = j.id;
+    usedTestJobs.add(j.id);
+    logPush(c, "system", `Test job linked: ${j.helpdeskRef || j.id}`);
+    changed.add(c);
+  }
+  for (const c of cases) {
+    if (c.closed_at) continue;
+    const t = c.test_job_id && jobs.get(c.test_job_id);
+    if (!c.works_job_id && t && t.remedialsWorksJobId && jobs.get(t.remedialsWorksJobId) && !jobCancelled(jobs.get(t.remedialsWorksJobId))) {
+      c.works_job_id = t.remedialsWorksJobId;
+      logPush(c, "system", "Works job linked");
+      changed.add(c);
+    }
+    const t2 = c.test_job_id && jobs.get(c.test_job_id);
+    const out3 = c.outcome || (t2 && jobFinished(t2, doneCats) ? testOutcome(t2) : "");
+    if (!c.order_number && (out3 === "remedials" || QUOTE_PATH.has(c.status))) {
+      const since = String(t2 && (t2.scheduledAt || t2.createdAt) || "").slice(0, 10);
+      const list = (orders.get(c.store_code) || []).filter((o) => !usedOrders.has(o.id) && (!since || String(o.at).slice(0, 10) >= since)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      if (list.length) {
+        const o = list[0];
+        c.order_number = o.number;
+        c.order_value = o.value ?? null;
+        c.order_at = o.at || nowIso();
+        c.order_id = o.id;
+        usedOrders.add(o.id);
+        logPush(c, "system", `Order ${o.number} picked up from the client's order email`);
+        changed.add(c);
+      }
+    }
+  }
+  for (const c of cases) {
+    if (c.closed_at) continue;
+    const t = c.test_job_id && jobs.get(c.test_job_id);
+    c._testFinished = !!(t && jobFinished(t, doneCats));
+    const d = deriveStatus(c, ctx);
+    if (d.outcome && !c.outcome) {
+      c.outcome = d.outcome;
+      changed.add(c);
+    }
+    const nx = nextStatus(c, d.status);
+    if (nx !== c.status) {
+      logPush(c, "system", `${S4[c.status] ? S4[c.status].label : c.status} \u2192 ${S4[nx].label}`);
+      c.status = nx;
+      c.status_at = nowIso();
+      c.status_by = "system";
+      c.status_manual = 0;
+      changed.add(c);
+    }
+    if (c.ev_status !== d.status) {
+      c.ev_status = d.status;
+      changed.add(c);
+    }
+    if (isClosable(c)) {
+      c.closed_at = nowIso();
+      logPush(c, "system", "Closed \u2014 done and invoiced");
+      changed.add(c);
+    }
+  }
+  for (const c of changed) await saveCase(env, tid, c);
+  return { stores, cases, jobs, doneCats };
+}
+var TIMERS = { to_quote: 5, ordered: 5, cert_signoff: 2, cert_update: 2, quoted: 20 };
+function jobView(j, money3) {
+  if (!j) return null;
+  const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+  return { id: j.id, ref: j.helpdeskRef || j.siteName || "", status: j.status || "", scheduledAt: j.scheduledAt || null, engineers: engs };
+}
+function shapeRow3(store, c, ctx, extra) {
+  const today = londonToday2();
+  const t = c && c.test_job_id ? ctx.jobs.get(c.test_job_id) : null;
+  const w = c && c.works_job_id ? ctx.jobs.get(c.works_job_id) : null;
+  const status = c ? c.status : "due";
+  const due = store ? store.due : c && c.cycle_due || "";
+  let alert = "", alertText = "";
+  if (status === "due") {
+    if (due && due < today) {
+      alert = "red";
+      alertText = "Overdue \u2014 no valid certificate";
+    } else if (due && daysBetween(today, due) <= 60) {
+      alert = "amber";
+      alertText = `Due in ${daysBetween(today, due)} days`;
+    }
+  } else if (status === "booked" || status === "works_booked") {
+    const jj = status === "booked" ? t : w;
+    const sd = jj && jj.scheduledAt ? String(jj.scheduledAt).slice(0, 10) : "";
+    if (!sd) {
+      alert = "amber";
+      alertText = "No date booked";
+    } else if (sd < today && !jobFinished(jj, ctx.doneCats)) {
+      alert = "red";
+      alertText = "Visit date passed \u2014 job not finished";
+    }
+  } else if (TIMERS[status] && c) {
+    const wd = workingDaysSince(c.status_at);
+    if (wd > TIMERS[status]) {
+      alert = status === "quoted" ? "amber" : "red";
+      alertText = `${wd} working days in this status`;
+    }
+  }
+  const need = c ? invoicesNeeded(c) : [];
+  const conc = extra.concerto.get(store ? store.code : c && c.store_code);
+  const cert = extra.certs.get(store ? store.code : c && c.store_code);
+  const testDate = t ? String(t.scheduledAt || t.createdAt || "").slice(0, 10) : "";
+  return {
+    code: store ? store.code : c.store_code,
+    name: store && store.name || c && c.site_name || "",
+    category: store ? store.category : "",
+    due,
+    closedStore: !!(store && store.closed),
+    onChart: !!store,
+    caseId: c ? c.id : null,
+    status,
+    statusLabel: S4[status] ? S4[status].label : status,
+    who: S4[status] ? S4[status].who : "",
+    statusAt: c ? c.status_at : null,
+    statusBy: c ? c.status_by : "",
+    manual: !!(c && c.status_manual),
+    daysInStatus: c && c.status_at ? workingDaysSince(c.status_at) : null,
+    alert,
+    alertText,
+    outcome: c ? c.outcome || "" : "",
+    test: jobView(t),
+    works: jobView(w),
+    remedials: t ? remSummary(t) : null,
+    quote: c && (c.quote_at || c.quote_ref) ? { ref: c.quote_ref || "", value: extra.money ? c.quote_value : void 0, at: c.quote_at } : null,
+    order: c && c.order_number ? { number: c.order_number, value: extra.money ? c.order_value : void 0, at: c.order_at } : null,
+    certSigned: c && c.cert_signed_at ? { at: c.cert_signed_at, by: c.cert_signed_by } : null,
+    certUpdated: c && c.cert_updated_at ? { at: c.cert_updated_at, by: c.cert_updated_by } : null,
+    certFiled: cert ? cert.uploadedAt : "",
+    certFiledSinceTest: !!(cert && testDate && String(cert.uploadedAt).slice(0, 10) >= testDate),
+    invoices: {
+      test: need.includes("test") ? { done: !!(c && c.test_inv_at), at: c && c.test_inv_at, by: c && c.test_inv_by, ref: c && c.test_inv_ref } : null,
+      works: need.includes("works") ? { done: !!(c && c.works_inv_at), at: c && c.works_inv_at, by: c && c.works_inv_by, ref: c && c.works_inv_ref } : null
+    },
+    concerto: conc ? { next: conc.next, released: conc.released, orderNr: conc.orderNr } : null,
+    note: c ? c.note || "" : "",
+    flag: c ? c.flag || "" : "",
+    source: c ? c.source || "" : "",
+    log: c ? (() => {
+      try {
+        return JSON.parse(c.log || "[]").slice(-12).reverse();
+      } catch {
+        return [];
+      }
+    })() : []
+  };
+}
+async function buildBoard(env, tid, money3) {
+  const r = await reconcile(env, tid);
+  const [conc, certs] = await Promise.all([concertoRows(env, tid), certFiles(env, tid)]);
+  const extra = { concerto: conc.byCode, certs, money: money3 };
+  const ctx = { jobs: r.jobs, doneCats: r.doneCats };
+  const openByCode = /* @__PURE__ */ new Map();
+  const doneUninvoiced = [];
+  for (const c of r.cases) if (!c.closed_at) openByCode.set(c.store_code, c);
+  const rows = [];
+  for (const st of r.stores.values()) {
+    const c = openByCode.get(st.code);
+    if (st.closed && !c) continue;
+    rows.push(shapeRow3(st, c, ctx, extra));
+    openByCode.delete(st.code);
+  }
+  for (const c of openByCode.values()) rows.push(shapeRow3(null, c, ctx, extra));
+  rows.sort((a, b) => String(a.due || "9999").localeCompare(String(b.due || "9999")) || a.code.localeCompare(b.code));
+  const counts = {};
+  for (const x of rows) counts[x.status] = (counts[x.status] || 0) + 1;
+  return { rows, counts, statuses: STATUSES };
+}
+async function buildExceptions(env, tid) {
+  const [stores, conc] = await Promise.all([chartStores2(env, tid), concertoRows(env, tid)]);
+  const today = londonToday2(), horizon = addMonthsIso(today, 12);
+  const dueOnPortalNotConcerto = [], dueOnConcertoNotPortal = [], notOnChart = [], noDate = [];
+  for (const st of stores.values()) {
+    if (st.closed) continue;
+    const c = conc.byCode.get(st.code);
+    if (!st.due) {
+      noDate.push({ code: st.code, name: st.name, concertoNext: c ? c.next : "" });
+      continue;
+    }
+    if (st.due <= horizon) {
+      if (!c) dueOnPortalNotConcerto.push({ code: st.code, name: st.name, due: st.due, reason: "Not on the Concerto list at all" });
+      else if (c.next && c.next > horizon) dueOnPortalNotConcerto.push({ code: st.code, name: st.name, due: st.due, concertoNext: c.next, reason: "Concerto has it later" });
+    }
+  }
+  for (const [code, c] of conc.byCode) {
+    const st = stores.get(code);
+    if (!st) {
+      notOnChart.push({ code, concertoNext: c.next, released: c.released });
+      continue;
+    }
+    if (st.closed) continue;
+    const concDue = c.next && c.next <= horizon || c.released;
+    if (concDue && (!st.due || st.due > horizon)) dueOnConcertoNotPortal.push({ code, name: st.name, due: st.due, concertoNext: c.next, released: c.released, orderNr: c.orderNr });
+  }
+  const unmapped = conc.unmapped.map((u) => ({ id: u.id, site: u.site_name || "", next: toIso2(u.next_date || u.planned_date) }));
+  return { horizon, dueOnPortalNotConcerto, dueOnConcertoNotPortal, notOnChart, noDate, unmapped };
+}
+function quoteText(job, includeC3, money3) {
+  const rem = (job.remedials || []).filter((r) => r && r.description && (includeC3 || String(r.code || "").toUpperCase() !== "C3"));
+  const lines = [`Remedial works following the EICR at ${job.siteCode ? pad42(job.siteCode) + " " : ""}${job.siteName || ""}:`, ""];
+  let mins = 0, mat = 0;
+  rem.forEach((r, i) => {
+    const m = Number(r.minutes) || 0, c = Number(r.materialCost) || 0;
+    mins += m;
+    mat += c;
+    const bits = [];
+    if (m) bits.push(m >= 60 ? `${(m / 60).toFixed(m % 60 ? 1 : 0)} h` : `${m} min`);
+    if (money3 && c) bits.push(`materials \xA3${c.toFixed(2)}`);
+    lines.push(`${i + 1}. ${r.code ? "[" + String(r.code).toUpperCase() + "] " : ""}${String(r.description).trim()}${bits.length ? " \u2014 " + bits.join(", ") : ""}`);
+  });
+  lines.push("");
+  if (mins) lines.push(`Total time: ${(mins / 60).toFixed(1)} h`);
+  if (money3 && mat) lines.push(`Total materials: \xA3${mat.toFixed(2)}`);
+  return lines.join("\n");
+}
+async function siteRecord(env, tid, code) {
+  try {
+    const r = await env.DB.prepare(`SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number<>'' AND site_number NOT GLOB '*[^0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER) ORDER BY LENGTH(site_number) LIMIT 1`).bind(tid, code).first();
+    if (!r) return null;
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}") || {};
+    } catch {
+    }
+    return {
+      client: r.client,
+      code: r.site_number,
+      name: r.site_name || "",
+      postcode: r.postcode || d.postcode || "",
+      address: [d.address1 || d.street, d.address2, d.town].filter(Boolean).join(", "),
+      telephone: d.telephone || "",
+      lat: d.lat,
+      lng: d.lng
+    };
+  } catch {
+    return null;
+  }
+}
+function elecDescription(label2) {
+  return `Carry out EICR. Import "${label2}" from EasyCert Cloud. If certificate is not there, create a new one and use certificate name and number "${label2}"
+
+- Record every remedial (with its C1/C2/C3/FI code) and photos in this job.
+- Export complete certificate to EasyCert Cloud
+- Set job as complete`;
+}
+async function handle40(request, env, ctx, url, sess) {
+  if (!sess) return error("Unauthorised", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  const full = perms.FullAccess === "Yes";
+  const office = full || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  if (!office) return error("Compliance, SLA Admin or Full Access needed", 403, env, request);
+  await ensureTables9(env);
+  const money3 = await canSeeMoney(env, tid, me);
+  const path = url.pathname, method = request.method.toUpperCase();
+  const body = async () => {
+    try {
+      return await request.json();
+    } catch {
+      return {};
+    }
+  };
+  const ok = (o) => json({ ok: true, ...o }, {}, env, request);
+  if (path === "/eicr/board" && method === "GET") {
+    try {
+      await migrateOld(env, tid, me, false);
+    } catch {
+    }
+    const out = await buildBoard(env, tid, money3);
+    return ok({ ...out, money: money3, canSignOff: full, me });
+  }
+  if (path === "/eicr/exceptions" && method === "GET") return ok(await buildExceptions(env, tid));
+  async function caseFor(b2, create) {
+    if (b2.caseId) {
+      const c2 = await env.DB.prepare("SELECT * FROM eicr_cases WHERE tenant_id=? AND id=?").bind(tid, b2.caseId).first();
+      if (c2) return { ...c2 };
+    }
+    const code = pad42(b2.code);
+    if (!code) return null;
+    const c = await env.DB.prepare("SELECT * FROM eicr_cases WHERE tenant_id=? AND store_code=? AND closed_at IS NULL ORDER BY created_at DESC LIMIT 1").bind(tid, code).first();
+    if (c) return { ...c };
+    if (!create) return null;
+    const stores = await chartStores2(env, tid);
+    const st = stores.get(code);
+    return newCase(code, st ? st.name : b2.name || "", st ? st.due : "", me, "office");
+  }
+  if (path === "/eicr/case" && method === "GET") {
+    const c = await caseFor({ caseId: url.searchParams.get("id"), code: url.searchParams.get("code") }, false);
+    if (!c) return error("No case", 404, env, request);
+    const t = c.test_job_id ? await getJob(env, tid, c.test_job_id).catch(() => null) : null;
+    const rem = t && Array.isArray(t.remedials) ? t.remedials.filter((r) => r && (r.description || (r.photos || []).length)).map((r) => ({
+      id: r.id,
+      code: String(r.code || "").toUpperCase(),
+      description: r.description || "",
+      minutes: r.minutes || 0,
+      materialCost: money3 ? r.materialCost || 0 : void 0,
+      photos: (r.photos || []).length
+    })) : [];
+    return ok({ case: { id: c.id, code: c.store_code, status: c.status }, remedials: rem });
+  }
+  if (path === "/eicr/quote-text" && method === "GET") {
+    const c = await caseFor({ caseId: url.searchParams.get("id") }, false);
+    const t = c && c.test_job_id ? await getJob(env, tid, c.test_job_id).catch(() => null) : null;
+    if (!t) return error("This case has no test job with remedials", 404, env, request);
+    return ok({ text: quoteText(t, url.searchParams.get("c3") === "1", money3) });
+  }
+  if (method !== "POST") return error("Not found", 404, env, request);
+  const b = await body();
+  if (path === "/eicr/book") {
+    const code = pad42(b.code);
+    if (!code) return error("Store code needed", 400, env, request);
+    const engs = (Array.isArray(b.engineers) ? b.engineers : []).map(String).filter(Boolean);
+    const bad = badScheduleIn({ scheduledAt: b.scheduledAt, scheduledEnd: b.scheduledEnd });
+    if (bad) return error(bad, 400, env, request);
+    const c = await caseFor({ code }, true);
+    if (c.test_job_id) {
+      const ex = await getJob(env, tid, c.test_job_id).catch(() => null);
+      if (ex && !jobCancelled(ex)) return error("This site already has a test job on its case \u2014 open it from the row.", 409, env, request);
+    }
+    const site = await siteRecord(env, tid, code);
+    const label2 = `${code} ${site && site.name || c.site_name || ""}`.trim();
+    const payload = {
+      reference: label2,
+      description: elecDescription(label2),
+      siteCode: code,
+      siteName: site && site.name || c.site_name || "",
+      postcode: site ? site.postcode : "",
+      address: site ? site.address : "",
+      telephone: site ? site.telephone : "",
+      lat: site ? site.lat : void 0,
+      lon: site ? site.lng : void 0,
+      storeType: site ? site.client : "retail",
+      client: site ? site.client : "retail",
+      elecTest: true,
+      requiresRA: false,
+      requiresSignature: false,
+      requiresPhoto: false,
+      requiresNote: false,
+      assignedEngineers: engs,
+      priority: "",
+      status: engs.length ? "Scheduled" : "Pending",
+      release: { mode: "dayBefore" },
+      changedBy: me
+    };
+    if (b.scheduledAt) payload.scheduledAt = new Date(b.scheduledAt).toISOString();
+    if (b.scheduledEnd) payload.scheduledEnd = new Date(b.scheduledEnd).toISOString();
+    if (b.durationMinutes) payload.durationMinutes = Math.max(15, Number(b.durationMinutes) || 0);
+    const job = await createOrUpdateJobFromPayload(env, tid, payload);
+    try {
+      const nj = await getJob(env, tid, job.id);
+      if (nj && engs.length) await reconcileRelease(env, tid, nj);
+    } catch {
+    }
+    c.test_job_id = job.id;
+    c.status = "booked";
+    c.status_at = nowIso();
+    c.status_by = me;
+    c.status_manual = 0;
+    c.ev_status = "booked";
+    logPush(c, me, `Test booked${engs.length ? " for " + engs.join(", ") : ""}${b.scheduledAt ? " on " + String(b.scheduledAt).slice(0, 10) : ""}`);
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id, jobId: job.id });
+  }
+  if (path === "/eicr/link-job") {
+    const c = await caseFor(b, true);
+    const j = b.jobId ? await getJob(env, tid, b.jobId).catch(() => null) : null;
+    if (!j) return error("Job not found", 404, env, request);
+    if (b.kind === "works") c.works_job_id = j.id;
+    else c.test_job_id = j.id;
+    logPush(c, me, `${b.kind === "works" ? "Works" : "Test"} job linked by hand: ${j.helpdeskRef || j.id}`);
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id });
+  }
+  if (path === "/eicr/status") {
+    if (!S4[b.status]) return error("Unknown status", 400, env, request);
+    const c = await caseFor(b, true);
+    if (b.status === "done" && (c.status === "cert_signoff" || c.status === "cert_update") && !full) return error("Only Full Access can sign off a certificate", 403, env, request);
+    const from = c.status;
+    c.status = b.status;
+    c.status_at = nowIso();
+    c.status_by = me;
+    c.status_manual = 1;
+    if (b.status === "quoted" && !c.quote_at) {
+      c.quote_at = nowIso();
+      c.quote_by = me;
+    }
+    if (QUOTE_PATH.has(b.status) && !c.outcome) c.outcome = "remedials";
+    logPush(c, me, `Status set by hand: ${S4[from] ? S4[from].label : from || "\u2014"} \u2192 ${S4[b.status].label}${b.note ? " (" + String(b.note).slice(0, 200) + ")" : ""}`);
+    if (c.closed_at && b.status !== "done") c.closed_at = null;
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id });
+  }
+  if (path === "/eicr/update") {
+    const c = await caseFor(b, true);
+    const bits = [];
+    if (b.orderNumber !== void 0) {
+      const v = String(b.orderNumber || "").trim().slice(0, 40);
+      if (v !== (c.order_number || "")) {
+        c.order_number = v || null;
+        c.order_at = v ? c.order_at || nowIso() : null;
+        c.order_id = null;
+        bits.push(v ? `order number ${v}` : "order number cleared");
+      }
+    }
+    if (b.orderValue !== void 0 && money3) {
+      c.order_value = b.orderValue === "" || b.orderValue === null ? null : Number(b.orderValue) || 0;
+      bits.push("order value");
+    }
+    if (b.quoteRef !== void 0) {
+      c.quote_ref = String(b.quoteRef || "").trim().slice(0, 60) || null;
+      bits.push("quote ref");
+    }
+    if (b.quoteValue !== void 0 && money3) {
+      c.quote_value = b.quoteValue === "" || b.quoteValue === null ? null : Number(b.quoteValue) || 0;
+      bits.push("quote value");
+    }
+    if (b.note !== void 0) {
+      c.note = String(b.note || "").slice(0, 2e3);
+      bits.push("note");
+    }
+    if (b.outcome !== void 0 && ["c3", "remedials", ""].includes(b.outcome)) {
+      c.outcome = b.outcome || null;
+      bits.push("outcome " + (b.outcome || "cleared"));
+    }
+    if (bits.length) logPush(c, me, "Updated " + bits.join(", "));
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id });
+  }
+  if (path === "/eicr/quote-sent") {
+    const c = await caseFor(b, false);
+    if (!c) return error("No case", 404, env, request);
+    c.quote_at = nowIso();
+    c.quote_by = me;
+    if (b.quoteRef !== void 0) c.quote_ref = String(b.quoteRef || "").trim().slice(0, 60) || null;
+    if (b.quoteValue !== void 0 && money3) c.quote_value = Number(b.quoteValue) || null;
+    if (S4[c.status].rank < S4.quoted.rank) {
+      c.status = "quoted";
+      c.status_at = nowIso();
+      c.status_by = me;
+      c.status_manual = 0;
+    }
+    c.outcome = "remedials";
+    logPush(c, me, `Quote sent${c.quote_ref ? " (" + c.quote_ref + ")" : ""}`);
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id });
+  }
+  if (path === "/eicr/create-works") {
+    const c = await caseFor(b, false);
+    if (!c) return error("No case", 404, env, request);
+    if (c.works_job_id) {
+      const ex = await getJob(env, tid, c.works_job_id).catch(() => null);
+      if (ex && !jobCancelled(ex)) return ok({ caseId: c.id, jobId: ex.id, existing: true });
+    }
+    let src = c.test_job_id ? await getJob(env, tid, c.test_job_id).catch(() => null) : null;
+    const items = Array.isArray(b.items) ? b.items.map((s) => String(s || "").trim()).filter(Boolean) : [];
+    let synthetic = false;
+    if (!src || items.length) {
+      const site = await siteRecord(env, tid, c.store_code);
+      src = src || { siteCode: c.store_code, siteName: site && site.name || c.site_name, postcode: site && site.postcode, address: site && site.address, telephone: site && site.telephone, storeType: site && site.client, client: site && site.client, lat: site && site.lat, lon: site && site.lng, helpdeskRef: c.order_number || "" };
+      synthetic = !c.test_job_id;
+    }
+    const res = await createWorksJobFromRemedials(env, tid, src, {
+      pickIds: Array.isArray(b.itemIds) ? b.itemIds : null,
+      items: items.length ? items : null,
+      synthetic,
+      assignedEngineers: b.engineers,
+      scheduledAt: b.scheduledAt,
+      scheduledEnd: b.scheduledEnd,
+      durationMinutes: b.durationMinutes,
+      by: me,
+      existingId: null
+    });
+    if (res.error) return error(res.error, res.status || 400, env, request);
+    c.works_job_id = res.id;
+    c.status = "works_booked";
+    c.status_at = nowIso();
+    c.status_by = me;
+    c.status_manual = 0;
+    c.ev_status = "works_booked";
+    c.outcome = "remedials";
+    logPush(c, me, `Works job created (${res.items || 0} items, test photos copied)`);
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id, jobId: res.id });
+  }
+  if (path === "/eicr/signoff") {
+    if (!full) return error("Only Full Access can sign off a certificate", 403, env, request);
+    const c = await caseFor(b, false);
+    if (!c) return error("No case", 404, env, request);
+    if (c.status === "cert_update" || b.kind === "update") {
+      c.cert_updated_at = nowIso();
+      c.cert_updated_by = me;
+      logPush(c, me, "Updated certificate signed off");
+    } else {
+      c.cert_signed_at = nowIso();
+      c.cert_signed_by = me;
+      logPush(c, me, "Certificate signed off");
+    }
+    c.status = "done";
+    c.status_at = nowIso();
+    c.status_by = me;
+    c.status_manual = 0;
+    c.ev_status = "done";
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id });
+  }
+  if (path === "/eicr/invoice") {
+    const c = await caseFor(b, false);
+    if (!c) return error("No case", 404, env, request);
+    const which = b.which === "works" ? "works" : "test";
+    if (b.undo) {
+      c[which + "_inv_at"] = null;
+      c[which + "_inv_by"] = null;
+      c[which + "_inv_ref"] = null;
+      c.closed_at = null;
+      logPush(c, me, `${which === "works" ? "Remedial works" : "Test"} invoice un-ticked`);
+    } else {
+      c[which + "_inv_at"] = nowIso();
+      c[which + "_inv_by"] = me;
+      c[which + "_inv_ref"] = String(b.ref || "").trim().slice(0, 60) || null;
+      logPush(c, me, `${which === "works" ? "Remedial works" : "Test"} invoiced${b.ref ? " (" + b.ref + ")" : ""}`);
+      c._testFinished = true;
+      if (isClosable(c)) {
+        c.closed_at = nowIso();
+        logPush(c, "system", "Closed \u2014 done and invoiced");
+      }
+    }
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id, closed: !!c.closed_at });
+  }
+  if (path === "/eicr/reopen") {
+    const c = await caseFor(b, false);
+    if (!c) return error("No case", 404, env, request);
+    c.closed_at = null;
+    logPush(c, me, "Reopened");
+    await saveCase(env, tid, c);
+    return ok({ caseId: c.id });
+  }
+  if (path === "/eicr/migrate") {
+    if (!full) return error("Full Access only", 403, env, request);
+    return ok(await migrateOld(env, tid, me, !!b.force));
+  }
+  return error("Not found", 404, env, request);
+}
+var OLD_STAGE = {
+  needs_booking: "due",
+  scheduled: "booked",
+  awaiting_review: "cert_signoff",
+  complete_satisfactory: "done",
+  remedials_required: "to_quote",
+  remedials_to_quote: "to_quote",
+  remedials_quoted: "quoted",
+  orders_received: "ordered",
+  remedials_scheduled: "works_booked",
+  remedials_complete: "cert_update",
+  certificate_updated: "done",
+  invoiced: "done"
+};
+async function migrateOld(env, tid, by, force) {
+  await ensureTables9(env);
+  const flagKey = "eicr:migrated:" + tid;
+  if (!force) {
+    const f = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(flagKey).first();
+    if (f) return { skipped: true, at: f.value };
+  }
+  const r = await reconcile(env, tid);
+  const open = /* @__PURE__ */ new Map();
+  for (const c of r.cases) if (!c.closed_at) open.set(c.store_code, c);
+  let fromSchedule = 0, fromRegister = 0;
+  const stores = r.stores;
+  const ensureCase = (code, source) => {
+    let c = open.get(code);
+    if (!c) {
+      const st = stores.get(code);
+      c = newCase(code, st ? st.name : "", st ? st.due : "", by, source);
+      open.set(code, c);
+      r.cases.push(c);
+    }
+    return c;
+  };
+  try {
+    const { results } = await env.DB.prepare("SELECT store_code, stage12, note, quote_ref, quote_value, quote_at, works_job_id FROM concerto_cases WHERE stage12 IS NOT NULL AND stage12<>'' AND closed_at IS NULL").bind().all();
+    for (const o of results || []) {
+      const code = pad42(o.store_code);
+      const st = OLD_STAGE[o.stage12];
+      if (!code || !st) continue;
+      const c = ensureCase(code, "old schedule");
+      if (S4[st].rank > S4[c.status || "due"].rank) {
+        c.status = st;
+        c.status_at = nowIso();
+        c.status_by = "migration";
+        c.status_manual = 1;
+      }
+      if (QUOTE_PATH.has(st) && !c.outcome) c.outcome = "remedials";
+      if (o.quote_ref && !c.quote_ref) c.quote_ref = o.quote_ref;
+      if (o.quote_value && c.quote_value == null) c.quote_value = o.quote_value;
+      if (o.quote_at && !c.quote_at) c.quote_at = o.quote_at;
+      if (o.works_job_id && !c.works_job_id) c.works_job_id = o.works_job_id;
+      if (o.note) c.note = [c.note, o.note].filter(Boolean).join("\n");
+      if (o.stage12 === "invoiced") {
+        c.test_inv_at = c.test_inv_at || nowIso();
+        c.test_inv_by = "migration";
+        if (c.outcome === "remedials") {
+          c.works_inv_at = c.works_inv_at || nowIso();
+          c.works_inv_by = "migration";
+        }
+      }
+      logPush(c, "migration", `Carried over from the old 5-Year schedule (status "${o.stage12}")`);
+      c._dirty = true;
+      fromSchedule++;
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT id, store_code, stage, order_number, order_value, data FROM five_year_remedials").bind().all();
+    for (const o of results || []) {
+      const code = pad42(o.store_code);
+      if (!code) continue;
+      const stage = String(o.stage || "");
+      if (!["ordered", "in_works", "quoted", "to_review"].includes(stage)) continue;
+      const c = ensureCase(code, "old remedials register");
+      if (c.test_job_id) {
+        if (o.order_number && !c.order_number) {
+          c.order_number = o.order_number;
+          c.order_value = o.order_value;
+          c.order_at = nowIso();
+          logPush(c, "migration", `Order ${o.order_number} carried over from the old remedials register`);
+          c._dirty = true;
+          fromRegister++;
+        }
+        continue;
+      }
+      c.outcome = "remedials";
+      const target = stage === "in_works" ? "works_booked" : stage === "ordered" ? "ordered" : stage === "quoted" ? "quoted" : "to_quote";
+      if (S4[target].rank > S4[c.status || "due"].rank) {
+        c.status = target;
+        c.status_at = nowIso();
+        c.status_by = "migration";
+        c.status_manual = 1;
+      }
+      if (o.order_number && !c.order_number) {
+        c.order_number = o.order_number;
+        c.order_value = o.order_value;
+        c.order_at = nowIso();
+      }
+      if (!c.test_job_id) c.flag = "Imported from the old remedials register \u2014 check it is still outstanding";
+      logPush(c, "migration", `Carried over from the old remedials register (${stage}${o.order_number ? ", order " + o.order_number : ""})`);
+      c._dirty = true;
+      fromRegister++;
+    }
+  } catch {
+  }
+  let saved = 0;
+  for (const c of r.cases) if (c._dirty) {
+    delete c._dirty;
+    await saveCase(env, tid, c);
+    saved++;
+  }
+  await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, flagKey, nowIso()).run();
+  return { fromSchedule, fromRegister, saved, cases: r.cases.length };
+}
+
 // src/index.js
 init_concerto();
 init_certs();
@@ -49416,7 +50371,7 @@ init_pump();
 init_http();
 init_auth();
 init_once();
-async function ensureTables__raw7(env) {
+async function ensureTables__raw8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_modules (
     tenant_id INTEGER, id TEXT, title TEXT, category TEXT, content TEXT, video TEXT,
     pass_mark INTEGER, min_seconds INTEGER, questions TEXT, active INTEGER DEFAULT 1,
@@ -49440,7 +50395,7 @@ async function ensureTables__raw7(env) {
   } catch {
   }
 }
-var ensureTables9 = onceMigration(ensureTables__raw7);
+var ensureTables10 = onceMigration(ensureTables__raw8);
 function parseYouTubeId(input) {
   const s = String(input || "").trim();
   if (!s) return "";
@@ -49767,13 +50722,13 @@ async function seedIfEmpty(env, tid) {
     "sample"
   ).run();
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const sub = url.pathname.replace(/^\/cpd(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables9(env);
+  await ensureTables10(env);
   const perms = await permissionsFor(env, tid, me);
   const isAdmin = perms.FullAccess === "Yes";
   const canLearn = isAdmin || perms.CPD === "Yes";
@@ -50041,7 +50996,7 @@ var W7 = 595;
 var H4 = 842;
 var M7 = 40;
 var CW3 = W7 - M7 * 2;
-var S4 = (v) => toWinAnsi(String(v == null ? "" : v));
+var S5 = (v) => toWinAnsi(String(v == null ? "" : v));
 var NAVY6 = [0, 0.2, 0.41];
 var INK5 = [0.09, 0.14, 0.22];
 var GREY5 = [0.42, 0.47, 0.53];
@@ -50056,13 +51011,13 @@ function card(doc, x, y, w, h, r = 10) {
   doc.roundRect(x, y, w, h, r, { fill: CARD4 });
 }
 function label(doc, x, y, str) {
-  doc.text(x, y, S4(str).toUpperCase(), { size: 6.6, color: GREY5 });
+  doc.text(x, y, S5(str).toUpperCase(), { size: 6.6, color: GREY5 });
 }
 function val(doc, x, y, str, opt = {}) {
-  doc.text(x, y, S4(str), Object.assign({ size: 9.5, color: INK5 }, opt));
+  doc.text(x, y, S5(str), Object.assign({ size: 9.5, color: INK5 }, opt));
 }
 function wrap7(str, width, size) {
-  const words = S4(str).split(/\s+/);
+  const words = S5(str).split(/\s+/);
   const lines = [];
   let cur = "";
   for (const w of words) {
@@ -50102,15 +51057,15 @@ function buildCableCalcPdf(record, meta = {}) {
     }
   }
   doc.text(M7, 70, "Cable Calculation Report", { size: 17, bold: true, color: [1, 1, 1] });
-  doc.text(W7 - M7, 34, S4(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W7 - M7, 50, S4("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
-  doc.text(W7 - M7, 64, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(W7 - M7, 34, S5(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W7 - M7, 50, S5("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(W7 - M7, 64, S5("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
   const overall = record.incomplete ? "INCOMPLETE" : record.pass ? "COMPLIANT" : "NOT COMPLIANT";
   const oc = record.incomplete ? AMBER2 : record.pass ? GREEN4 : RED4;
   const pw = textWidth(overall, 9) + 22;
   doc.roundRect(M7, 108, pw, 20, 10, { fill: oc });
   doc.text(M7 + 11, 122, overall, { size: 9, bold: true, color: [1, 1, 1] });
-  doc.text(M7 + pw + 12, 122, S4(m.title || (inp.circuitRef ? "Circuit " + inp.circuitRef : "Single circuit")), { size: 10.5, bold: true, color: INK5 });
+  doc.text(M7 + pw + 12, 122, S5(m.title || (inp.circuitRef ? "Circuit " + inp.circuitRef : "Single circuit")), { size: 10.5, bold: true, color: INK5 });
   let y = 144;
   const colW = (CW3 - 14) / 2, cx2 = M7 + colW + 14;
   const cardH = 128;
@@ -50159,7 +51114,7 @@ function buildCableCalcPdf(record, meta = {}) {
   let fx = M7 + 12;
   facs.forEach((f) => {
     const t = f[0] + " " + (f[1] == null ? "\u2014" : f[1]);
-    doc.text(fx, y + 27, S4(t), { size: 9, color: INK5, bold: f[0] === "Product" });
+    doc.text(fx, y + 27, S5(t), { size: 9, color: INK5, bold: f[0] === "Product" });
     fx += textWidth(t, 9) + 26;
   });
   y += 34 + 16;
@@ -50187,9 +51142,9 @@ function buildCableCalcPdf(record, meta = {}) {
     const dotc = c.pass === true ? GREEN4 : c.pass === false ? RED4 : AMBER2;
     doc.roundRect(M7 + CW3 * 0.05 / 2 - 3.5, y + 1, 7, 7, 3.5, { fill: dotc });
     cxr += CW3 * 0.05;
-    doc.text(cxr, y + 8, S4(c.label), { size: 8.6, bold: true, color: INK5 });
+    doc.text(cxr, y + 8, S5(c.label), { size: 8.6, bold: true, color: INK5 });
     cxr += CW3 * 0.34;
-    doc.text(cxr, y + 8, S4(c.reg), { size: 8, color: GREY5 });
+    doc.text(cxr, y + 8, S5(c.reg), { size: 8, color: GREY5 });
     cxr += CW3 * 0.14;
     detailLines.forEach((ln, k) => doc.text(cxr, y + 8 + k * 10.5, ln, { size: 8.4, color: INK5 }));
     y += rh;
@@ -50211,8 +51166,8 @@ function buildCableCalcPdf(record, meta = {}) {
   figs.forEach((f, i) => {
     const col = i % perRow, row = Math.floor(i / perRow);
     const fxx = M7 + 12 + col * fw, fyy = y + 30 + row * 20;
-    doc.text(fxx, fyy, S4(f[0]), { size: 7.4, color: GREY5 });
-    doc.text(fxx + 62, fyy, S4((f[1] == null ? "\u2014" : f[1]) + (f[1] == null ? "" : " " + f[2])), { size: 8.6, bold: true, color: INK5 });
+    doc.text(fxx, fyy, S5(f[0]), { size: 7.4, color: GREY5 });
+    doc.text(fxx + 62, fyy, S5((f[1] == null ? "\u2014" : f[1]) + (f[1] == null ? "" : " " + f[2])), { size: 8.6, bold: true, color: INK5 });
   });
   y += 58 + 12;
   if ((record.warnings || []).length) {
@@ -50229,10 +51184,10 @@ function buildCableCalcPdf(record, meta = {}) {
   }
   card(doc, M7, y, CW3, 66);
   label(doc, M7 + 12, y + 15, "Declaration");
-  doc.text(M7 + 12, y + 30, S4("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK5 });
-  doc.text(M7 + 12, y + 44, S4("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK5 });
-  doc.text(W7 - M7 - 12, y + 30, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
-  doc.text(M7 + 12, y + 58, S4("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY5 });
+  doc.text(M7 + 12, y + 30, S5("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK5 });
+  doc.text(M7 + 12, y + 44, S5("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK5 });
+  doc.text(W7 - M7 - 12, y + 30, S5("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
+  doc.text(M7 + 12, y + 58, S5("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY5 });
   const total = doc.pages.length;
   for (let p = 0; p < total; p++) {
     doc.lineOn(p, M7, H4 - 30, W7 - M7, { grey: true });
@@ -50252,13 +51207,13 @@ init_logo();
 init_once();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY5 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables__raw8(env) {
+async function ensureTables__raw9(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
-var ensureTables10 = onceMigration(ensureTables__raw8);
+var ensureTables11 = onceMigration(ensureTables__raw9);
 async function getConfig6(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY5(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
@@ -50291,13 +51246,13 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/cablecalc(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables10(env);
+  await ensureTables11(env);
   const perms = await permissionsFor(env, tid, me);
   const canUse = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
@@ -50506,7 +51461,7 @@ var LINE_H = 10;
 var ROW_PAD = 4.5;
 var MAX_NAME_LINES = 5;
 var HDR_H = 22;
-var COLS3 = [
+var COLS4 = [
   // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
   { key: "contractor", label: "Contractor", w: 62 },
@@ -50514,15 +51469,15 @@ var COLS3 = [
   { key: "end", label: "End", w: 36 },
   { key: "days", label: "Days", w: 26 }
 ];
-var LEFT_W = COLS3.reduce((a, c) => a + c.w, 0);
+var LEFT_W = COLS4.reduce((a, c) => a + c.w, 0);
 var GRID_X = M8 + LEFT_W;
 var GRID_W = PW2 - M8 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
-  COLS3[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
-  LEFT_W = COLS3.reduce((a, c) => a + c.w, 0);
+  COLS4[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
+  LEFT_W = COLS4.reduce((a, c) => a + c.w, 0);
   GRID_X = M8 + LEFT_W;
   GRID_W = PW2 - M8 - GRID_X;
 }
@@ -50645,7 +51600,7 @@ function buildProgrammePdf(data, meta = {}) {
     _c: byC[t.contractor] || null
   }));
   for (const t of tasks) {
-    t._lines = wrapLines2(t.name || "", COLS3[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._lines = wrapLines2(t.name || "", COLS4[0].w - 6, 8.5, MAX_NAME_LINES);
     t._h = Math.max(ROW_H3, t._lines.length * LINE_H + ROW_PAD);
   }
   const hasExtra = tasks.some((t) => t.extra);
@@ -50783,7 +51738,7 @@ function buildProgrammePdf(data, meta = {}) {
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
       doc.rect(M8, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
       let cx = M8;
-      for (const col of COLS3) {
+      for (const col of COLS4) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
       }
@@ -50853,11 +51808,11 @@ function buildProgrammePdf(data, meta = {}) {
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
         (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M8 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M8 + COLS3[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M8 + COLS3[0].w + 12, ry + 10.5, fitText(t._c.name, COLS3[1].w - 16, 8), { size: 8 });
+          doc.rect(M8 + COLS4[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M8 + COLS4[0].w + 12, ry + 10.5, fitText(t._c.name, COLS4[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M8 + COLS3[0].w + COLS3[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M8 + COLS3[0].w + COLS3[1].w + COLS3[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        if (t._start) doc.text(M8 + COLS4[0].w + COLS4[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M8 + COLS4[0].w + COLS4[1].w + COLS4[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
         doc.text(M8 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
         doc.line(M8, ry + rh, M8 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
@@ -50958,7 +51913,7 @@ function buildProgrammePdf(data, meta = {}) {
 // src/routes/programmes.js
 init_once();
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables__raw9(env) {
+async function ensureTables__raw10(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -50987,7 +51942,7 @@ async function ensureTables__raw9(env) {
   } catch {
   }
 }
-var ensureTables11 = onceMigration(ensureTables__raw9);
+var ensureTables12 = onceMigration(ensureTables__raw10);
 async function bankHolidayDates(db) {
   const y = (/* @__PURE__ */ new Date()).getFullYear();
   const years = [y - 1, y, y + 1, y + 2];
@@ -51109,14 +52064,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle42(request, env, ctx, url) {
+async function handle43(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables11(env);
+  await ensureTables12(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -52001,13 +52956,13 @@ function buildValuationPdf(data, meta = {}) {
 // src/routes/valuations.js
 init_once();
 var MAX_DATA_BYTES2 = 400 * 1024;
-async function ensureTables__raw10(env) {
+async function ensureTables__raw11(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS valuations (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT,
     project_id TEXT, status TEXT DEFAULT 'live', data TEXT,
     created_by TEXT, created_at TEXT, updated_at TEXT, updated_by TEXT)`).run();
 }
-var ensureTables12 = onceMigration(ensureTables__raw10);
+var ensureTables13 = onceMigration(ensureTables__raw11);
 function newId3(prefix2) {
   return prefix2 + "-" + Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
 }
@@ -52132,14 +53087,14 @@ function computeValuation(data) {
     perCol
   };
 }
-async function handle43(request, env, ctx, url) {
+async function handle44(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables12(env);
+  await ensureTables13(env);
   const g = await gate(env, request);
   if (g.error) return json4({ ok: false, error: g.error }, g.code);
   const me = g.sess.user.username;
@@ -52402,7 +53357,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables__raw11(env) {
+async function ensureTables__raw12(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -52417,7 +53372,7 @@ async function ensureTables__raw11(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
-var ensureTables13 = onceMigration(ensureTables__raw11);
+var ensureTables14 = onceMigration(ensureTables__raw12);
 async function setProjFinValue(env, tid, costingKey, value, name) {
   return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
 }
@@ -52585,7 +53540,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle44(request, env, ctx, url, sess) {
+async function handle45(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -52609,7 +53564,7 @@ async function handle44(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables13(env);
+  await ensureTables14(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -53698,7 +54653,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle45(request, env, ctx, url, sess) {
+async function handle46(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -53962,7 +54917,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle46(request, env, ctx, url, sess) {
+async function handle47(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -54108,10 +55063,10 @@ async function handle46(request, env, ctx, url, sess) {
         const err = offline ? "The gate controller is offline \u2014 no internet or power right now, so it didn't get the command. Check its power and WiFi. The fob/keypad still work." : friendlyGateError(jr8.msg);
         return json4({ ok: false, error: err, offline, raw: jr8.msg || "" }, 502);
       }
-      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-      await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
-      await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });
-      if (wantOpen) await saveKV2(db, "tuya:lastopen", { user, at: nowIso });
+      const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
+      await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso2);
+      await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso2 });
+      if (wantOpen) await saveKV2(db, "tuya:lastopen", { user, at: nowIso2 });
       return json4({ ok: true, open: wantOpen, by: user, sent });
     } catch (e) {
       return json4({ ok: false, error: String(e && e.message || e) }, 502);
@@ -54123,9 +55078,9 @@ async function handle46(request, env, ctx, url, sess) {
     const open = !!b.open;
     const user = sess.user && sess.user.username || "?";
     const cfg = await loadCfg(db);
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-    await setGateState(db, open, user, cfg.gateDeviceId, nowIso);
-    await logGate(db, { user, action: open ? "mark-open" : "mark-closed", device: cfg.gateDeviceId, at: nowIso });
+    const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
+    await setGateState(db, open, user, cfg.gateDeviceId, nowIso2);
+    await logGate(db, { user, action: open ? "mark-open" : "mark-closed", device: cfg.gateDeviceId, at: nowIso2 });
     return json4({ ok: true, open });
   }
   if (path === "/tuya/gate/state" && method === "GET") {
@@ -54318,7 +55273,7 @@ async function orgSites(env, tid, org) {
   sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
   return sites;
 }
-async function handle47(request, env, ctx, url, sess) {
+async function handle48(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -54547,7 +55502,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY3(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle48(request, env, ctx, url, sess) {
+async function handle49(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -54736,7 +55691,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle49(request, env, ctx, url, sess) {
+async function handle50(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -54914,7 +55869,7 @@ async function handle49(request, env, ctx, url, sess) {
     if (!jobs.length) return json4({ ok: true, counts: {}, needPhotos: [], needDetail: [] });
     const map = await loadMap2(db);
     const userMap = await loadUserMap(db, tid);
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const nowIso2 = (/* @__PURE__ */ new Date()).toISOString();
     const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
     const liveByRef = {};
     for (const r of liveRows) {
@@ -54931,7 +55886,7 @@ async function handle49(request, env, ctx, url, sess) {
     }
     const counts = { updatedLive: 0, importedArchive: 0, updatedArchive: 0, skipped: 0, errors: 0 };
     const needPhotos = [], needDetail = [], logRows = [];
-    const addLog = (action, j, from, to, note, portalId) => logRows.push([tid, runId, nowIso, action, j.mos || "", leadRef(j.name), portalId || "", from || "", to || "", note || ""]);
+    const addLog = (action, j, from, to, note, portalId) => logRows.push([tid, runId, nowIso2, action, j.mos || "", leadRef(j.name), portalId || "", from || "", to || "", note || ""]);
     for (const j of jobs) {
       try {
         const mos = String(j.mos || "").trim();
@@ -54947,15 +55902,15 @@ async function handle49(request, env, ctx, url, sess) {
             } catch {
             }
             data2.status = m.portal;
-            data2.closedAt = data2.closedAt || nowIso;
+            data2.closedAt = data2.closedAt || nowIso2;
             if (!Array.isArray(data2.statusHistory)) data2.statusHistory = [];
-            data2.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync", src: "sync-pending" });
-            data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
+            data2.statusHistory.push({ status: m.portal, at: nowIso2, by: "Workever sync", src: "sync-pending" });
+            data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso2, runId };
             const engs = matchEngineers(userMap, j.assignedLabel);
             if (engs.length && !(Array.isArray(data2.assignedEngineers) && data2.assignedEngineers.filter(Boolean).length)) {
               data2.assignedEngineers = engs;
             }
-            await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso, nowIso, JSON.stringify(data2), tid, live.id).run();
+            await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso2, nowIso2, JSON.stringify(data2), tid, live.id).run();
             counts.updatedLive++;
             addLog("update-live", j, live.status, m.portal, j.name, live.id);
             needPhotos.push({ mos, uuid: j.uuid || "", target: "live", portalId: live.id });
@@ -54994,7 +55949,7 @@ async function handle49(request, env, ctx, url, sess) {
           customerName: j.customerName || "",
           address: j.address || {},
           workeverStatus: j.status || "",
-          syncedAt: nowIso,
+          syncedAt: nowIso2,
           runId,
           assignedEngineers: engsA,
           assignedLabel: j.assignedLabel || ""
@@ -55027,7 +55982,7 @@ async function handle49(request, env, ctx, url, sess) {
     const prev = await loadKV2(db, LASTRUN_KEY) || {};
     const acc = prev.runId === runId && prev.counts ? prev.counts : { updatedLive: 0, importedArchive: 0, updatedArchive: 0, skipped: 0, errors: 0 };
     for (const k of Object.keys(counts)) acc[k] = (acc[k] || 0) + counts[k];
-    await saveKV3(db, LASTRUN_KEY, { runId, startedAt: prev.runId === runId ? prev.startedAt : nowIso, updatedAt: nowIso, counts: acc });
+    await saveKV3(db, LASTRUN_KEY, { runId, startedAt: prev.runId === runId ? prev.startedAt : nowIso2, updatedAt: nowIso2, counts: acc });
     return json4({ ok: true, counts, needPhotos, needDetail });
   }
   return json4({ ok: false, error: "Not found: " + path }, 404);
@@ -55055,7 +56010,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle50(request, env, ctx, url, sess) {
+async function handle51(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -55195,7 +56150,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle16],
   ["*", "/upload-asset-thumb", handle16],
   ["*", "/delete-asset-image", handle16],
-  ["*", "/sla/workever", handle49],
+  ["*", "/sla/workever", handle50],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle12],
   ["*", "/stats", handle25],
@@ -55278,6 +56233,8 @@ var ROUTES = [
   // Outlook unreplied-email → portal task sync (status / manual run / config)
   ["*", "/fbc", handle19],
   // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
+  ["*", "/eicr", handle40],
+  // EICR tracker
   ["*", "/concerto", handle9],
   // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs", handle11],
@@ -55288,29 +56245,29 @@ var ROUTES = [
   // SiteLog timesheet PDFs (FullAccess)
   ["*", "/sitelog-map", handleMap],
   // where a phone was for a sign-in/out (signed link, public)
-  ["*", "/cablecalc", handle41],
+  ["*", "/cablecalc", handle42],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/cpd", handle40],
+  ["*", "/cpd", handle41],
   // CPD training (electricians): read material + test → logged per user for the NICEIC audit
-  ["*", "/prog", handle42],
+  ["*", "/prog", handle43],
   // job programmes (builder, revisions, client share links)
-  ["*", "/val", handle43],
+  ["*", "/val", handle44],
   // valuation sheets (line-item applications for payment)
-  ["*", "/projects", handle44],
+  ["*", "/projects", handle45],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle44],
+  ["*", "/project", handle45],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle45],
+  ["*", "/health/", handle46],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle50],
+  ["*", "/comms", handle51],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle50],
+  ["*", "/customer", handle51],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle46],
+  ["*", "/tuya", handle47],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/client", handle47],
+  ["*", "/client", handle48],
   // external client portal (walled per-org: jobs, raise, compliance)
-  ["*", "/fra", handle48]
+  ["*", "/fra", handle49]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.

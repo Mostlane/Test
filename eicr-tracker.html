@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>EICR Tracker</title>
+  <script src="/portal-config.js?v=51"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; --muted:#6b7a90; }
+    *{box-sizing:border-box;}
+    html{background:#eef1f4;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:transparent;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    header.page h1{font-size:18px;margin:0;flex:1;min-width:160px;}
+    .hbtn{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;}
+    .wrap{max-width:1240px;margin:12px auto 90px;padding:0 12px;}
+    .tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;-webkit-overflow-scrolling:touch;}
+    .tab{flex:0 0 auto;border:1px solid #ccd5dd;background:#fff;border-radius:999px;padding:8px 14px;font-size:14px;font-weight:700;color:#334;cursor:pointer;white-space:nowrap;}
+    .tab.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .tab .n{display:inline-block;min-width:20px;padding:1px 6px;margin-left:6px;border-radius:999px;background:#e2e8f0;color:#1f2937;font-size:12px;}
+    .tab .n.red{background:var(--bad);color:#fff;}
+    .tab.on .n{background:rgba(255,255,255,.25);color:#fff;} .tab.on .n.red{background:#fff;color:var(--bad);}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+    .toolbar input,.toolbar select{padding:8px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;background:#fff;}
+    .toolbar input{flex:1;min-width:180px;}
+    .sec{margin:16px 0 6px;display:flex;align-items:baseline;gap:8px;}
+    .sec h2{font-size:15px;margin:0;color:var(--brand);}
+    .sec .who{font-size:12px;color:var(--muted);}
+    .sec .cnt{font-size:12px;font-weight:800;background:#e2e8f0;border-radius:999px;padding:1px 8px;}
+    .tw{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);}
+    table{width:100%;border-collapse:collapse;font-size:13.5px;}
+    thead th{background:var(--brand);color:#fff;text-align:left;padding:8px 10px;font-size:12px;letter-spacing:.02em;white-space:nowrap;position:sticky;top:0;}
+    tbody td{padding:7px 10px;border-top:1px solid #edf1f5;vertical-align:middle;}
+    tbody tr.zeb td{background:#f7f9fc;}
+    tbody tr{cursor:pointer;} tbody tr:hover td{background:#eef4fb;}
+    td.code{font-weight:800;white-space:nowrap;} td.due{white-space:nowrap;}
+    .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap;background:#e2e8f0;color:#334;}
+    .pill.red{background:#ffd9d9;color:#8a0016;} .pill.amber{background:#fff1c9;color:#7a4a00;} .pill.green{background:#e3f6e8;color:#0a5c27;} .pill.blue{background:#dbeafe;color:#1e3a8a;} .pill.purple{background:#ede9fe;color:#5b21b6;}
+    .alert{font-size:12px;font-weight:700;margin-top:2px;} .alert.red{color:var(--bad);} .alert.amber{color:var(--warn);}
+    .sub{font-size:12px;color:var(--muted);}
+    .codes span{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:1px 5px;margin-right:3px;}
+    .c1{background:#b00020;color:#fff}.c2{background:#e8590c;color:#fff}.fi{background:#7c3aed;color:#fff}.c3{background:#e2e8f0;color:#334}.unc{background:#fde68a;color:#7a4a00}
+    .btn{border:0;border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:var(--brand);color:#fff;white-space:nowrap;}
+    .btn.g{background:var(--ok);} .btn.l{background:#e2e8f0;color:#0f172a;} .btn.r{background:var(--bad);}
+    .btn:disabled{opacity:.5;cursor:default;}
+    td.act{white-space:nowrap;text-align:right;}
+    .empty{padding:14px;color:var(--muted);font-size:13px;}
+    .flag{display:inline-block;font-size:11px;font-weight:700;background:#fff1c9;color:#7a4a00;border-radius:6px;padding:1px 6px;margin-top:2px;}
+    .mback{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:9000;overflow-y:auto;padding:30px 12px;}
+    .mback.on{display:flex;}
+    .mcard{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:16px 18px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+    .mcard h3{margin:0 0 4px;color:var(--brand);font-size:17px;}
+    .mcard label{display:block;font-size:12px;font-weight:700;color:#475569;margin:10px 0 3px;}
+    .mcard input,.mcard select,.mcard textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit;font-size:14px;}
+    .mcard textarea{min-height:70px;resize:vertical;}
+    .row2{display:flex;gap:10px;} .row2>div{flex:1;}
+    .mact{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap;}
+    .kv{display:grid;grid-template-columns:140px 1fr;gap:4px 10px;font-size:13.5px;margin:10px 0;}
+    .kv b{color:#475569;font-weight:700;}
+    .log{max-height:160px;overflow:auto;font-size:12px;color:#475569;border-top:1px solid var(--line);margin-top:10px;padding-top:6px;}
+    .remlist label{display:flex;gap:8px;align-items:flex-start;font-weight:400;font-size:13.5px;color:#1f2937;margin:4px 0;}
+    .remlist input{width:auto;margin-top:3px;}
+    pre.qt{white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;font-size:13px;max-height:320px;overflow:auto;}
+    .exgrid h2{font-size:15px;color:var(--brand);margin:18px 0 6px;}
+    .note{background:#eef4fb;border:1px solid #cfe0f2;color:#274b73;border-radius:12px;padding:10px 13px;margin-bottom:10px;font-size:13px;}
+    @media(max-width:700px){ td.hide-s,th.hide-s{display:none;} .kv{grid-template-columns:110px 1fr;} }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/main.html" title="Back">‹ Back</a>
+    <h1>⚡ EICR tracker</h1>
+    <a class="hbtn" href="/eicr-portal.html">📋 Compliance chart</a>
+    <a class="hbtn" href="/five-year-remedials.html" title="The previous 5-year pages">Old 5-year page</a>
+  </header>
+  <div class="wrap">
+    <div class="tabs" id="tabs"></div>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="Search store number or site…">
+      <select id="allFilter" style="display:none"></select>
+      <button class="btn l" id="reload">↻</button>
+    </div>
+    <div id="body"><div class="empty">Loading the EICR tracker…</div></div>
+  </div>
+
+  <div class="mback" id="mb"><div class="mcard" id="mc"></div></div>
+
+<script>
+const API = window.MOSTLANE_API;
+const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+const g = id => document.getElementById(id);
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+const toast = m => (window.MLUI ? MLUI.toast : alert)(m);
+async function confirmBox(msg, opts){ return window.MLUI ? MLUI.confirm(msg, opts||{}) : confirm(msg); }
+function fmtD(iso){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||"")); return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : ""; }
+function fmtDT(iso){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return fmtD(iso); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"2-digit"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); }
+const money = v => (v==null||v==="") ? "" : "£"+Number(v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+let D = null, TAB = "", Q = "", ALLF = "", EX = null, ENGLIST = null;
+const PILL = { due:"", booked:"blue", to_quote:"red", quoted:"amber", ordered:"red", works_booked:"blue", cert_update:"purple", cert_signoff:"purple", done:"green" };
+const SECTIONS = {
+  office: [
+    { key:"book", title:"📅 Book a test", who:"Due within 90 days or overdue — make the job", f:r=>r.status==="due" && r.due && daysTo(r.due) <= 90 },
+    { key:"booked", title:"🔌 Test booked", who:"With the engineer", f:r=>r.status==="booked" },
+    { key:"to_quote", title:"💬 Remedials to quote", who:"C1 / C2 / FI found — send the quote", f:r=>r.status==="to_quote" },
+    { key:"quoted", title:"⏳ Quoted — awaiting the client's order", who:"Chase if it sits", f:r=>r.status==="quoted" },
+    { key:"ordered", title:"📦 Order received — book the works", who:"Create the works job (test photos go with it)", f:r=>r.status==="ordered" },
+    { key:"works", title:"🔧 Remedial works booked", who:"With the engineer", f:r=>r.status==="works_booked" },
+  ],
+  signoff: [
+    { key:"cs", title:"✍️ Sign off the certificate", who:"Test done — C3 only or satisfactory", f:r=>r.status==="cert_signoff" },
+    { key:"cu", title:"✍️ Update the certificate", who:"Remedial works done — edit the original certificate", f:r=>r.status==="cert_update" },
+  ],
+  invoice: [
+    { key:"it", title:"🧾 Test to invoice", who:"", f:r=>r.invoices && r.invoices.test && !r.invoices.test.done },
+    { key:"iw", title:"🧾 Remedial works to invoice", who:"", f:r=>r.invoices && r.invoices.works && !r.invoices.works.done },
+  ],
+};
+function daysTo(iso){ return Math.round((Date.parse(iso+"T12:00:00Z") - Date.now())/86400000); }
+
+async function load(){
+  g("body").innerHTML = '<div class="empty">Loading the EICR tracker…</div>';
+  try {
+    const r = await authFetch("/eicr/board"); const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || r.status);
+    D = j;
+    if (!TAB) TAB = (new URLSearchParams(location.search).get("tab")) || "office";
+    const sel = g("allFilter");
+    sel.innerHTML = '<option value="">All statuses</option>' + D.statuses.map(s=>`<option value="${s.key}">${esc(s.label)}</option>`).join("");
+    sel.value = ALLF;
+    render();
+  } catch(e){ g("body").innerHTML = `<div class="empty">Couldn't load the tracker (${esc(e.message||e)}). <button class="btn l" onclick="load()">Try again</button></div>`; }
+}
+function matchQ(r){ if(!Q) return true; const q=Q.toLowerCase(); return (r.code+" "+r.name+" "+(r.order?r.order.number:"")).toLowerCase().includes(q); }
+function count(list){ return D.rows.filter(r => list.some(s=>s.f(r))).length; }
+function redCount(list){ return D.rows.filter(r => list.some(s=>s.f(r)) && r.alert==="red").length; }
+function renderTabs(){
+  const t = [
+    ["office","📋 To do (office)", count(SECTIONS.office), redCount(SECTIONS.office)],
+    ["signoff","✍️ Sign off", count(SECTIONS.signoff), redCount(SECTIONS.signoff)],
+    ["invoice","🧾 Invoicing", count(SECTIONS.invoice), 0],
+    ["all","🗂 All sites", D.rows.length, 0],
+    ["concerto","⚠ Concerto check", null, 0],
+  ];
+  g("tabs").innerHTML = t.map(([k,l,n,red]) => `<button class="tab${TAB===k?" on":""}" data-tab="${k}">${l}${n!=null?`<span class="n${red?" red":""}">${red?red+" late · ":""}${n}</span>`:""}</button>`).join("");
+  g("allFilter").style.display = TAB==="all" ? "" : "none";
+}
+function render(){
+  if (!D) return;
+  renderTabs();
+  if (TAB==="concerto") return renderConcerto();
+  const rows = D.rows.filter(matchQ);
+  let html = "";
+  if (TAB==="all") {
+    const list = rows.filter(r => !ALLF || r.status===ALLF);
+    html = `<div class="sec"><h2>Every Co-op site, in due order</h2><span class="cnt">${list.length}</span></div>` + table(list, "all");
+  } else {
+    if (TAB==="signoff" && !D.canSignOff) html += '<div class="note">Only Full Access users can sign off a certificate. You can still open and upload certificates here.</div>';
+    for (const s of SECTIONS[TAB]) {
+      const list = rows.filter(s.f).sort((a,b)=> (b.alert==="red")-(a.alert==="red") || String(a.due||"").localeCompare(String(b.due||"")));
+      html += `<div class="sec"><h2>${s.title}</h2><span class="cnt">${list.length}</span><span class="who">${esc(s.who)}</span></div>` + (list.length ? table(list, TAB) : '<div class="tw"><div class="empty">Nothing here. ✓</div></div>');
+    }
+  }
+  g("body").innerHTML = html;
+}
+function codesHtml(rm){
+  if (!rm || !rm.total) return "";
+  const b = (n,c,l)=> n ? `<span class="${c}">${n} ${l}</span>` : "";
+  return `<span class="codes">${b(rm.C1,"c1","C1")}${b(rm.C2,"c2","C2")}${b(rm.FI,"fi","FI")}${b(rm.C3,"c3","C3")}${b(rm.uncoded,"unc","no code")}</span>`;
+}
+function jobLine(j, label){
+  if (!j) return "";
+  const when = j.scheduledAt ? fmtD(j.scheduledAt) : "not booked in";
+  return `<div class="sub">${label}: ${esc((j.engineers||[]).join(", ")||"unassigned")} · ${esc(when)} · ${esc(j.status)}</div>`;
+}
+function statusCell(r){
+  return `<span class="pill ${PILL[r.status]||""}">${esc(r.statusLabel)}</span>`
+    + (r.daysInStatus!=null && r.status!=="due" ? `<div class="sub">${r.daysInStatus} working day${r.daysInStatus===1?"":"s"}${r.manual?" · set by hand":""}</div>` : "")
+    + (r.alert ? `<div class="alert ${r.alert}">${esc(r.alertText)}</div>` : "");
+}
+function actions(r, tab){
+  const b = [];
+  const a = (act, label, cls) => b.push(`<button class="btn ${cls||""}" data-act="${act}" data-code="${esc(r.code)}">${label}</button>`);
+  if (tab==="invoice") {
+    if (r.invoices.test && !r.invoices.test.done) a("inv-test","✓ Test invoiced","g");
+    if (r.invoices.works && !r.invoices.works.done) a("inv-works","✓ Works invoiced","g");
+    return b.join(" ");
+  }
+  switch (r.status) {
+    case "due": a("book","📅 Book test"); break;
+    case "to_quote": a("quote","📋 Quote text","l"); a("quote-sent","✓ Quote sent"); break;
+    case "quoted": a("order","📦 Order received"); break;
+    case "ordered": a("works","🔧 Create works job"); break;
+    case "cert_signoff": case "cert_update":
+      a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+  }
+  return b.join(" ");
+}
+function table(list, tab){
+  return `<div class="tw"><table><thead><tr><th>Store</th><th>Site</th><th>Due</th><th>Status</th><th class="hide-s">Details</th><th></th></tr></thead><tbody>`
+    + list.map((r,i) => `<tr class="${i%2?"zeb":""}" data-open="${esc(r.code)}">
+      <td class="code">${esc(r.code)}</td>
+      <td>${esc(r.name)}${r.flag?`<div class="flag">⚑ ${esc(r.flag)}</div>`:""}${!r.onChart?'<div class="flag">Not on the compliance chart</div>':""}</td>
+      <td class="due">${esc(fmtD(r.due))||'<span class="sub">no date</span>'}</td>
+      <td>${statusCell(r)}</td>
+      <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.quote&&r.quote.ref?`<div class="sub">Quote ${esc(r.quote.ref)}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
+      <td class="act">${actions(r, tab)}</td></tr>`).join("")
+    + `</tbody></table></div>`;
+}
+const rowBy = code => D.rows.find(r => r.code===code);
+
+// ── modals ────────────────────────────────────────────────────────────────
+function openModal(html){ g("mc").innerHTML = html; g("mb").classList.add("on"); }
+function closeModal(){ g("mb").classList.remove("on"); }
+g("mb").addEventListener("click", e => { if (e.target===g("mb") || e.target.closest("[data-close]")) closeModal(); });
+
+async function post(path, body){
+  const r = await authFetch(path, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP "+r.status));
+  return j;
+}
+async function loadEngList(){
+  if (ENGLIST) return ENGLIST;
+  try {
+    const d = await authFetch("/users").then(r=>r.json());
+    let list = (d.Users || []).filter(u => String(u.Status||"active").toLowerCase()==="active");
+    if (window.mlOrderUsers) list = window.mlOrderUsers(list);
+    ENGLIST = list.map(u => ({ u: u.Username, name: ((u.FirstName||"")+" "+(u.LastName||"")).trim() || u.Username, field: (u.StaffType||"field")!=="office" }));
+  } catch { ENGLIST = []; }
+  return ENGLIST;
+}
+async function engSelect(id){
+  const list = await loadEngList();
+  return `<select id="${id}"><option value="">— Unassigned —</option>${list.filter(e=>e.field).map(e=>`<option value="${esc(e.u)}">${esc(e.name)}</option>`).join("")}<optgroup label="Office">${list.filter(e=>!e.field).map(e=>`<option value="${esc(e.u)}">${esc(e.name)}</option>`).join("")}</optgroup></select>`;
+}
+function schedFrom(dateId, timeId, hoursId){
+  const d = g(dateId).value, t = g(timeId).value || "08:00", h = Number(g(hoursId).value)||0;
+  if (!d) return {};
+  const start = new Date(d+"T"+t+":00");
+  const out = { scheduledAt: start.toISOString() };
+  if (h) { out.scheduledEnd = new Date(start.getTime()+h*3600000).toISOString(); out.durationMinutes = Math.round(h*60); }
+  return out;
+}
+
+async function bookTest(r){
+  openModal(`<h3>📅 Book the EICR — ${esc(r.code)} ${esc(r.name)}</h3><div class="sub">Due ${esc(fmtD(r.due))||"—"}. Creates the electrical test job; the engineer sees it the evening before.</div>
+    <label>Engineer</label>${await engSelect("bkEng")}
+    <div class="row2"><div><label>Date</label><input type="date" id="bkDate"></div><div><label>Start</label><input type="time" id="bkTime" value="08:00"></div><div><label>Hours</label><input type="number" id="bkHrs" value="4" step="0.5" min="0"></div></div>
+    <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn" id="bkGo">Create test job</button></div><div class="sub" id="bkMsg"></div>`);
+  g("bkGo").onclick = async () => {
+    const eng = g("bkEng").value;
+    g("bkGo").disabled = true;
+    try { await post("/eicr/book", { code:r.code, engineers: eng?[eng]:[], ...schedFrom("bkDate","bkTime","bkHrs") }); closeModal(); toast("Test job created for "+r.code); load(); }
+    catch(e){ g("bkMsg").textContent = e.message; g("bkGo").disabled = false; }
+  };
+}
+async function quoteText(r){
+  openModal(`<h3>📋 Quote text — ${esc(r.code)} ${esc(r.name)}</h3>
+    <label style="display:flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" id="qC3" style="width:auto"> Include C3 items</label>
+    <pre class="qt" id="qTxt">Loading…</pre>
+    <div class="mact"><button class="btn l" data-close>Close</button><button class="btn" id="qCopy">📋 Copy</button></div>`);
+  const fill = async () => {
+    try { const j = await authFetch(`/eicr/quote-text?id=${encodeURIComponent(r.caseId)}&c3=${g("qC3").checked?1:0}`).then(x=>x.json()); g("qTxt").textContent = j.ok ? j.text : (j.error||"No remedials on file"); }
+    catch { g("qTxt").textContent = "Couldn't load."; }
+  };
+  g("qC3").onchange = fill; fill();
+  g("qCopy").onclick = async () => { try { await navigator.clipboard.writeText(g("qTxt").textContent); toast("Copied"); } catch { toast("Copy failed — select the text instead"); } };
+}
+async function quoteSent(r){
+  openModal(`<h3>✓ Quote sent — ${esc(r.code)} ${esc(r.name)}</h3>
+    <div class="row2"><div><label>Quote reference (optional)</label><input id="qsRef"></div>${D.money?`<div><label>Value £ ex VAT (optional)</label><input id="qsVal" type="number" step="0.01"></div>`:""}</div>
+    <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn" id="qsGo">Mark quote sent</button></div><div class="sub" id="qsMsg"></div>`);
+  g("qsGo").onclick = async () => {
+    try { await post("/eicr/quote-sent", { caseId:r.caseId, quoteRef:g("qsRef").value, quoteValue: g("qsVal")?g("qsVal").value:undefined }); closeModal(); load(); }
+    catch(e){ g("qsMsg").textContent = e.message; }
+  };
+}
+async function orderReceived(r){
+  openModal(`<h3>📦 Order received — ${esc(r.code)} ${esc(r.name)}</h3><div class="sub">Usually picked up automatically from the client's order email. Use this when it wasn't.</div>
+    <div class="row2"><div><label>Order number</label><input id="orNum" value="${esc(r.order?r.order.number:"")}"></div>${D.money?`<div><label>Order value £ ex VAT</label><input id="orVal" type="number" step="0.01" value="${r.order&&r.order.value!=null?r.order.value:""}"></div>`:""}</div>
+    <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn" id="orGo">Save</button></div><div class="sub" id="orMsg"></div>`);
+  g("orGo").onclick = async () => {
+    const n = g("orNum").value.trim(); if (!n) { g("orMsg").textContent = "Type the order number."; return; }
+    try { await post("/eicr/update", { caseId:r.caseId, code:r.code, orderNumber:n, orderValue: g("orVal")?g("orVal").value:undefined }); closeModal(); load(); }
+    catch(e){ g("orMsg").textContent = e.message; }
+  };
+}
+async function createWorks(r){
+  let rem = [];
+  try { const j = await authFetch(`/eicr/case?id=${encodeURIComponent(r.caseId)}`).then(x=>x.json()); rem = (j.remedials||[]); } catch {}
+  const list = rem.length
+    ? `<label>Which remedials go on the works job</label><div class="remlist">${rem.map(x=>`<label><input type="checkbox" class="wkItem" value="${esc(x.id)}"${x.code!=="C3"?" checked":""}> <span><b>${esc(x.code||"no code")}</b> ${esc(x.description)}${x.photos?` <span class="sub">📷 ${x.photos}</span>`:""}</span></label>`).join("")}</div>`
+    : `<label>No remedials recorded on a portal test job — type the works, one per line</label><textarea id="wkTyped" placeholder="e.g. Replace damaged socket in staff room"></textarea>`;
+  openModal(`<h3>🔧 Remedial works job — ${esc(r.code)} ${esc(r.name)}</h3><div class="sub">${r.order?"Order "+esc(r.order.number)+". ":""}A site-audit job: one checklist line per remedial, with the photos from the test.</div>
+    ${list}
+    <label>Engineer</label>${await engSelect("wkEng")}
+    <div class="row2"><div><label>Date</label><input type="date" id="wkDate"></div><div><label>Start</label><input type="time" id="wkTime" value="08:00"></div><div><label>Hours</label><input type="number" id="wkHrs" value="4" step="0.5" min="0"></div></div>
+    <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn" id="wkGo">Create works job</button></div><div class="sub" id="wkMsg"></div>`);
+  g("wkGo").onclick = async () => {
+    const body = { caseId:r.caseId, ...schedFrom("wkDate","wkTime","wkHrs") };
+    const eng = g("wkEng").value; body.engineers = eng ? [eng] : [];
+    if (rem.length) { body.itemIds = [...document.querySelectorAll(".wkItem:checked")].map(x=>x.value); if (!body.itemIds.length) { g("wkMsg").textContent = "Tick at least one remedial."; return; } }
+    else { body.items = g("wkTyped").value.split("\n").map(s=>s.trim()).filter(Boolean); if (!body.items.length) { g("wkMsg").textContent = "Type at least one line."; return; } }
+    g("wkGo").disabled = true;
+    try { const j = await post("/eicr/create-works", body); closeModal(); toast(j.existing ? "A works job already exists — linked." : "Works job created"); load(); }
+    catch(e){ g("wkMsg").textContent = e.message; g("wkGo").disabled = false; }
+  };
+}
+async function openCert(r){
+  try { const d = await authFetch("/compliance/file-url?scheme=coop&code="+encodeURIComponent(r.code)+"&type=fiveYear").then(x=>x.json()); if (d && d.url) window.open(d.url, "_blank"); else toast("No 5-year certificate is filed for "+r.code+" yet — upload it."); }
+  catch { toast("Couldn't open the certificate."); }
+}
+function uploadCert(r){
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,image/*";
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const form = new FormData(); form.append("file", f); form.append("code", r.code); form.append("type", "fiveYear"); form.append("filename", f.name);
+    // A test's certificate starts the new 5-year cycle (rolls the due date); an
+    // updated certificate after remedials is linked to it and doesn't.
+    if (r.status==="cert_update") { form.append("label", "Updated after remedials — "+f.name); form.append("link", "1"); }
+    else form.append("bump", "1");
+    try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); toast("Certificate filed for "+r.code); load(); }
+    catch(e){ toast("Upload failed: "+(e.message||e)); }
+  };
+  inp.click();
+}
+async function signOff(r){
+  const warn = r.certFiledSinceTest ? "" : "\n\nNo 5-year certificate has been filed on the chart since the test — upload it first if you haven't.";
+  const ok = await confirmBox((r.status==="cert_update"?"Updated certificate for ":"Certificate for ")+r.code+" "+r.name+" checked and signed off?"+warn, { title:"Sign off", okLabel:"✓ Sign off" });
+  if (!ok) return;
+  try { await post("/eicr/signoff", { caseId:r.caseId }); load(); } catch(e){ toast(e.message); }
+}
+async function invoice(r, which){
+  openModal(`<h3>🧾 ${which==="works"?"Remedial works":"Test"} invoiced — ${esc(r.code)} ${esc(r.name)}</h3>
+    <label>Invoice number (optional)</label><input id="invRef">
+    <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn g" id="invGo">Mark invoiced</button></div><div class="sub" id="invMsg"></div>`);
+  g("invGo").onclick = async () => {
+    try { await post("/eicr/invoice", { caseId:r.caseId, which, ref:g("invRef").value }); closeModal(); load(); }
+    catch(e){ g("invMsg").textContent = e.message; }
+  };
+}
+// Full detail + edit everything.
+async function openDetail(r){
+  const st = D.statuses.map(s=>`<option value="${s.key}"${s.key===r.status?" selected":""}>${esc(s.label)}</option>`).join("");
+  const inv = (x, which) => x ? (x.done ? `✓ ${fmtDT(x.at)} by ${esc(x.by||"")}${x.ref?" · "+esc(x.ref):""} <button class="btn l" data-undo="${which}">Undo</button>` : `<span class="sub">not yet</span>`) : '<span class="sub">not due yet</span>';
+  const link = (j, label) => j ? `<a href="/job-view.html?jobId=${encodeURIComponent(j.id)}" target="_blank">${esc(j.ref||label)}</a> · ${esc((j.engineers||[]).join(", ")||"unassigned")} · ${esc(j.scheduledAt?fmtD(j.scheduledAt):"not booked in")} · ${esc(j.status)}` : '<span class="sub">none</span>';
+  openModal(`<h3>${esc(r.code)} ${esc(r.name)}</h3><div class="sub">Certificate due ${esc(fmtD(r.due))||"—"}${r.concerto?` · Concerto: ${esc(fmtD(r.concerto.next))||"—"}${r.concerto.released?" (released "+esc(r.concerto.orderNr)+")":""}`:" · not on the Concerto list"}</div>
+    ${r.flag?`<div class="flag" style="margin-top:6px">⚑ ${esc(r.flag)}</div>`:""}
+    <div class="kv">
+      <b>Status</b><span>${statusCell(r)}</span>
+      <b>Test job</b><span>${link(r.test,"Test")}</span>
+      <b>Remedials</b><span>${codesHtml(r.remedials)||'<span class="sub">none recorded</span>'}</span>
+      <b>Works job</b><span>${link(r.works,"Works")}</span>
+      <b>Certificate</b><span>${r.certFiled?"last filed "+esc(fmtDT(r.certFiled)):"none filed"} <a href="#" data-cert="1">open</a>${r.certSigned?` · signed off ${esc(fmtDT(r.certSigned.at))} by ${esc(r.certSigned.by)}`:""}${r.certUpdated?` · update signed off ${esc(fmtDT(r.certUpdated.at))} by ${esc(r.certUpdated.by)}`:""}</span>
+      <b>Test invoice</b><span>${inv(r.invoices.test,"test")}</span>
+      <b>Works invoice</b><span>${inv(r.invoices.works,"works")}</span>
+    </div>
+    <label>Status (change it by hand if needed)</label><select id="dStatus">${st}</select>
+    <div class="row2"><div><label>Order number</label><input id="dOrder" value="${esc(r.order?r.order.number:"")}"></div>${D.money?`<div><label>Order value £</label><input id="dOrderVal" type="number" step="0.01" value="${r.order&&r.order.value!=null?r.order.value:""}"></div>`:""}</div>
+    <div class="row2"><div><label>Quote reference</label><input id="dQuote" value="${esc(r.quote?r.quote.ref:"")}"></div>${D.money?`<div><label>Quote value £</label><input id="dQuoteVal" type="number" step="0.01" value="${r.quote&&r.quote.value!=null?r.quote.value:""}"></div>`:""}</div>
+    <label>Notes</label><textarea id="dNote">${esc(r.note)}</textarea>
+    <div class="mact"><a class="btn l" href="/site-folder.html?site=${encodeURIComponent(r.code)}" target="_blank" style="text-decoration:none">🗂 Site folder</a><button class="btn l" data-close>Close</button><button class="btn" id="dSave">Save</button></div>
+    <div class="sub" id="dMsg"></div>
+    ${r.log && r.log.length ? `<div class="log">${r.log.map(l=>`<div>${esc(fmtDT(l.at))} · ${esc(l.by||"")} — ${esc(l.text)}</div>`).join("")}</div>` : ""}`);
+  g("mc").querySelector("[data-cert]").onclick = e => { e.preventDefault(); openCert(r); };
+  g("mc").querySelectorAll("[data-undo]").forEach(b => b.onclick = async () => { try { await post("/eicr/invoice", { caseId:r.caseId, which:b.dataset.undo, undo:true }); closeModal(); load(); } catch(e){ toast(e.message); } });
+  g("dSave").onclick = async () => {
+    const body = { caseId:r.caseId, code:r.code, note:g("dNote").value, quoteRef:g("dQuote").value };
+    if (g("dOrder").value.trim() !== (r.order?r.order.number:"")) body.orderNumber = g("dOrder").value.trim();
+    if (g("dOrderVal")) body.orderValue = g("dOrderVal").value;
+    if (g("dQuoteVal")) body.quoteValue = g("dQuoteVal").value;
+    try {
+      const j = await post("/eicr/update", body);
+      const ns = g("dStatus").value;
+      if (ns !== r.status) await post("/eicr/status", { caseId: j.caseId, code:r.code, status: ns });
+      closeModal(); toast("Saved"); load();
+    } catch(e){ g("dMsg").textContent = e.message; }
+  };
+}
+
+// ── Concerto check ───────────────────────────────────────────────────────
+async function renderConcerto(){
+  g("body").innerHTML = '<div class="empty">Checking the chart against Concerto…</div>';
+  try { if (!EX) { const r = await authFetch("/eicr/exceptions"); EX = await r.json(); if (!EX.ok) throw new Error(EX.error); } }
+  catch(e){ g("body").innerHTML = `<div class="empty">Couldn't load (${esc(e.message||e)}).</div>`; return; }
+  const q = (x) => !Q || (String(x.code||"")+" "+String(x.name||x.site||"")).toLowerCase().includes(Q.toLowerCase());
+  const tbl = (list, cols) => list.filter(q).length ? `<div class="tw"><table><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${list.filter(q).map((x,i)=>`<tr class="${i%2?"zeb":""}">${cols.map(c=>`<td>${c[1](x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : '<div class="tw"><div class="empty">None. ✓</div></div>';
+  const S = x => `<b>${esc(x.code)}</b>`;
+  g("body").innerHTML = `<div class="note">The compliance chart is the master list. These are the places Concerto disagrees with it, looking ahead to ${esc(fmtD(EX.horizon))}.</div>
+    <div class="exgrid">
+    <h2>Due on the portal but not on Concerto (${EX.dueOnPortalNotConcerto.length})</h2>
+    ${tbl(EX.dueOnPortalNotConcerto, [["Store",S],["Site",x=>esc(x.name)],["Due on portal",x=>esc(fmtD(x.due))],["Concerto",x=>x.concertoNext?esc(fmtD(x.concertoNext)):"—"],["Why",x=>esc(x.reason)]])}
+    <h2>Due on Concerto but not due on the portal (${EX.dueOnConcertoNotPortal.length})</h2>
+    ${tbl(EX.dueOnConcertoNotPortal, [["Store",S],["Site",x=>esc(x.name)],["Concerto due",x=>esc(fmtD(x.concertoNext))+(x.released?' <span class="pill amber">released '+esc(x.orderNr)+'</span>':"")],["Portal due",x=>x.due?esc(fmtD(x.due)):"no date"]])}
+    <h2>On Concerto but not on the compliance chart (${EX.notOnChart.length})</h2>
+    ${tbl(EX.notOnChart, [["Store",S],["Concerto due",x=>esc(fmtD(x.concertoNext))],["Released",x=>x.released?"yes":"—"]])}
+    <h2>On the chart with no 5-year date (${EX.noDate.length})</h2>
+    ${tbl(EX.noDate, [["Store",S],["Site",x=>esc(x.name)],["Concerto due",x=>x.concertoNext?esc(fmtD(x.concertoNext)):"—"]])}
+    ${EX.unmapped.length?`<h2>Concerto entries not matched to a store (${EX.unmapped.length})</h2>${tbl(EX.unmapped,[["Concerto ref",x=>esc(x.id)],["Site",x=>esc(x.site)],["Due",x=>esc(fmtD(x.next))]])}`:""}
+    </div>`;
+}
+
+// ── wiring ───────────────────────────────────────────────────────────────
+g("tabs").addEventListener("click", e => { const t = e.target.closest("[data-tab]"); if (!t) return; TAB = t.dataset.tab; history.replaceState(null,"","?tab="+TAB); render(); });
+g("q").addEventListener("input", e => { Q = e.target.value.trim(); render(); });
+g("allFilter").addEventListener("change", e => { ALLF = e.target.value; render(); });
+g("reload").addEventListener("click", () => { EX = null; load(); });
+g("body").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]");
+  if (b) {
+    e.stopPropagation();
+    const r = rowBy(b.dataset.code); if (!r) return;
+    ({ book:bookTest, quote:quoteText, "quote-sent":quoteSent, order:orderReceived, works:createWorks, cert:openCert, upload:uploadCert, signoff:signOff,
+       "inv-test":x=>invoice(x,"test"), "inv-works":x=>invoice(x,"works") })[b.dataset.act](r);
+    return;
+  }
+  if (e.target.closest("a")) return;
+  const tr = e.target.closest("[data-open]"); if (tr) { const r = rowBy(tr.dataset.open); if (r) openDetail(r); }
+});
+load();
+</script>
+</body>
+</html>
