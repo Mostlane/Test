@@ -499,6 +499,15 @@ function baseData(){ return allData.filter(e => viewMode === 'closed' ? e.active
    portal's own /compliance store (SharePoint certs migrated into R2). Drives the
    📄 links on each date cell. Column key → canonical compliance type. */
 let complianceIndex = {};
+/* A CLIENT login's tool switches (from GET /compliance/stores; null for staff).
+   The server enforces them too — this just hides what's switched off. */
+let CLIENT_TOOLS = null;
+function tool(k){ return !CLIENT_TOOLS || !!CLIENT_TOOLS[k]; }
+function applyClientTools(){
+  const hide = (id, k) => { const el = document.getElementById(id); if (el && !tool(k)) el.style.display = 'none'; };
+  hide('packBtn','wholePack'); hide('exportBtn','export'); hide('summaryBtn','summary');
+  hide('searchModalBtn','search'); hide('closedSitesBtn','closedSites');
+}
 let storeFiles = {};   // code -> { type: [ {url,current,date,filename}, … ] } (lazy-loaded)
 const CERT_TYPE = { fiveYear:'fiveYear', pat:'pat', em:'em', pv:'pv', ev:'ev', pump:'pump' };
 const TYPE_LABEL = { fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV/Forecourt', forecourt:'EV/Forecourt', pump:'Pump', other:'Other' };
@@ -1022,7 +1031,7 @@ function fmtDue(s){
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
   const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
-  const link = has ? ` <a class="cert-link" href="#" data-code="${esc(code)}" data-type="${t}" title="Open certificate">📄</a>` : '';
+  const link = (has && tool('viewCerts')) ? ` <a class="cert-link" href="#" data-code="${esc(code)}" data-type="${t}" title="Open certificate">📄</a>` : '';
   // EM cell: flag an outstanding remedial (a fitting failed on the last EM cert).
   let warn = '';
   if (t === 'em' && remedialFlags[pad4(code)]) {
@@ -1155,7 +1164,7 @@ function renderTable(d){
     // + anything ticked "include in pack") — is for everyone who can see the chart,
     // the client included. Closed stores aren't in the pack, so no 📦 there.
     const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${esc(e.storeCode)}" title="Upload / drop a document">📎</button> ` : '';
-    const packBtn = (nFiles && e.active !== 0 && viewMode !== 'closed')
+    const packBtn = (nFiles && e.active !== 0 && viewMode !== 'closed' && tool('sitePack'))
       ? `<button class="doc-btn pack" data-code="${esc(e.storeCode)}" title="Download this store's compliance pack (zip)">📦</button>` : '';
     const docsCell = upBtn
       + (nFiles && canEditCompliance() ? `<button class="doc-btn view" data-code="${esc(e.storeCode)}" title="View all documents">🗂 ${nFiles}</button> ` : '')
@@ -1378,6 +1387,8 @@ async function loadFromPortal(){
     // The server returns canComment (+ each row's comment) ONLY for Full Access
     // users and Tanya — so the column shows/hides itself from the server's word.
     canComment = !!j.canComment;
+    CLIENT_TOOLS = j.clientTools || null;
+    applyClientTools();
     document.body.classList.toggle('can-comment', canComment);
   }catch(e){
     console.error('loadFromPortal', e);

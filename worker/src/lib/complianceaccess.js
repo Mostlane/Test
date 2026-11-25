@@ -69,3 +69,25 @@ export function resolveComplianceAccess(profile, perms) {
   }
   return out;
 }
+
+// ── What a CLIENT login may use on its compliance chart ──────────────────────
+// Set per client in Users Admin (profile.clientTools). Editing is never on the
+// list — a client is hard-capped at view/download above. null = not a client.
+export const CLIENT_TOOLS = [
+  { key: "viewCerts",   label: "Open certificates (📄)",                 def: true  },
+  { key: "sitePack",    label: "Download a store's pack (📦)",           def: true  },
+  { key: "wholePack",   label: "Whole-estate compliance pack",          def: false },
+  { key: "export",      label: "Export the chart to Excel",             def: false },
+  { key: "summary",     label: "％ Summary",                             def: true  },
+  { key: "search",      label: "Search by date / type",                 def: true  },
+  { key: "closedSites", label: "See closed sites",                      def: false },
+  { key: "flags",       label: "See 🚩 unsatisfactory flags",            def: false },
+];
+export function resolveClientTools(profile) {
+  const p = parseProfile(profile);
+  if (p.staffType !== "client") return null;
+  const set = (p.clientTools && typeof p.clientTools === "object") ? p.clientTools : {};
+  const out = {};
+  for (const t of CLIENT_TOOLS) out[t.key] = set[t.key] == null ? t.def : !!set[t.key];
+  return out;
+}

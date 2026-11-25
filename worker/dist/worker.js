@@ -361,7 +361,15 @@ function resolveComplianceAccess(profile, perms) {
   }
   return out;
 }
-var COMPLIANCE_SCHEMES, COMPLIANCE_LEVELS, ORG_SCHEME;
+function resolveClientTools(profile) {
+  const p = parseProfile(profile);
+  if (p.staffType !== "client") return null;
+  const set = p.clientTools && typeof p.clientTools === "object" ? p.clientTools : {};
+  const out = {};
+  for (const t of CLIENT_TOOLS) out[t.key] = set[t.key] == null ? t.def : !!set[t.key];
+  return out;
+}
+var COMPLIANCE_SCHEMES, COMPLIANCE_LEVELS, ORG_SCHEME, CLIENT_TOOLS;
 var init_complianceaccess = __esm({
   "src/lib/complianceaccess.js"() {
     COMPLIANCE_SCHEMES = [
@@ -372,6 +380,16 @@ var init_complianceaccess = __esm({
     ];
     COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
     ORG_SCHEME = { fbc: "fareham", coop: "coop" };
+    CLIENT_TOOLS = [
+      { key: "viewCerts", label: "Open certificates (\u{1F4C4})", def: true },
+      { key: "sitePack", label: "Download a store's pack (\u{1F4E6})", def: true },
+      { key: "wholePack", label: "Whole-estate compliance pack", def: false },
+      { key: "export", label: "Export the chart to Excel", def: false },
+      { key: "summary", label: "\uFF05 Summary", def: true },
+      { key: "search", label: "Search by date / type", def: true },
+      { key: "closedSites", label: "See closed sites", def: false },
+      { key: "flags", label: "See \u{1F6A9} unsatisfactory flags", def: false }
+    ];
   }
 });
 
@@ -15412,6 +15430,15 @@ async function handle8(request, env, ctx, url, sess) {
   const scheme = schemeOf(q);
   const level = await complianceLevelFor(env, tid, me, scheme, viaToken);
   const canRead = viaToken || level !== "none";
+  let clientTools = null;
+  if (sess && !viaToken) {
+    try {
+      const urow = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
+      clientTools = resolveClientTools(urow ? urow.profile : null);
+    } catch {
+    }
+  }
+  const toolOff = (k) => !!clientTools && !clientTools[k];
   const canWrite = viaToken || level === "edit";
   await ensure2(env);
   let _canComment = null;
@@ -15449,6 +15476,8 @@ async function handle8(request, env, ctx, url, sess) {
     if (scheme !== "coop") return jr2({ error: "The compliance pack is for the Southern Co-op chart" }, headers, 400);
     const oneCode = q.get("code") ? pad4(q.get("code")) : "";
     if (!oneCode && !(viaToken || level === "download" || level === "edit")) return jr2({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
+    if (oneCode && toolOff("sitePack")) return jr2({ error: "Store packs aren't switched on for your login" }, headers, 403);
+    if (!oneCode && toolOff("wholePack")) return jr2({ error: "The whole-estate pack isn't switched on for your login" }, headers, 403);
     const { results: srows } = await env.DB.prepare(
       `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, s.site_name AS sname, s.postcode AS spost
          FROM compliance_stores cs
@@ -15486,6 +15515,7 @@ async function handle8(request, env, ctx, url, sess) {
   if (sub === "/files" && method === "GET") {
     const code = pad4(q.get("code"));
     if (!code) return jr2({ error: "code required" }, headers, 400);
+    if (toolOff("viewCerts")) return jr2({ error: "Opening certificates isn't switched on for your login" }, headers, 403);
     const byType = await listStoreFiles(env, url.origin, tid, scheme, code);
     const internal = viaToken || level === "edit";
     if (!internal) {
@@ -15549,6 +15579,7 @@ async function handle8(request, env, ctx, url, sess) {
     return jr2({ ok: true, site, sections }, headers);
   }
   if (sub === "/file-url" && method === "GET") {
+    if (toolOff("viewCerts")) return jr2({ error: "Opening certificates isn't switched on for your login" }, headers, 403);
     const code = pad4(q.get("code")), type = canonType(q.get("type"));
     const row = await env.DB.prepare(
       "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY pinned DESC, uploaded_at DESC, COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
@@ -15791,7 +15822,8 @@ async function handle8(request, env, ctx, url, sess) {
       if (canComment) out.comment = comments[pad4(r.code) || r.code] || "";
       return out;
     });
-    return jr2({ ok: true, stores, count: stores.length, canComment }, headers);
+    const shown = toolOff("closedSites") ? stores.filter((x) => x.active !== 0) : stores;
+    return jr2({ ok: true, stores: shown, count: shown.length, canComment, clientTools }, headers);
   }
   if (sub === "/stores/import" && method === "POST") {
     if (!canWrite) return jr2({ error: "Compliance access required" }, headers, 403);
@@ -15927,6 +15959,7 @@ async function handle8(request, env, ctx, url, sess) {
     return jr2({ ok: true, code, due, siteNumber: siteNo }, headers);
   }
   if (sub === "/unsat-flags" && method === "GET") {
+    if (toolOff("flags")) return jr2({ ok: true, codes: {} }, headers);
     const key = "compliance:unsat:" + scheme + ":" + tid;
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
     let codes = {};
