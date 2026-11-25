@@ -175,6 +175,7 @@
     .unsat-flag:hover{ opacity:.7; }
     .unsat-flag.on{ opacity:1; filter:none; }
     .unsat-flag[disabled]{ cursor:default; }
+    .flagsvg{ vertical-align:-0.15em; }
     .flagpick{ display:flex; flex-direction:column; gap:8px; margin:12px 0 4px; }
     .flagpick button{ text-align:left; border:2px solid #e2e8f0; background:#fff; border-radius:10px; padding:10px 12px; font-size:15px; cursor:pointer; }
     .flagpick button.cur{ border-color:#003366; font-weight:700; }
@@ -577,10 +578,14 @@ async function loadUnsatFlags(){
 // A flag's status: 'unsat' (red — unsatisfactory, nothing sent yet), 'quoted'
 // (amber — quote sent, awaiting the client's order) or 'ordered' (green — order
 // received, works to do). Legacy value 1 = 'unsat'. null = no flag.
+// A drawn flag (no emoji exists for a yellow or green flag), same shape for all three.
+function flagSvg(col){
+  return `<svg class="flagsvg" viewBox="0 0 16 16" width="1.05em" height="1.05em" aria-hidden="true"><path d="M3 1.2v14" stroke="#334155" stroke-width="1.6" stroke-linecap="round"/><path d="M3.8 2h9.4l-2.4 3.4 2.4 3.4H3.8z" fill="${col}" stroke="rgba(0,0,0,.35)" stroke-width=".6"/></svg>`;
+}
 const FLAG_INFO = {
-  unsat:   { icon:'🚩', label:'Unsatisfactory',                     short:'Unsatisfactory', cls:'red' },
-  quoted:  { icon:'📨', label:'Quote sent — awaiting order',        short:'Awaiting order', cls:'amber' },
-  ordered: { icon:'📦', label:'Order received — works to do',       short:'Order received', cls:'green' }
+  unsat:   { icon:flagSvg('#dc2626'), dot:'🟥', label:'Unsatisfactory',                short:'Unsatisfactory', cls:'red' },
+  quoted:  { icon:flagSvg('#facc15'), dot:'🟨', label:'Quote sent — awaiting order',   short:'Awaiting order', cls:'amber' },
+  ordered: { icon:flagSvg('#16a34a'), dot:'🟩', label:'Order received — works to do',  short:'Order received', cls:'green' }
 };
 function flagOf(code){
   const v = unsatFlags[pad4(code)];
@@ -1070,9 +1075,9 @@ function openFlagPicker(code){
     <div style="color:#475569;font-size:14px;">${esc(pad4(code))}${row ? ' — ' + esc(row.siteName || '') : ''}</div>
     ${fl && fl.at ? `<div style="color:#64748b;font-size:12.5px;margin-top:4px;">Set ${esc(fmtDue(fl.at.slice(0,10)))}${fl.by ? ' by ' + esc(fl.by) : ''}</div>` : ''}
     <div class="flagpick">
-      ${btn('unsat','🚩 Unsatisfactory — remedials to quote','fp-red')}
-      ${btn('quoted','📨 Quote sent — awaiting order','fp-amber')}
-      ${btn('ordered','📦 Order received — works to do','fp-green')}
+      ${btn('unsat',FLAG_INFO.unsat.icon+' Unsatisfactory — remedials to quote','fp-red')}
+      ${btn('quoted',FLAG_INFO.quoted.icon+' Quote sent — awaiting order','fp-amber')}
+      ${btn('ordered',FLAG_INFO.ordered.icon+' Order received — works to do','fp-green')}
       ${btn('','✕ Clear — back to the due date','')}
     </div>
     <div class="actions"><button class="btn" style="background:#ccc;color:#000;" data-x="1">Cancel</button></div>
@@ -1102,7 +1107,7 @@ function openFlagList(){
     const byCode = {}; (allData || []).forEach(e => { byCode[pad4(e.storeCode)] = e; });
     const rows = Object.keys(unsatFlags).map(c => ({ c, f: flagOf(c), e: byCode[c] })).filter(r => r.f && r.e);
     const n = { all: rows.length, unsat:0, quoted:0, ordered:0 }; rows.forEach(r => n[r.f.s]++);
-    modal.querySelector('.fl-chips').innerHTML = [['all','All'],['unsat','🚩 Unsatisfactory'],['quoted','📨 Awaiting order'],['ordered','📦 Order received']]
+    modal.querySelector('.fl-chips').innerHTML = [['all','All'],['unsat',FLAG_INFO.unsat.icon+' Unsatisfactory'],['quoted',FLAG_INFO.quoted.icon+' Awaiting order'],['ordered',FLAG_INFO.ordered.icon+' Order received']]
       .map(([k,l]) => `<button type="button" data-f="${k}" class="${filt===k?'on':''}">${l} (${n[k]})</button>`).join('');
     const order = { unsat:0, quoted:1, ordered:2 };
     const list = rows.filter(r => filt === 'all' || r.f.s === filt)
@@ -1110,7 +1115,7 @@ function openFlagList(){
     modal.querySelector('tbody').innerHTML = list.length ? list.map(r => {
       const fi = FLAG_INFO[r.f.s];
       const st = editable
-        ? `<select data-code="${esc(r.c)}">${Object.keys(FLAG_INFO).map(k => `<option value="${k}"${k===r.f.s?' selected':''}>${FLAG_INFO[k].icon} ${FLAG_INFO[k].short}</option>`).join('')}<option value="">✕ Clear flag</option></select>`
+        ? `<select data-code="${esc(r.c)}">${Object.keys(FLAG_INFO).map(k => `<option value="${k}"${k===r.f.s?' selected':''}>${FLAG_INFO[k].dot} ${FLAG_INFO[k].short}</option>`).join('')}<option value="">✕ Clear flag</option></select>`
         : `${fi.icon} ${esc(fi.short)}`;
       return `<tr class="fr-${fi.cls}"><td>${esc(r.c)}</td><td>${esc(r.e.siteName || '')}</td><td>${esc(fmtDue(r.e.fiveYear))}</td><td class="fs">${st}</td><td style="color:#64748b;font-size:12.5px;">${r.f.at ? esc(fmtDue(r.f.at.slice(0,10))) : ''}${r.f.by ? ' · ' + esc(r.f.by) : ''}</td></tr>`;
     }).join('') : `<tr><td colspan="5" style="padding:14px;color:#64748b;">Nothing here.</td></tr>`;
