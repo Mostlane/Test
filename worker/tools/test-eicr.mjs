@@ -181,9 +181,11 @@ ok("working days skip weekends", eicr.workingDaysSince("2026-11-20T10:00:00Z", "
     { status: "Scheduled", at: "2026-10-29T08:30:00Z" }, { status: "Complete", at: "2026-10-29T13:40:00Z" },
     { status: "Pending", at: "2026-11-09T11:46:00Z" }, { status: "Scheduled", at: "2026-11-12T16:26:00Z" },
     { status: "Complete", at: "2026-11-13T12:56:00Z" }, { status: "Jamie/Tanya", at: "2026-11-13T13:04:00Z" }] };
-  ok("reused test job detected", eicr.testReusedForWorks(j, dc) === "2026-11-13T12:56:00Z");
+  ok("reused test job detected", (eicr.testReusedForWorks(j, dc)||{}).at === "2026-11-13T12:56:00Z");
   ok("test date = first completion", eicr.testDoneAt(j, dc) === "2026-10-29T13:40:00Z");
   ok("plain test not reused", eicr.testReusedForWorks({ status: "Complete", statusHistory: [{ status: "In Progress" }, { status: "Complete" }] }, dc) === null);
+  ok("re-completed weeks later by another engineer (no reopen)", (eicr.testReusedForWorks({ status: "Jamie/Tanya", statusHistory: [{ status: "Complete", at: "2026-10-14T10:00:00Z", by: "Daniel" }, { status: "Compliance Complete", at: "2026-10-21T10:00:00Z" }, { status: "Complete", at: "2026-11-17T10:00:00Z", by: "Lionel" }] }, dc)||{}).by === "Lionel");
+  ok("quick re-complete (paperwork) not counted", eicr.testReusedForWorks({ status: "Complete", statusHistory: [{ status: "Complete", at: "2026-11-13T10:00:00Z" }, { status: "Scheduled", at: "2026-11-13T11:00:00Z" }, { status: "Complete", at: "2026-11-15T10:00:00Z" }] }, dc) === null);
   ok("re-opened but not finished again", eicr.testReusedForWorks({ status: "Scheduled", statusHistory: [{ status: "Complete" }, { status: "Scheduled" }] }, dc) === null);
   const d = eicr.deriveStatus({ test_job_id: "t", works_job_id: "w", outcome: "remedials", order_number: "R32814" },
     { jobs: new Map([["t", j], ["w", { status: "Pending" }]]), doneCats: dc });

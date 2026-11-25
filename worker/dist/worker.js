@@ -49519,17 +49519,17 @@ function testReusedForWorks(job, doneCats) {
     const s = String(e && e.status || "").toLowerCase();
     return FIN_BUILTIN.has(s) || !!(doneCats && doneCats.has(s));
   };
-  let phase = 0, doneAt = "";
+  let t0 = null, hit = null;
   for (const e of h) {
-    const s = String(e && e.status || "");
-    if (phase === 0 && fin(e)) phase = 1;
-    else if (phase === 1 && !fin(e) && !/cancel/i.test(s)) phase = 2;
-    else if (phase === 2 && fin(e)) {
-      phase = 3;
-      doneAt = e.at || "";
+    const ms = Date.parse(e && e.at || "");
+    if (!Number.isFinite(ms)) continue;
+    if (t0 == null) {
+      if (fin(e)) t0 = ms;
+      continue;
     }
+    if (String(e.status || "").toLowerCase() === "complete" && ms - t0 >= 5 * 864e5) hit = { at: e.at, by: e.by || "" };
   }
-  return phase === 3 ? doneAt || "yes" : null;
+  return hit;
 }
 var ORDER_RE = /\b(REM\d{3,}|R\d{4,})\b/i;
 function testOutcome(job) {
@@ -49784,6 +49784,10 @@ async function reconcile(env, tid, opts) {
       changed.add(c);
     }
     const nx = nextStatus(c, d.status);
+    if (nx === "cert_update" && c.status !== "cert_update" && t) {
+      const hit = testReusedForWorks(t, doneCats);
+      if (hit) logPush(c, "system", `Remedials done on the test job \u2014 completed again by ${hit.by || "the engineer"} on ${String(hit.at).slice(0, 10)} (check)`);
+    }
     if (nx !== c.status) {
       logPush(c, "system", `${S4[c.status] ? S4[c.status].label : c.status} \u2192 ${S4[nx].label}`);
       c.status = nx;
@@ -49847,7 +49851,7 @@ function shapeRow3(store, c, ctx, extra) {
   const conc = extra.concerto.get(store ? store.code : c && c.store_code);
   const cert = extra.certs.get(store ? store.code : c && c.store_code);
   const testDate = t ? String(testDoneAt(t, ctx.doneCats) || t.scheduledAt || "").slice(0, 10) : "";
-  const reused = t ? testReusedForWorks(t, ctx.doneCats) : null;
+  const reusedHit = t ? testReusedForWorks(t, ctx.doneCats) : null;
   return {
     code: store ? store.code : c.store_code,
     name: store && store.name || c && c.site_name || "",
@@ -49868,7 +49872,7 @@ function shapeRow3(store, c, ctx, extra) {
     outcome: c ? c.outcome || "" : "",
     test: jobView(t),
     works: jobView(w),
-    worksOnTestJob: reused ? String(reused).slice(0, 10) : null,
+    worksOnTestJob: reusedHit ? { date: String(reusedHit.at).slice(0, 10), by: reusedHit.by } : null,
     remedials: t ? remSummary(t) : null,
     quote: c && (c.quote_at || c.quote_ref) ? { ref: c.quote_ref || "", value: extra.money ? c.quote_value : void 0, at: c.quote_at } : null,
     order: c && c.order_number ? { number: c.order_number, value: extra.money ? c.order_value : void 0, at: c.order_at } : null,

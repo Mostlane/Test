@@ -104,21 +104,22 @@ export function testDoneAt(job, doneCats) {
   for (const e of h) { const s = String((e && e.status) || "").toLowerCase(); if (FIN_BUILTIN.has(s) || (doneCats && doneCats.has(s))) return e.at || ""; }
   return (job && (job.createdAt || job.scheduledAt)) || "";
 }
-// The office sometimes RE-OPENS the test job and sends the engineer back on it to
-// do the remedials (instead of using the separate works job). Spot that: the job
-// finished, was re-opened (a live status), and is finished again now.
+// The office sometimes sends an engineer back on the TEST job itself to do the
+// remedials (instead of the separate works job) — re-opened or simply re-assigned,
+// and the engineer taps Complete again. Spot that: a "Complete" at least 5 days
+// after the test was first finished. Returns {at, by} or null.
 export function testReusedForWorks(job, doneCats) {
   if (!job || !jobFinished(job, doneCats)) return null;
   const h = Array.isArray(job.statusHistory) ? job.statusHistory : [];
   const fin = e => { const s = String((e && e.status) || "").toLowerCase(); return FIN_BUILTIN.has(s) || !!(doneCats && doneCats.has(s)); };
-  let phase = 0, doneAt = "";
+  let t0 = null, hit = null;
   for (const e of h) {
-    const s = String((e && e.status) || "");
-    if (phase === 0 && fin(e)) phase = 1;
-    else if (phase === 1 && !fin(e) && !/cancel/i.test(s)) phase = 2;
-    else if (phase === 2 && fin(e)) { phase = 3; doneAt = e.at || ""; }
+    const ms = Date.parse((e && e.at) || "");
+    if (!Number.isFinite(ms)) continue;
+    if (t0 == null) { if (fin(e)) t0 = ms; continue; }
+    if (String(e.status || "").toLowerCase() === "complete" && ms - t0 >= 5 * 86400000) hit = { at: e.at, by: e.by || "" };
   }
-  return phase === 3 ? (doneAt || "yes") : null;
+  return hit;
 }
 const ORDER_RE = /\b(REM\d{3,}|R\d{4,})\b/i;
 // Remedials found on the test: "remedials" when any C1/C2/FI — or an UNCODED
@@ -341,6 +342,10 @@ async function reconcile(env, tid, opts) {
     const d = deriveStatus(c, ctx);
     if (d.outcome && !c.outcome) { c.outcome = d.outcome; changed.add(c); }
     const nx = nextStatus(c, d.status);
+    if (nx === "cert_update" && c.status !== "cert_update" && t) {
+      const hit = testReusedForWorks(t, doneCats);
+      if (hit) logPush(c, "system", `Remedials done on the test job — completed again by ${hit.by || "the engineer"} on ${String(hit.at).slice(0, 10)} (check)`);
+    }
     if (nx !== c.status) {
       logPush(c, "system", `${S[c.status] ? S[c.status].label : c.status} → ${S[nx].label}`);
       c.status = nx; c.status_at = nowIso(); c.status_by = "system"; c.status_manual = 0; changed.add(c);
@@ -382,7 +387,7 @@ function shapeRow(store, c, ctx, extra) {
   const conc = extra.concerto.get(store ? store.code : (c && c.store_code));
   const cert = extra.certs.get(store ? store.code : (c && c.store_code));
   const testDate = t ? String(testDoneAt(t, ctx.doneCats) || t.scheduledAt || "").slice(0, 10) : "";
-  const reused = t ? testReusedForWorks(t, ctx.doneCats) : null;
+  const reusedHit = t ? testReusedForWorks(t, ctx.doneCats) : null;
   return {
     code: store ? store.code : c.store_code,
     name: (store && store.name) || (c && c.site_name) || "",
@@ -394,7 +399,7 @@ function shapeRow(store, c, ctx, extra) {
     alert, alertText,
     outcome: c ? c.outcome || "" : "",
     test: jobView(t), works: jobView(w),
-    worksOnTestJob: reused ? String(reused).slice(0, 10) : null,
+    worksOnTestJob: reusedHit ? { date: String(reusedHit.at).slice(0, 10), by: reusedHit.by } : null,
     remedials: t ? remSummary(t) : null,
     quote: c && (c.quote_at || c.quote_ref) ? { ref: c.quote_ref || "", value: extra.money ? c.quote_value : undefined, at: c.quote_at } : null,
     order: c && c.order_number ? { number: c.order_number, value: extra.money ? c.order_value : undefined, at: c.order_at } : null,
