@@ -236,6 +236,8 @@ export async function handle(request, env, ctx, url, sess) {
 
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
+  // Display name for an office-logged record's "Recorded by" sign-off.
+  const recorderName = [sess.user.first_name, sess.user.last_name].filter(Boolean).join(" ").trim() || me;
   const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
   const q = url.searchParams;
   await ensureTables(env);
@@ -281,6 +283,100 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/stores" && method === "GET") {
     const cfg = await getConfig(env, tid);
     return json({ ok: true, stores: (cfg.stores || []).map(s => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
+  }
+
+  // ── monthly office tool: pump sites + chart due date + last record/photos ──
+  // Powers pump-monthly.html (compliance → 🚰 Pump maintenance): one call gives
+  // every pump store with its pump due date (from the coop chart) and its most
+  // recent record (date + photos, so "use last month's photos" can offer them).
+  if (sub === "/monthly" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const cfg = await getConfig(env, tid);
+    const dueMap = {};
+    try {
+      const { results } = await env.DB.prepare("SELECT code, json_extract(due,'$.pump') AS pump FROM compliance_stores WHERE tenant_id=? AND scheme='coop'").bind(tid).all();
+      for (const r of (results || [])) { const n = String(Number(String(r.code || "").replace(/\D/g, "") || "0")); if (r.pump) dueMap[n] = r.pump; }
+    } catch {}
+    const lastByStore = {};
+    try {
+      const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? ORDER BY updated_at DESC").bind(tid).all();
+      for (const row of (results || [])) { if (row.store && !lastByStore[row.store]) lastByStore[row.store] = row; }
+    } catch {}
+    const stores = [];
+    for (const s of (cfg.stores || [])) {
+      let last = lastByStore[s.id] ? shapeRow(lastByStore[s.id]) : null;
+      if (last) await resignMedia(env, url.origin, last);
+      const numeric = s.siteCode ? String(Number(String(s.siteCode).replace(/\D/g, "") || "0")) : "";
+      const photos = last ? (last.media || []).filter(m => m && m.kind !== "video") : [];
+      stores.push({
+        id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "",
+        address: s.address || "", postcode: s.postcode || "", instructions: s.instructions || "",
+        pumpDue: dueMap[numeric] || "",
+        last: last ? { id: last.id, date: last.date || (last.updatedAt || "").slice(0, 10), status: last.status,
+          photos: photos.map(m => ({ key: m.key, name: m.name, url: m.url })), photoN: photos.length } : null,
+      });
+    }
+    return json({ ok: true, stores, recordedBy: recorderName }, {}, env, request);
+  }
+
+  // ── monthly office tool: create a draft with every check auto-passed ──
+  // The office logs the month from photos; the checklist is marked all "Yes",
+  // the declaration confirmed, and it's signed off in the user's name (office
+  // record — no on-site signatures). Client then uploads photos (/media and/or
+  // /media-copy) and /finalise files it to the chart.
+  if (sub === "/office-create" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const cfg = await getConfig(env, tid);
+    const store = storeById(cfg, String(b.store || ""));
+    if (!store) return error("Unknown pump store", 400, env, request);
+    const data = {
+      storeName: store.name, instructions: store.instructions || "", declaration: cfg.declaration || "",
+      safety: (cfg.safety || []).map(s => ({ id: s.id, label: s.label, answer: "yes" })),
+      checks: (store.checks || []).map(c => ({ label: c, answer: "yes" })),
+      detailsNo: String(b.note || "").slice(0, 4000),
+      declarationAgreed: "yes",
+      date: (String(b.date || "").slice(0, 20)) || new Date().toISOString().slice(0, 10),
+      engineerName: "", dmName: "", engSig: "", dmSig: "",
+      officeRecord: true, recordedBy: recorderName, media: [],
+    };
+    const now = new Date().toISOString();
+    const id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .bind(tid, id, "", store.id, store.siteCode || "", "draft", JSON.stringify(data), me, now, now).run();
+    return json({ ok: true, record: shapeRow(await loadRec(id)) }, {}, env, request);
+  }
+
+  // ── copy a previous record's photos into a draft ("use last month's photos") ──
+  if (sub === "/media-copy" && method === "POST") {
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || ""), fromId = String(b.fromId || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (rec.status === "final") return error("Record finalised", 409, env, request);
+    if (!(await canWrite(rec))) return error("Not allowed", 403, env, request);
+    const src = await loadRec(fromId);
+    if (!src) return error("Source record not found", 404, env, request);
+    const srcMedia = (shapeRow(src).media || []).filter(m => m && m.key && m.kind !== "video");
+    if (!srcMedia.length) return error("No photos on that record", 400, env, request);
+    const d = shapeRow(rec); const media = Array.isArray(d.media) ? d.media : [];
+    let copied = 0;
+    for (const m of srcMedia) {
+      try {
+        const o = await env.JOB_FILES.get(m.key); if (!o) continue;
+        const buf = new Uint8Array(await o.arrayBuffer());
+        const ext = (String(m.key).match(/\.([a-z0-9]{2,5})$/i) || [, "jpg"])[1].toLowerCase();
+        const key = `pump/${tid}/${id}/photo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: (o.httpMetadata && o.httpMetadata.contentType) || "image/jpeg" } });
+        media.push({ key, kind: "photo", name: (m.name || "photo") });
+        copied++;
+      } catch {}
+    }
+    const data = { ...d }; delete data.id; delete data.jobId; delete data.store; delete data.siteCode; delete data.status; delete data.engineer; delete data.createdAt; delete data.updatedAt; data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), new Date().toISOString(), tid, id).run();
+    const out = shapeRow(await loadRec(id)); await resignMedia(env, url.origin, out);
+    return json({ ok: true, copied, record: out }, {}, env, request);
   }
 
   // ── load / seed a job's record ──
