@@ -4060,7 +4060,7 @@ five-year-remedials.html stays reachable via "Old 5-year page").
   in the browser (eicr-engine.js readPdf) and pre-fills a confirm box with the LATEST date that is NOT in the future
   (a cert also prints its next-inspection date); a test cert needs a date (bump → due + 5 years), an updated cert
   after remedials is filed linked with no bump.
-- **⏳ Awaiting order tab (25 Nov 2026):** every case at `quoted`, oldest quote first (quote date = `quote.at`, else `statusAt`), days waiting amber >14 / red >28, quote ref + £ (money users), 📦 Order received button; plus a "Still to quote" list (`to_quote`). Deep-link `eicr-tracker.html?tab=awaiting`.
+- **⏳ Awaiting order tab (25 Nov 2026):** a "Test certificate" column on both lists (✓ Filed + 📄 View, else ⬆ Upload cert — the unsatisfactory test cert is filed with bump so the test can be invoiced while remedials are quoted); every case at `quoted`, oldest quote first (quote date = `quote.at`, else `statusAt`), days waiting amber >14 / red >28, quote ref + £ (money users), 📦 Order received button; plus a "Still to quote" list (`to_quote`). Deep-link `eicr-tracker.html?tab=awaiting`.
 - **📝 Paste text (25 Nov 2026):** header button on eicr-tracker.html → a modal of standard certificate lines, each with 📋 Copy; ⠿ drag to reorder; ✏️ Edit lines (edit · ↑ ↓ · ✕) + add a line. Per user in `/prefs` `eicrPasteLines` (+ localStorage mirror); seeded with Jamie's four lines. Front-end only.
 - Test `node --no-warnings worker/tools/test-eicr.mjs` (55). portal-config `?v=51`, SW `mostlane-v155`.
 - **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
