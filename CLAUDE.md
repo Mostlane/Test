@@ -6784,6 +6784,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `/stores` says `canComment` — Full Access + Tanya) lists every row with a comment: search, edit in place
   (saves on blur via /compliance/store-comment), **✓ Done** = clears the comment (no history kept), ↗ jumps
   to and highlights the row. Front-end only.
+  **🔧 Remedial works required marker (25 Nov 2026):** a spanner inside the Store Code cell of each row on
+  eicr-portal.html — faint for edit users (tap to mark), amber badge when marked (tap to clear); view users only
+  see it when marked. Independent of the 5-year flag. Map `{code:{at,by}}` in app_config
+  `compliance:works:<scheme>:<tid>`; GET /compliance/works-flags (hidden from clients unless their `flags` tool
+  is on), POST /compliance/works-flag `{code,on}` (edit). Tools → "🔧 Remedial works required" lists them with
+  the 5-year flag status, ✓ Works done (clears) and ↗ (jump to the row). NB saveEditInstant now reads the code
+  from `tr.dataset.code` because the cell holds the button.
   **Compliance chart 🚩 unsatisfactory flags (fixed 18 Nov 2026):** the flags
   (eicr-portal.html 5-Year cell, stored as one map in app_config
   `compliance:unsat:<scheme>:<tid>`) SAVED fine but never showed after a refresh —

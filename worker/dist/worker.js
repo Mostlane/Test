@@ -15455,7 +15455,7 @@ async function handle8(request, env, ctx, url, sess) {
     }
     return _canComment;
   };
-  const SCHEME_READS = /* @__PURE__ */ new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
+  const SCHEME_READS = /* @__PURE__ */ new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags", "/works-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr2({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -15963,6 +15963,33 @@ async function handle8(request, env, ctx, url, sess) {
       }
     }
     return jr2({ ok: true, code, due, siteNumber: siteNo }, headers);
+  }
+  if (sub === "/works-flags" && method === "GET") {
+    if (toolOff("flags")) return jr2({ ok: true, codes: {} }, headers);
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "compliance:works:" + scheme + ":" + tid).first();
+    let codes = {};
+    try {
+      codes = JSON.parse(row && row.value || "{}") || {};
+    } catch {
+    }
+    return jr2({ ok: true, codes }, headers);
+  }
+  if (sub === "/works-flag" && method === "POST") {
+    if (!canWrite) return jr2({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr2({ error: "code required" }, headers, 400);
+    const key = "compliance:works:" + scheme + ":" + tid;
+    const path = '$."' + code + '"';
+    const val2 = JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), by: me });
+    if (b.on) {
+      await env.DB.prepare(
+        "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, json(?))) ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, json(?))"
+      ).bind(tid, key, code, val2, path, val2).run();
+    } else {
+      await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
+    }
+    return jr2({ ok: true, code, on: !!b.on }, headers);
   }
   if (sub === "/unsat-flags" && method === "GET") {
     if (toolOff("flags")) return jr2({ ok: true, codes: {} }, headers);
