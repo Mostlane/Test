@@ -1042,22 +1042,28 @@ export async function handle(request, env, ctx, url, sess) {
     // read-then-write of the whole map could. Falls back to read-then-write only
     // if the stored value isn't valid JSON.
     const path = '$."' + code + '"';
+    // Status of the flag (Jamie, 25 Nov 2026): unsat (red) → quoted = quote sent,
+    // awaiting the client's order (amber) → ordered = order received, works to do
+    // (green). Stored as {s, at, by}; a legacy value of 1 reads as "unsat".
+    const FLAG_STATES = ["unsat", "quoted", "ordered"];
+    const st = FLAG_STATES.includes(b.status) ? b.status : "unsat";
+    const val = JSON.stringify({ s: st, at: new Date().toISOString(), by: me });
     try {
       if (b.on) {
         await env.DB.prepare(
-          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, 1)) " +
-          "ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, 1)"
-        ).bind(tid, key, code, path).run();
+          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, json(?))) " +
+          "ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, json(?))"
+        ).bind(tid, key, code, val, path, val).run();
       } else {
         await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
       }
     } catch {
       const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
       let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}
-      if (b.on) codes[code] = 1; else delete codes[code];
+      if (b.on) codes[code] = JSON.parse(val); else delete codes[code];
       await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
     }
-    return jr({ ok: true, code, on: !!b.on }, headers);
+    return jr({ ok: true, code, on: !!b.on, status: b.on ? st : null }, headers);
   }
 
   // ── Free-text COMMENT per store (RESTRICTED: Full Access + Tanya only) ────────

@@ -6772,6 +6772,14 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   61 EM cert jobs. Now only a plain done flag/result is shared and each request
   runs the migration itself until one completes. Same fix for the timesheets
   `PO_PROBE`. Module-level caches must hold VALUES, never promises.
+  **5-year flag STATUSES (25 Nov 2026, Jamie):** the 🚩 on a 5-Year cell is now a 3-state flag, stored
+  `{s, at, by}` in the same `compliance:unsat:<scheme>:<tid>` map (legacy `1` = unsat): **🚩 unsat** (red —
+  remedials to quote) · **📨 quoted** (amber — quote sent, awaiting the client's order) · **📦 ordered** (green —
+  order received, works to do). POST /compliance/unsat-flag `{code,on,status}`. Tapping the icon (edit users)
+  opens a picker; Tools → **🚩 Unsatisfactory EICRs** lists every flagged store with status chips + an inline
+  status select. `typeStatus()` applies the flag for fiveYear, so the Status light/filters/summary/export
+  follow the flag colour, not the date. Hidden from client logins unless their `flags` tool is on. Test cases
+  in test-compliance-links.mjs.
   **Compliance chart 🚩 unsatisfactory flags (fixed 18 Nov 2026):** the flags
   (eicr-portal.html 5-Year cell, stored as one map in app_config
   `compliance:unsat:<scheme>:<tid>`) SAVED fine but never showed after a refresh —

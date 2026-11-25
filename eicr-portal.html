@@ -175,6 +175,18 @@
     .unsat-flag:hover{ opacity:.7; }
     .unsat-flag.on{ opacity:1; filter:none; }
     .unsat-flag[disabled]{ cursor:default; }
+    .flagpick{ display:flex; flex-direction:column; gap:8px; margin:12px 0 4px; }
+    .flagpick button{ text-align:left; border:2px solid #e2e8f0; background:#fff; border-radius:10px; padding:10px 12px; font-size:15px; cursor:pointer; }
+    .flagpick button.cur{ border-color:#003366; font-weight:700; }
+    .flagpick .fp-red{ background:#ffd9d9; } .flagpick .fp-amber{ background:#fff1c9; } .flagpick .fp-green{ background:#e3f6e8; }
+    .fl-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+    .fl-chips button{ border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:6px 12px; cursor:pointer; font-size:13.5px; }
+    .fl-chips button.on{ background:#003366; color:#fff; border-color:#003366; }
+    .fl-table{ width:100%; border-collapse:collapse; font-size:14px; }
+    .fl-table th{ background:#003366; color:#fff; text-align:left; padding:7px 8px; position:sticky; top:0; }
+    .fl-table td{ padding:6px 8px; border-bottom:1px solid #e5e7eb; vertical-align:middle; }
+    .fl-table tr.fr-red td.fs{ background:#ffd9d9; } .fl-table tr.fr-amber td.fs{ background:#fff1c9; } .fl-table tr.fr-green td.fs{ background:#e3f6e8; }
+    .fl-table select{ padding:4px 6px; border-radius:7px; border:1px solid #cbd5e1; font-size:13.5px; }
     /* Document rows inside the Documents modal. */
     .doc-row{ display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #eef2f7; flex-wrap:wrap; }
     .doc-row:last-child{ border-bottom:0; }
@@ -301,6 +313,7 @@
         <div class="toolmenu" id="toolsMenu" hidden>
           <button class="bubble" id="searchModalBtn">🔎 Search by date / type</button>
           <button class="bubble" id="summaryBtn">％ Summary</button>
+          <button class="bubble" id="flagListBtn" onclick="openFlagList()" title="Every site flagged unsatisfactory, awaiting order or order received">🚩 Unsatisfactory EICRs</button>
           <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
           <button class="bubble" id="packBtn" onclick="location.href='compliance-pack.html'" title="Folder pack of the latest certificate per store for the client, plus a tracker spreadsheet">📦 Client compliance pack</button>
           <button class="bubble" id="reviewBtn" onclick="location.href='compliance-review.html'" title="Verify all stored 5-year certificates">🔍 Run compliance checks</button>
@@ -460,6 +473,9 @@ function typeSettings(type){
    or 'red', from that type's own warning windows. Red = due within redDays (or
    overdue); amber = due within amberDays; green = further off. */
 function typeStatus(e, type){
+  // A manual 5-year flag (🚩 red / 📨 amber / 📦 green) beats the date — here, so
+  // the Status light, filters, summary and export all agree with the cell.
+  if (type === 'fiveYear' && e && e.storeCode != null) { const fl = flagOf(e.storeCode); if (fl) return FLAG_INFO[fl.s].cls; }
   const d = parseDate(e[type]);
   if (!d) return '';
   const cfg = typeSettings(type);
@@ -506,7 +522,7 @@ function tool(k){ return !CLIENT_TOOLS || !!CLIENT_TOOLS[k]; }
 function applyClientTools(){
   const hide = (id, k) => { const el = document.getElementById(id); if (el && !tool(k)) el.style.display = 'none'; };
   hide('packBtn','wholePack'); hide('exportBtn','export'); hide('summaryBtn','summary');
-  hide('searchModalBtn','search'); hide('closedSitesBtn','closedSites');
+  hide('searchModalBtn','search'); hide('closedSitesBtn','closedSites'); hide('flagListBtn','flags');
 }
 let storeFiles = {};   // code -> { type: [ {url,current,date,filename}, … ] } (lazy-loaded)
 const CERT_TYPE = { fiveYear:'fiveYear', pat:'pat', em:'em', pv:'pv', ev:'ev', pump:'pump' };
@@ -558,19 +574,35 @@ async function loadUnsatFlags(){
     if (allData.length) applyFilters();
   } catch(e){ /* non-critical */ }
 }
-async function toggleUnsat(code, on){
-  const k = pad4(code), prev = !!unsatFlags[k];
-  if (on) unsatFlags[k] = 1; else delete unsatFlags[k];   // optimistic
-  applyFilters();
+// A flag's status: 'unsat' (red — unsatisfactory, nothing sent yet), 'quoted'
+// (amber — quote sent, awaiting the client's order) or 'ordered' (green — order
+// received, works to do). Legacy value 1 = 'unsat'. null = no flag.
+const FLAG_INFO = {
+  unsat:   { icon:'🚩', label:'Unsatisfactory',                     short:'Unsatisfactory', cls:'red' },
+  quoted:  { icon:'📨', label:'Quote sent — awaiting order',        short:'Awaiting order', cls:'amber' },
+  ordered: { icon:'📦', label:'Order received — works to do',       short:'Order received', cls:'green' }
+};
+function flagOf(code){
+  const v = unsatFlags[pad4(code)];
+  if (!v) return null;
+  if (typeof v === 'object') return { s: FLAG_INFO[v.s] ? v.s : 'unsat', at: v.at || '', by: v.by || '' };
+  return { s:'unsat', at:'', by:'' };
+}
+function toggleUnsat(code, on){ return setFlag(code, on ? 'unsat' : null); }
+async function setFlag(code, status){
+  const k = pad4(code), prev = unsatFlags[k];
+  if (status) unsatFlags[k] = { s: status, at: new Date().toISOString(), by: '' }; else delete unsatFlags[k];   // optimistic
+  applyFilters(); if (window._flagListRefresh) window._flagListRefresh();
   unsatSaving++;
   try {
     const r = await authFetch('/compliance/unsat-flag?scheme=' + COMPLIANCE_SCHEME, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ code: k, on: !!on })
+      body: JSON.stringify({ code: k, on: !!status, status: status || undefined })
     });
     if (!r.ok) throw 0;
   } catch(e){
-    if (prev) unsatFlags[k] = 1; else delete unsatFlags[k];   // revert on failure
+    if (prev) unsatFlags[k] = prev; else delete unsatFlags[k];   // revert on failure
+    if (window._flagListRefresh) window._flagListRefresh();
     applyFilters();
     alert("Couldn't save the flag — check your connection and try again.");
   } finally {
@@ -1027,6 +1059,75 @@ function fmtDue(s){
   const p = n => String(n).padStart(2,'0');
   return `${p(d)}/${p(m)}/${y}`;
 }
+/* Pick a 5-year flag status for one store (edit users). */
+function openFlagPicker(code){
+  const fl = flagOf(code); const cur = fl ? fl.s : '';
+  const row = (allData || []).find(e => pad4(e.storeCode) === pad4(code));
+  const modal = document.createElement('div'); modal.className = 'modal';
+  const btn = (s, txt, cls) => `<button type="button" data-s="${s}" class="${cls}${cur===s?' cur':''}">${txt}</button>`;
+  modal.innerHTML = `<div class="modal-content" style="max-width:420px">
+    <h2 style="margin:0 0 4px;">5-year status</h2>
+    <div style="color:#475569;font-size:14px;">${esc(pad4(code))}${row ? ' — ' + esc(row.siteName || '') : ''}</div>
+    ${fl && fl.at ? `<div style="color:#64748b;font-size:12.5px;margin-top:4px;">Set ${esc(fmtDue(fl.at.slice(0,10)))}${fl.by ? ' by ' + esc(fl.by) : ''}</div>` : ''}
+    <div class="flagpick">
+      ${btn('unsat','🚩 Unsatisfactory — remedials to quote','fp-red')}
+      ${btn('quoted','📨 Quote sent — awaiting order','fp-amber')}
+      ${btn('ordered','📦 Order received — works to do','fp-green')}
+      ${btn('','✕ Clear — back to the due date','')}
+    </div>
+    <div class="actions"><button class="btn" style="background:#ccc;color:#000;" data-x="1">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(modal); modal.style.display = 'block';
+  modal.addEventListener('click', (ev) => {
+    if (ev.target === modal || ev.target.closest('[data-x]')) { modal.remove(); return; }
+    const b = ev.target.closest('[data-s]'); if (!b) return;
+    modal.remove();
+    if ((b.dataset.s || '') !== cur) setFlag(code, b.dataset.s || null);
+  });
+}
+
+/* List of every flagged store, filterable by status, changeable inline. */
+function openFlagList(){
+  let filt = 'all';
+  const modal = document.createElement('div'); modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-content" style="max-width:880px">
+    <h2 style="margin:0;">🚩 Unsatisfactory EICRs</h2>
+    <div class="fl-chips"></div>
+    <div style="max-height:62vh;overflow:auto;"><table class="fl-table"><thead><tr><th>Store</th><th>Site</th><th>5-year due</th><th>Status</th><th>Set</th></tr></thead><tbody></tbody></table></div>
+    <div class="actions"><button class="btn" style="background:#ccc;color:#000;" data-x="1">Close</button></div>
+  </div>`;
+  document.body.appendChild(modal); modal.style.display = 'block';
+  const editable = canEditCompliance();
+  function render(){
+    const byCode = {}; (allData || []).forEach(e => { byCode[pad4(e.storeCode)] = e; });
+    const rows = Object.keys(unsatFlags).map(c => ({ c, f: flagOf(c), e: byCode[c] })).filter(r => r.f && r.e);
+    const n = { all: rows.length, unsat:0, quoted:0, ordered:0 }; rows.forEach(r => n[r.f.s]++);
+    modal.querySelector('.fl-chips').innerHTML = [['all','All'],['unsat','🚩 Unsatisfactory'],['quoted','📨 Awaiting order'],['ordered','📦 Order received']]
+      .map(([k,l]) => `<button type="button" data-f="${k}" class="${filt===k?'on':''}">${l} (${n[k]})</button>`).join('');
+    const order = { unsat:0, quoted:1, ordered:2 };
+    const list = rows.filter(r => filt === 'all' || r.f.s === filt)
+      .sort((a,b) => (order[a.f.s]-order[b.f.s]) || a.c.localeCompare(b.c));
+    modal.querySelector('tbody').innerHTML = list.length ? list.map(r => {
+      const fi = FLAG_INFO[r.f.s];
+      const st = editable
+        ? `<select data-code="${esc(r.c)}">${Object.keys(FLAG_INFO).map(k => `<option value="${k}"${k===r.f.s?' selected':''}>${FLAG_INFO[k].icon} ${FLAG_INFO[k].short}</option>`).join('')}<option value="">✕ Clear flag</option></select>`
+        : `${fi.icon} ${esc(fi.short)}`;
+      return `<tr class="fr-${fi.cls}"><td>${esc(r.c)}</td><td>${esc(r.e.siteName || '')}</td><td>${esc(fmtDue(r.e.fiveYear))}</td><td class="fs">${st}</td><td style="color:#64748b;font-size:12.5px;">${r.f.at ? esc(fmtDue(r.f.at.slice(0,10))) : ''}${r.f.by ? ' · ' + esc(r.f.by) : ''}</td></tr>`;
+    }).join('') : `<tr><td colspan="5" style="padding:14px;color:#64748b;">Nothing here.</td></tr>`;
+  }
+  window._flagListRefresh = render;
+  modal.addEventListener('click', (ev) => {
+    if (ev.target === modal || ev.target.closest('[data-x]')) { window._flagListRefresh = null; modal.remove(); return; }
+    const c = ev.target.closest('[data-f]'); if (c) { filt = c.dataset.f; render(); }
+  });
+  modal.addEventListener('change', (ev) => {
+    const sel = ev.target.closest('select[data-code]'); if (!sel) return;
+    if (!sel.value && !confirm('Clear the flag on ' + sel.dataset.code + '? It goes back to its due-date colour.')) { render(); return; }
+    setFlag(sel.dataset.code, sel.value || null);
+  });
+  render();
+}
+
 /* HTML for a date cell, with a 📄 link appended when a cert is on file. */
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
@@ -1042,9 +1143,9 @@ function dateCell(code, colKey, val){
   // button (faint ⚑ when off, red 🚩 when on); view users only see 🚩 when set.
   let flag = '';
   if (t === 'fiveYear') {
-    const on = !!unsatFlags[pad4(code)];
+    const fl = flagOf(code);
     const editable = canEditCompliance();
-    if (on) flag = ` <button type="button" class="unsat-flag on" data-code="${esc(code)}" data-on="1" title="Marked UNSATISFACTORY${editable?' — tap to clear':''}"${editable?'':' disabled'}>🚩</button>`;
+    if (fl) { const fi = FLAG_INFO[fl.s]; flag = ` <button type="button" class="unsat-flag on fl-${fl.s}" data-code="${esc(code)}" data-on="1" title="${fi.label}${editable?' — tap to change':''}"${editable?'':' disabled'}>${fi.icon}</button>`; }
     else if (editable) flag = ` <button type="button" class="unsat-flag" data-code="${esc(code)}" data-on="0" title="Mark this site unsatisfactory">⚑</button>`;
   }
   return `${esc(fmtDue(val))}${link}${warn}${flag}`;
@@ -1189,8 +1290,10 @@ function renderTable(d){
         const hasCert = !!(complianceIndex[pad4(e.storeCode)] && complianceIndex[pad4(e.storeCode)].fiveYear);
         if (tf && s === 'red') { s = 'amber'; extra = testedNote(tf, 'overdue'); }
         else if (tf && s !== 'red' && !hasCert) { s = 'amber'; extra = testedNote(tf, 'rolled'); }
-        // A manual UNSATISFACTORY flag wins — force the cell red whatever the date says.
-        if (unsatFlags[pad4(e.storeCode)]) { s = 'red'; extra = ''; }
+        // A manual flag wins whatever the date says: 🚩 unsatisfactory = red,
+        // 📨 quote sent / awaiting order = amber, 📦 order received = green.
+        const fl = flagOf(e.storeCode);
+        if (fl) { s = FLAG_INFO[fl.s].cls; extra = ''; }
       }
       return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
@@ -2205,7 +2308,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 📄 certificate links + 📎 upload / 🗂 view (event-delegated, survives re-render)
   tb.addEventListener('click', (ev)=>{
     const uf = ev.target.closest('.unsat-flag');
-    if (uf && !editMode && canEditCompliance()){ ev.preventDefault(); ev.stopPropagation(); toggleUnsat(uf.dataset.code, uf.dataset.on !== '1'); return; }
+    if (uf && !editMode && canEditCompliance()){ ev.preventDefault(); ev.stopPropagation(); openFlagPicker(uf.dataset.code); return; }
     const cert = ev.target.closest('.cert-link');
     if (cert && !editMode){ ev.preventDefault(); openCert(cert.dataset.code, cert.dataset.type); return; }
     const up = ev.target.closest('.doc-btn.up');

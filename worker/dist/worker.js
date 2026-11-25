@@ -15982,11 +15982,14 @@ async function handle8(request, env, ctx, url, sess) {
     if (!code) return jr2({ error: "code required" }, headers, 400);
     const key = "compliance:unsat:" + scheme + ":" + tid;
     const path = '$."' + code + '"';
+    const FLAG_STATES = ["unsat", "quoted", "ordered"];
+    const st = FLAG_STATES.includes(b.status) ? b.status : "unsat";
+    const val2 = JSON.stringify({ s: st, at: (/* @__PURE__ */ new Date()).toISOString(), by: me });
     try {
       if (b.on) {
         await env.DB.prepare(
-          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, 1)) ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, 1)"
-        ).bind(tid, key, code, path).run();
+          "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, json(?))) ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, json(?))"
+        ).bind(tid, key, code, val2, path, val2).run();
       } else {
         await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
       }
@@ -15997,11 +16000,11 @@ async function handle8(request, env, ctx, url, sess) {
         codes = JSON.parse(row && row.value || "{}") || {};
       } catch {
       }
-      if (b.on) codes[code] = 1;
+      if (b.on) codes[code] = JSON.parse(val2);
       else delete codes[code];
       await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
     }
-    return jr2({ ok: true, code, on: !!b.on }, headers);
+    return jr2({ ok: true, code, on: !!b.on, status: b.on ? st : null }, headers);
   }
   if (sub === "/store-comment" && method === "POST") {
     if (!await canCommentGate()) return jr2({ error: "Not allowed" }, headers, 403);

@@ -141,4 +141,15 @@ g = await getAs("Client Co", "/export?scheme=coop&code=0200");
 ok(g.j.stores[0].extras.length === 1, "client: extras switched ON → in the pack");
 g = await getAs("Client Co", "/site-files?site=0200");
 ok(g.status === 403, "client refused on cross-scheme /site-files");
+// 5-year flag statuses (unsat → quoted → ordered), legacy 1 kept readable
+const flags = async () => JSON.parse(db.prepare("SELECT value FROM app_config WHERE key='compliance:unsat:coop:1'").get().value);
+await post("/unsat-flag", { code: "0201", on: true, status: "quoted" });
+let fm = await flags();
+ok(fm["0200"] === 1 && fm["0201"] && fm["0201"].s === "quoted" && fm["0201"].by === "import-bot", "flag: quoted saved with who/when, legacy flag kept");
+await post("/unsat-flag", { code: "0201", on: true, status: "ordered" });
+fm = await flags(); ok(fm["0201"].s === "ordered", "flag: moved to order received");
+await post("/unsat-flag", { code: "0202", on: true, status: "bogus" });
+fm = await flags(); ok(fm["0202"].s === "unsat", "flag: unknown status → unsatisfactory");
+await post("/unsat-flag", { code: "0201", on: false });
+fm = await flags(); ok(!fm["0201"] && fm["0202"], "flag: cleared");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
