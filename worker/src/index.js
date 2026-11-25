@@ -55,6 +55,7 @@ import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: p
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as emailtasks from "./routes/emailtasks.js"; // DONE  (Outlook unreplied-email → portal task sync, replaces the Grok bot)
+import * as eicr from "./routes/eicr.js";     // EICR tracker — one case per site per 5-year cycle (due → test → quote → order → works → cert → invoiced)
 import * as concerto from "./routes/concerto.js"; // DONE  (Concerto PPM list: client's official EM/PAT/pump schedule, drop-in import + chart reconciliation)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
 import * as pump from "./routes/pump.js";          // DONE  (sump-pump monthly maintenance: per-store form + photo/video → office review → branded PDF)
@@ -142,6 +143,7 @@ const ROUTES = [
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/email-tasks", emailtasks.handle], // Outlook unreplied-email → portal task sync (status / manual run / config)
   ["*", "/fbc",        fbc.handle],      // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
+  ["*", "/eicr",       eicr.handle],     // EICR tracker
   ["*", "/concerto",   concerto.handle], // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)

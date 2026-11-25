@@ -4007,6 +4007,44 @@ it straight onto the compliance chart (rolling the next-due date).
     fresh order arrives. TODO/next: raise the works job from a 5-year remedial (like the
     EM one-tap); fold into the client-orders auto-match so a new order advances the stage.
 
+## EICR TRACKER — one case per site per 5-year cycle (routes/eicr.js + eicr-tracker.html — 25 Nov 2026)
+Jamie: "electrical tests are slipping through the net… plan a system". Diagnosis from live data: 41 elec test
+jobs, 28 with C1/C2/FI, only 4 ever got a works job; the office had parked 26 of them in custom DONE categories
+("Jamie/Tanya", "Compliance Complete") so they read finished; two registers (five_year_remedials 78 rows,
+concerto_cases 46) + 5 tabs disagreed. **This replaces all of that with ONE table `eicr_cases`** (self-migrating,
+tenant_id INTEGER) and ONE page **eicr-tracker.html** (⚡ tile `FiveYear` + sidebar "EICR tracker"; the old
+five-year-remedials.html stays reachable via "Old 5-year page").
+- **Due list = the compliance chart** (coop `compliance_stores.due.fiveYear`, closed stores dropped). Each store
+  has at most ONE open case; no case = a virtual "due" row.
+- **Statuses** (`STATUSES`): due → booked → **cert_signoff** (C3 only / no remedials) → done; or booked →
+  **to_quote** (any C1/C2/FI, or an UNCODED item — safe side) → quoted → ordered → works_booked →
+  **cert_update** (Jamie edits the original cert after remedials) → done.
+- **Stored status, moved by evidence on every board load** (`reconcile`): every elecTest job is linked to a case;
+  the test job finishing (built-in done OR a custom `done:true` category) sets the outcome; an electrical client
+  order for the store after the test (matched elec/fiveyear, or EICR/remedial wording; EM excluded) fills the order
+  number; the works job (`createWorksJobFromRemedials`, test photos copied) → works_booked; finished → cert_update.
+  **A manual status holds**: evidence only moves a case when the evidence itself CHANGED since last look
+  (`ev_status`), never backwards, and a C3 reading never drags a case off the quote path (`nextStatus`).
+- **Sign-off = Full Access only** (`/eicr/signoff`). **Invoicing is separate**: TEST invoice due once the test is
+  done; WORKS invoice due once the updated cert is signed off. A case CLOSES when done + every needed invoice is
+  ticked; the store then shows its next chart due date as "due".
+- **Late flags** (working days in status): to_quote 5, ordered 5, cert_signoff/cert_update 2 (red), quoted 20
+  (amber); booked/works_booked red once the visit date passes unfinished; due red once overdue, amber ≤60 days.
+- **Page tabs**: To do (office: book / booked / to quote / awaiting order / book works / works booked), Sign off,
+  Invoicing, All sites (status filter), **Concerto check** (`/eicr/exceptions`: due on portal not Concerto; due on
+  Concerto not portal — incl. released PPMs; on Concerto not on chart; chart with no date; unmapped refs; 12-month
+  horizon). Row click = everything on the case + edit status/order/quote/notes + log.
+- **Routes** (`/eicr/*`, office = FullAccess|SLAAdmin|Compliance; £ only canSeeMoney): GET board, exceptions,
+  case, quote-text; POST book (creates the elecTest job, dayBefore release), link-job, status, update, quote-sent,
+  create-works, signoff, invoice (+undo), reopen, migrate.
+- **One-off migration** (`migrateOld`, runs automatically on the first board load, flag app_config
+  `eicr:migrated:<tid>`): old concerto_cases stage12 (open ones) → status/quote/notes; old five_year_remedials
+  stages → status + order number, flagged "Imported … check it is still outstanding" when no portal test job (a
+  portal test job always wins — only its order number is carried).
+- Test `node --no-warnings worker/tools/test-eicr.mjs` (44). portal-config `?v=51`, SW `mostlane-v155`.
+- **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
+  `maybeOpenFiveYearRemedial` still writes the old register (harmless).
+
 ## Southern Co-op CLIENT COMPLIANCE PACK (compliance-pack.html + lib/compliancepack.js — 25 Nov 2026)
 Hand-over pack of the LATEST certificate per store per type for the client. eicr-portal 🛠 Tools → "📦 Client
 compliance pack" (download+ access). **GET /compliance/export?scheme=coop** (download|edit level, coop only) →
