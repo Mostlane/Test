@@ -80,4 +80,57 @@ const ex = await (await compliance.handle(new Request(eu, { headers: H }), env, 
 const st = ex.stores[0];
 ok(st.types.fiveYear.linked && st.types.fiveYear.files.length === 2, "export: linked pair");
 ok(st.extras.length === 1 && st.extras[0].folder === "Other documents" && st.extras[0].file.url, "export: PV manual as extra with a link");
+// ── Client login (Southern Co-op, compliance-only) ─────────────────────────
+db.exec(`CREATE TABLE users (tenant_id INTEGER, username TEXT, profile TEXT);
+  CREATE TABLE user_permissions (tenant_id INTEGER, username TEXT, permission TEXT, value INTEGER);
+  INSERT INTO users VALUES (1,'Client Co','{"staffType":"client","clientOrg":"coop","clientRole":"compliance"}');
+  INSERT INTO users VALUES (1,'Viewer','{"staffType":"field","complianceAccess":{"coop":"view"}}');`);
+const sessOf = (u) => ({ tenantId: 1, user: { username: u } });
+async function getAs(user, path) {
+  const url = new URL("https://x/compliance" + path);
+  const res = await compliance.handle(new Request(url), env, null, url, sessOf(user));
+  return { status: res.status, j: await res.json() };
+}
+let g = await getAs("Client Co", "/files?scheme=coop&code=0200");
+const visible = Object.values(g.j.files).flat().map(x => x.filename).sort().join(",");
+ok(g.status === 200 && g.j.internal === false, "client: /files answers, marked not internal");
+ok(visible === "PV-OM.pdf,eicr-2031.pdf,eicr-unsat.pdf", "client sees only current + in-pack docs: " + visible);
+g = await getAs("Client Co", "/export?scheme=coop&code=0200");
+ok(g.status === 200 && g.j.stores.length === 1 && g.j.stores[0].types.fiveYear.files.length === 2, "client: per-site pack");
+g = await getAs("Viewer", "/export?scheme=coop&code=0200");
+ok(g.status === 200 && g.j.stores.length === 1, "view-level staff: per-site pack allowed");
+g = await getAs("Viewer", "/export?scheme=coop");
+ok(g.status === 403, "view-level staff: whole-estate pack refused");
+g = await getAs("Client Co", "/export?scheme=coop&code=9999");
+ok(g.status === 404, "unknown store → 404");
+g = await getAs("Client Co", "/files?scheme=fareham&code=0200");
+ok(g.status === 403, "Co-op client can't read the Fareham chart");
+// ── Client tool switches (profile.clientTools; defaults when unset) ────────
+db.exec(`INSERT INTO compliance_stores VALUES (1,'coop','0300','Retail','Closed store','PO2 2BB','{}',0,'{}','','0300');`);
+g = await getAs("Client Co", "/export?scheme=coop");
+ok(g.status === 403, "client: whole-estate pack OFF by default");
+g = await getAs("Client Co", "/stores?scheme=coop");
+ok(g.status === 200 && g.j.clientTools && g.j.clientTools.wholePack === false && g.j.clientTools.sitePack === true, "client: /stores carries the tool switches");
+ok(!g.j.stores.some(x => x.code === "0300"), "client: closed store not sent by default");
+ok(!("comment" in g.j.stores[0]), "client: no comments sent");
+g = await getAs("Viewer", "/stores?scheme=coop");
+ok(g.j.clientTools === null && g.j.stores.some(x => x.code === "0300"), "staff: no switches, closed store present");
+db.exec(`INSERT INTO app_config VALUES (1,'compliance:unsat:coop:1','{"0200":1}');`);
+g = await getAs("Client Co", "/unsat-flags?scheme=coop");
+ok(g.status === 200 && Object.keys(g.j.codes).length === 0, "client: 🚩 flags hidden by default");
+db.exec(`UPDATE users SET profile='{"staffType":"client","clientOrg":"coop","clientRole":"compliance","clientTools":{"viewCerts":false,"sitePack":false,"wholePack":true,"flags":true,"closedSites":true}}' WHERE username='Client Co'`);
+g = await getAs("Client Co", "/files?scheme=coop&code=0200");
+ok(g.status === 403, "client: certificates off → /files refused");
+g = await getAs("Client Co", "/file-url?scheme=coop&code=0200&type=fiveYear");
+ok(g.status === 403, "client: certificates off → /file-url refused");
+g = await getAs("Client Co", "/export?scheme=coop&code=0200");
+ok(g.status === 403, "client: store pack off → refused");
+g = await getAs("Client Co", "/export?scheme=coop");
+ok(g.status === 200, "client: whole-estate pack switched ON works");
+g = await getAs("Client Co", "/unsat-flags?scheme=coop");
+ok(Object.keys(g.j.codes).length === 1, "client: flags switched ON");
+g = await getAs("Client Co", "/stores?scheme=coop");
+ok(g.j.stores.some(x => x.code === "0300"), "client: closed sites switched ON");
+g = await getAs("Client Co", "/site-files?site=0200");
+ok(g.status === 403, "client refused on cross-scheme /site-files");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

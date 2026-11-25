@@ -23,7 +23,7 @@ import { sendToPermission } from "./push.js";
 import { sendEmail, appBase } from "../lib/email.js";
 import { clientUpdatesFor } from "./fbc.js";
 
-const ORG_LABEL = { fbc: "Fareham Borough Council" };
+const ORG_LABEL = { fbc: "Fareham Borough Council", coop: "The Southern Co-operative" };
 
 // The urgency a client flags -> the internal SLA priority the office starts from
 // (the office can always re-prioritise on the board).

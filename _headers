@@ -179,6 +179,8 @@
   Cache-Control: no-cache
 /cpd-admin.html
   Cache-Control: no-cache
+/compliance-site-pack.js
+  Cache-Control: no-cache, no-store, must-revalidate
 /compliance-pack.html
   Cache-Control: no-cache, no-store, must-revalidate
 /compliance-review.html

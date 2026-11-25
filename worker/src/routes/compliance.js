@@ -12,7 +12,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor, requireSession } from "../lib/auth.js";
-import { resolveComplianceAccess } from "../lib/complianceaccess.js";
+import { resolveComplianceAccess, resolveClientTools } from "../lib/complianceaccess.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { buildPackPlan, PACK_TYPES, PACK_GROUPS } from "../lib/compliancepack.js";
 import { syncSiteToSiteLog } from "./sites.js";
@@ -460,6 +460,15 @@ export async function handle(request, env, ctx, url, sess) {
   // Per-scheme access level — the authoritative server gate.
   const level = await complianceLevelFor(env, tid, me, scheme, viaToken);
   const canRead  = viaToken || level !== "none";   // view / download / edit
+  // A CLIENT login's per-tool switches (Users Admin). null for staff / the bot.
+  let clientTools = null;
+  if (sess && !viaToken) {
+    try {
+      const urow = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
+      clientTools = resolveClientTools(urow ? urow.profile : null);
+    } catch {}
+  }
+  const toolOff = (k) => !!clientTools && !clientTools[k];
   const canWrite = viaToken || level === "edit";    // edit only (all write routes key off this)
   await ensure(env);
 
@@ -514,7 +523,13 @@ export async function handle(request, env, ctx, url, sess) {
   // A bulk download, so it needs "download" (or edit) access on the scheme.
   if (sub === "/export" && method === "GET") {
     if (scheme !== "coop") return jr({ error: "The compliance pack is for the Southern Co-op chart" }, headers, 400);
-    if (!(viaToken || level === "download" || level === "edit")) return jr({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
+    // ?code= → ONE store's pack (the per-site 📦 button on the chart). That is open
+    // to anyone who can see the chart, the client included; the whole-estate pack
+    // needs download (or edit) access.
+    const oneCode = q.get("code") ? pad4(q.get("code")) : "";
+    if (!oneCode && !(viaToken || level === "download" || level === "edit")) return jr({ error: "You need download access to the Southern Co-op chart" }, headers, 403);
+    if (oneCode && toolOff("sitePack")) return jr({ error: "Store packs aren't switched on for your login" }, headers, 403);
+    if (!oneCode && toolOff("wholePack")) return jr({ error: "The whole-estate pack isn't switched on for your login" }, headers, 403);
     const { results: srows } = await env.DB.prepare(
       `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, s.site_name AS sname, s.postcode AS spost
          FROM compliance_stores cs
@@ -523,8 +538,8 @@ export async function handle(request, env, ctx, url, sess) {
              OR (s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*'
                  AND COALESCE(NULLIF(cs.site_number, ''), cs.code) NOT GLOB '*[^0-9]*'
                  AND CAST(s.site_number AS INTEGER) = CAST(COALESCE(NULLIF(cs.site_number, ''), cs.code) AS INTEGER)))
-        WHERE cs.tenant_id = ? AND cs.scheme = 'coop' AND COALESCE(cs.active, 1) = 1`
-    ).bind(tid).all();
+        WHERE cs.tenant_id = ? AND cs.scheme = 'coop' AND COALESCE(cs.active, 1) = 1${oneCode ? " AND cs.code = ?" : ""}`
+    ).bind(...(oneCode ? [tid, oneCode] : [tid])).all();
     const byCode = new Map();
     for (const r of srows || []) {
       const prev = byCode.get(r.code);
@@ -535,8 +550,9 @@ export async function handle(request, env, ctx, url, sess) {
       return { code: r.code, category: r.category || "", name: r.sname || r.cname || "", postcode: r.spost || r.cpost || "", due };
     });
     const { results: frows } = await env.DB.prepare(
-      "SELECT id, code, type, filename, label, pinned, in_pack, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop'"
-    ).bind(tid).all();
+      "SELECT id, code, type, filename, label, pinned, in_pack, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop'" + (oneCode ? " AND code=?" : "")
+    ).bind(...(oneCode ? [tid, oneCode] : [tid])).all();
+    if (oneCode && !(srows || []).length) return jr({ error: "That store isn't on the live chart" }, headers, 404);
     const plan = buildPackPlan(stores, frows || []);
     for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
@@ -549,8 +565,19 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/files" && method === "GET") {
     const code = pad4(q.get("code"));
     if (!code) return jr({ error: "code required" }, headers, 400);
+    if (toolOff("viewCerts")) return jr({ error: "Opening certificates isn't switched on for your login" }, headers, 403);
     const byType = await listStoreFiles(env, url.origin, tid, scheme, code);
-    return jr({ ok: true, code, files: byType }, headers);
+    // Every version of every document is internal to Mostlane. Anyone below
+    // "edit" (view/download staff, client logins) sees only what's CURRENT plus
+    // anything ticked "include in pack" — the same set the client pack hands over.
+    const internal = viaToken || level === "edit";
+    if (!internal) {
+      for (const t of Object.keys(byType)) {
+        byType[t] = byType[t].filter((f) => f.inPack || (f.current && t !== "other"));   // "Other" docs only when ticked for the pack
+        if (!byType[t].length) delete byType[t];
+      }
+    }
+    return jr({ ok: true, code, files: byType, internal }, headers);
   }
 
   // ── A PORTAL SITE's compliance docs across every scheme (drives "Site
@@ -558,6 +585,13 @@ export async function handle(request, env, ctx, url, sess) {
   // Co-op site shows its Co-op certs and a Fareham site shows its Fareham certs
   // — from the one place a site is opened. `site` is the portal site_number.
   if (sub === "/site-files" && method === "GET") {
+    // Staff only (site folder / engineers). It lists EVERY version across every
+    // scheme, so an external client login is refused outright.
+    if (sess) {
+      const urow = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first().catch(() => null);
+      let prof = {}; try { prof = JSON.parse((urow && urow.profile) || "{}") || {}; } catch {}
+      if (prof.staffType === "client") return jr({ error: "Not available on a client login" }, headers, 403);
+    }
     const site = String(q.get("site") || "").trim();
     if (!site) return jr({ error: "site required" }, headers, 400);
     const seen = new Set();
@@ -600,6 +634,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Latest cert URL for a store+type (used by the 📄 links) ─────────────────
   if (sub === "/file-url" && method === "GET") {
+    if (toolOff("viewCerts")) return jr({ error: "Opening certificates isn't switched on for your login" }, headers, 403);
     const code = pad4(q.get("code")), type = canonType(q.get("type"));
     // Pinned doc wins (the office's chosen "show this one"), else the most
     // recently UPLOADED — same rule as listStoreFiles' `current`.
@@ -830,7 +865,9 @@ export async function handle(request, env, ctx, url, sess) {
       if (canComment) out.comment = comments[pad4(r.code) || r.code] || "";
       return out;
     });
-    return jr({ ok: true, stores, count: stores.length, canComment }, headers);
+    // A client without "closed sites" never receives the archived stores.
+    const shown = toolOff("closedSites") ? stores.filter(x => x.active !== 0) : stores;
+    return jr({ ok: true, stores: shown, count: shown.length, canComment, clientTools }, headers);
   }
 
   // ── One-time migration from the old mostlane-pos store list (browser-driven) ─
@@ -980,6 +1017,7 @@ export async function handle(request, env, ctx, url, sess) {
   // small map in app_config so the /stores builder is untouched. Shape mirrors
   // the tested/remedial flag maps the chart already consumes: {codes:{code:1}}.
   if (sub === "/unsat-flags" && method === "GET") {
+    if (toolOff("flags")) return jr({ ok: true, codes: {} }, headers);
     const key = "compliance:unsat:" + scheme + ":" + tid;
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
     let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}

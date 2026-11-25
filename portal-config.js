@@ -359,8 +359,9 @@
       if (role === "compliance") {
         // Compliance-only client: the ONE page they may see is their org's
         // compliance chart (plus the auth pages). Anything else bounces there.
-        var CPAGE = ({ fbc: "fareham.html" })[org] || "fareham.html";
-        if (AUTH.indexOf(page) === -1 && page !== CPAGE) { location.replace("/" + CPAGE); return; }
+        // (Southern Co-op also gets the whole-estate pack page.)
+        var CPAGES = ({ fbc: ["fareham.html"], coop: ["eicr-portal.html", "compliance-pack.html"] })[org] || ["fareham.html"];
+        if (AUTH.indexOf(page) === -1 && CPAGES.indexOf(page) === -1) { location.replace("/" + CPAGES[0]); return; }
       } else {
         // Jobs client: the walled jobs portal (client-home.html is standalone and
         // doesn't load portal-config, so this only fires on a stray staff URL).
@@ -1045,7 +1046,7 @@
             if (du.StaffType === "client") {
               var cOrg = String(du.ClientOrg || "").toLowerCase();
               location.href = (du.ClientRole === "jobs") ? "/client-home.html"
-                : (cOrg === "fbc" ? "/fareham.html" : "/client-home.html");
+                : (cOrg === "fbc" ? "/fareham.html" : cOrg === "coop" ? "/eicr-portal.html" : "/client-home.html");
             } else location.href = "/main.html";
           }).catch(function () { alert("Couldn't switch user."); go.disabled = false; go.textContent = "View as"; });
         };

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=49"></script>
+  <script src="/portal-config.js?v=50"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -324,12 +324,15 @@
           </div>
           <div id="clientOrgWrap" style="display:none;">
             <label>Client organisation</label>
-            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
+            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option><option value="coop">The Southern Co-op (compliance chart)</option></select>
             <label style="margin-top:8px;">What can they see</label>
             <select id="f_clientRole">
               <option value="compliance">Compliance chart only</option>
               <option value="jobs">Compliance + current jobs</option>
             </select>
+            <label style="margin-top:10px;">Compliance chart tools</label>
+            <div id="clientToolsBox" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 12px;font-size:14px;"></div>
+            <div style="font-size:12px;color:#64748b;margin:2px 0 6px;">What this client can use on their compliance chart. They can never edit, upload or change anything.</div>
             <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's data only. No staff access, no financial info. "Compliance chart only" hides jobs entirely. "Compliance + current jobs" also shows the jobs we're working on at their sites — each drops off once it's complete (no costs, no history).</div>
           </div>
         </div>
@@ -618,6 +621,21 @@
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const g = id => document.getElementById(id);
     // Show the client-org picker only when the account type is "client".
+    // Keep in step with worker/src/lib/complianceaccess.js CLIENT_TOOLS.
+    const CLIENT_TOOLS = [
+      ["viewCerts","Open certificates (📄)",true], ["sitePack","Download a store's pack (📦)",true],
+      ["wholePack","Whole-estate compliance pack",false], ["export","Export the chart to Excel",false],
+      ["summary","％ Summary",true], ["search","Search by date / type",true],
+      ["closedSites","See closed sites",false], ["flags","See 🚩 unsatisfactory flags",false],
+    ];
+    function renderClientTools(set){
+      const box = g("clientToolsBox"); if (!box) return;
+      set = set || {};
+      box.innerHTML = CLIENT_TOOLS.map(([k,label,def]) => {
+        const on = set[k] == null ? def : !!set[k];
+        return `<label style="display:flex;gap:6px;align-items:center;font-weight:400;cursor:pointer;margin:0;"><input type="checkbox" data-ctool="${k}" style="width:auto;margin:0;"${on?" checked":""}> ${label}</label>`;
+      }).join("");
+    }
     function syncClientOrg(){ const w = g("clientOrgWrap"); if (w) w.style.display = (g("f_staff") && g("f_staff").value === "client") ? "" : "none"; }
     try { if (g("f_staff")) g("f_staff").addEventListener("change", syncClientOrg); } catch (e) {}
 
@@ -890,7 +908,7 @@
     // Permissions that make someone an "Admin" (manage an area for everyone).
     const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
     // A person's headline access level (highest wins).
-    const ORG_LABELS = { fbc: "FBC" };
+    const ORG_LABELS = { fbc: "FBC", coop: "Southern Co-op" };
     function levelOf(u) {
       if (u.StaffType === "client") return { label: "Client", cls: "lvl-client" };
       if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
@@ -1135,6 +1153,7 @@
       if (g("f_clientOrg")) g("f_clientOrg").value = (user?.ClientOrg || user?.Profile?.clientOrg || "fbc");
       if (g("f_clientRole")) g("f_clientRole").value = (user?.ClientRole || user?.Profile?.clientRole || "compliance");
       syncClientOrg();
+      renderClientTools(user?.Profile?.clientTools || {});
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
       const prof = user?.Profile || {};
@@ -1251,9 +1270,12 @@
       if (profile.staffType === "client") {
         profile.clientOrg = (g("f_clientOrg") && g("f_clientOrg").value) || "fbc";
         profile.clientRole = (g("f_clientRole") && g("f_clientRole").value === "jobs") ? "jobs" : "compliance";
+        const ct = {}; document.querySelectorAll("[data-ctool]").forEach(cb => { ct[cb.dataset.ctool] = cb.checked; });
+        if (Object.keys(ct).length) profile.clientTools = ct;
       } else {
         delete profile.clientOrg;
         delete profile.clientRole;
+        delete profile.clientTools;
       }
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       if (g("p_standby").checked) profile.standby = true; else delete profile.standby;
@@ -1420,7 +1442,7 @@
           + (isClient
              ? `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Client organisation</label>
                 <select id="wiz_clientOrg" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
-                  <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option></select>
+                  <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option><option value="coop"${W.clientOrg === "coop" ? " selected" : ""}>The Southern Co-op (compliance chart)</option></select>
                 <label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">What can they see</label>
                 <select id="wiz_clientRole" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
                   <option value="compliance"${(W.clientRole || "compliance") !== "jobs" ? " selected" : ""}>Compliance chart only</option>
