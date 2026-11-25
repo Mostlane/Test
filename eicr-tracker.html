@@ -66,6 +66,11 @@
     pre.qt{white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;font-size:13px;max-height:320px;overflow:auto;}
     .exgrid h2{font-size:15px;color:var(--brand);margin:18px 0 6px;}
     .note{background:#eef4fb;border:1px solid #cfe0f2;color:#274b73;border-radius:12px;padding:10px 13px;margin-bottom:10px;font-size:13px;}
+    .pl-row{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);}
+    .pl-row .t{flex:1;font-size:14px;line-height:1.35;color:#1f2937;}
+    .pl-row input{flex:1;}
+    .pl-row .btn{flex:0 0 auto;}
+    .pl-copied{background:#16a34a !important;color:#fff !important;border-color:#16a34a !important;}
     @media(max-width:700px){ td.hide-s,th.hide-s{display:none;} .kv{grid-template-columns:110px 1fr;} }
   </style>
 </head>
@@ -73,6 +78,7 @@
   <header class="page">
     <a class="ml-back" href="/main.html" title="Back">‹ Back</a>
     <h1>⚡ EICR tracker</h1>
+    <button class="hbtn" id="pasteBtn" type="button" title="Standard lines to copy onto a certificate">📝 Paste text</button>
     <a class="hbtn" href="/eicr-portal.html">📋 Compliance chart</a>
     <a class="hbtn" href="/five-year-remedials.html" title="The previous 5-year pages">Old 5-year page</a>
   </header>
@@ -217,6 +223,64 @@ function table(list, tab){
     + `</tbody></table></div>`;
 }
 const rowBy = code => D.rows.find(r => r.code===code);
+// ── 📝 Paste text: standard certificate lines, copied one tap at a time ──
+// Kept per user in /prefs (follows you across devices), mirrored in localStorage.
+const PL_KEY = "eicrPasteLines";
+const PL_DEFAULT = [
+  "To ensure minimal disruption to the operating of the store",
+  "Good in terms of electrical safety",
+  "Remedial works required as per observations within this report",
+  "Based on use of building",
+];
+let PL = null, PL_EDIT = false;
+function plLocal(){ try { const v = JSON.parse(localStorage.getItem(PL_KEY)||"null"); return Array.isArray(v) ? v : null; } catch { return null; } }
+async function plLoad(){
+  if (PL) return PL;
+  PL = plLocal();
+  try {
+    const j = await authFetch("/prefs").then(r=>r.json());
+    if (j && j.prefs && Array.isArray(j.prefs[PL_KEY])) PL = j.prefs[PL_KEY];
+  } catch {}
+  if (!PL) PL = PL_DEFAULT.slice();
+  return PL;
+}
+async function plSave(){
+  try { localStorage.setItem(PL_KEY, JSON.stringify(PL)); } catch {}
+  try {
+    const r = await authFetch("/prefs", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ [PL_KEY]: PL }) });
+    if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || r.status);
+  } catch (e) { toast("Saved on this device only — " + (e.message||e)); }
+}
+async function plCopy(text, btn){
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch {} ta.remove();
+  }
+  if (btn){ const o = btn.textContent; btn.textContent = "✓ Copied"; btn.classList.add("pl-copied"); setTimeout(()=>{ btn.textContent = o; btn.classList.remove("pl-copied"); }, 1200); }
+}
+function plRender(){
+  const rows = PL.map((t,i) => PL_EDIT
+    ? `<div class="pl-row"><input data-pl-i="${i}" value="${esc(t)}"><button class="btn l" data-pl-up="${i}" title="Move up" ${i?"":"disabled"}>↑</button><button class="btn l" data-pl-del="${i}" title="Remove">✕</button></div>`
+    : `<div class="pl-row"><div class="t">${esc(t)}</div><button class="btn" data-pl-copy="${i}">📋 Copy</button></div>`).join("")
+    || '<div class="empty">No lines yet — add one below.</div>';
+  openModal(`<h3>📝 Paste text</h3><div class="sub">Tap Copy, then paste into the certificate.</div>
+    <div id="plList">${rows}</div>
+    <div class="row2" style="margin-top:10px;display:flex;gap:8px"><input id="plNew" placeholder="Add a new line…" style="flex:1"><button class="btn" id="plAdd">＋ Add</button></div>
+    <div class="mact"><button class="btn l" id="plEdit">${PL_EDIT?"✓ Done editing":"✏️ Edit lines"}</button><button class="btn l" data-close>Close</button></div>`);
+  const mc = g("mc");
+  mc.querySelectorAll("[data-pl-copy]").forEach(b => b.onclick = () => plCopy(PL[+b.dataset.plCopy], b));
+  mc.querySelectorAll("[data-pl-i]").forEach(inp => inp.onchange = () => { PL[+inp.dataset.plI] = inp.value.trim(); PL = PL.filter(Boolean); plSave(); });
+  mc.querySelectorAll("[data-pl-del]").forEach(b => b.onclick = () => { PL.splice(+b.dataset.plDel, 1); plSave(); plRender(); });
+  mc.querySelectorAll("[data-pl-up]").forEach(b => b.onclick = () => { const i = +b.dataset.plUp; if (i<1) return; [PL[i-1],PL[i]] = [PL[i],PL[i-1]]; plSave(); plRender(); });
+  const add = () => { const v = g("plNew").value.trim(); if (!v) return; PL.push(v); plSave(); plRender(); setTimeout(()=>g("plNew") && g("plNew").focus(), 0); };
+  g("plAdd").onclick = add;
+  g("plNew").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  g("plEdit").onclick = () => { PL_EDIT = !PL_EDIT; plRender(); };
+  mc.querySelectorAll("[data-close]").forEach(b => b.onclick = () => { PL_EDIT = false; closeModal(); });
+}
+g("pasteBtn").onclick = async () => { await plLoad(); PL_EDIT = false; plRender(); };
+
 // ── Awaiting order: everything quoted and waiting on the client, oldest quote first ──
 function quotedAt(r){ return (r.quote && r.quote.at) || (r.status==="quoted" ? r.statusAt : "") || ""; }
 function awaitTable(list, showQuote){
