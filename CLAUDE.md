@@ -4060,7 +4060,8 @@ five-year-remedials.html stays reachable via "Old 5-year page").
   in the browser (eicr-engine.js readPdf) and pre-fills a confirm box with the LATEST date that is NOT in the future
   (a cert also prints its next-inspection date); a test cert needs a date (bump → due + 5 years), an updated cert
   after remedials is filed linked with no bump.
-- Test `node --no-warnings worker/tools/test-eicr.mjs` (51). portal-config `?v=51`, SW `mostlane-v155`.
+- **⏳ Awaiting order tab (25 Nov 2026):** every case at `quoted`, oldest quote first (quote date = `quote.at`, else `statusAt`), days waiting amber >14 / red >28, quote ref + £ (money users), 📦 Order received button; plus a "Still to quote" list (`to_quote`). Deep-link `eicr-tracker.html?tab=awaiting`.
+- Test `node --no-warnings worker/tools/test-eicr.mjs` (55). portal-config `?v=51`, SW `mostlane-v155`.
 - **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
   `maybeOpenFiveYearRemedial` still writes the old register (harmless).
 

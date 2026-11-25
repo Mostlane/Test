@@ -141,6 +141,7 @@ function redCount(list){ return D.rows.filter(r => list.some(s=>s.f(r)) && r.ale
 function renderTabs(){
   const t = [
     ["year","📅 Concerto "+YEAR, yearRows().length, 0],
+    ["awaiting","⏳ Awaiting order", D.rows.filter(r=>r.status==="quoted").length, 0],
     ["office","📋 To do (office)", count(SECTIONS.office), redCount(SECTIONS.office)],
     ["signoff","✍️ Sign off", count(SECTIONS.signoff), redCount(SECTIONS.signoff)],
     ["invoice","🧾 Invoicing", count(SECTIONS.invoice), 0],
@@ -156,6 +157,7 @@ function render(){
   renderTabs();
   if (TAB==="concerto") return renderConcerto();
   if (TAB==="year") return renderYear();
+  if (TAB==="awaiting") return renderAwaiting();
   const rows = D.rows.filter(matchQ);
   let html = "";
   if (TAB==="all") {
@@ -215,6 +217,34 @@ function table(list, tab){
     + `</tbody></table></div>`;
 }
 const rowBy = code => D.rows.find(r => r.code===code);
+// ── Awaiting order: everything quoted and waiting on the client, oldest quote first ──
+function quotedAt(r){ return (r.quote && r.quote.at) || (r.status==="quoted" ? r.statusAt : "") || ""; }
+function awaitTable(list, showQuote){
+  return `<div class="tw"><table><thead><tr><th>Store</th><th>Site</th><th>${showQuote?"Quote sent":"Test found"}</th><th>${showQuote?"Waiting":"Since"}</th><th class="hide-s">Remedials</th><th></th></tr></thead><tbody>`
+    + list.map((r,i) => {
+      const at = showQuote ? quotedAt(r) : r.statusAt;
+      const days = at ? Math.max(0, Math.round((Date.now()-Date.parse(at))/86400000)) : null;
+      const tone = days==null ? "" : days>28 ? "red" : days>14 ? "amber" : "";
+      return `<tr class="${i%2?"zeb":""}" data-open="${esc(r.code)}">
+      <td class="code">${esc(r.code)}</td>
+      <td>${esc(r.name)}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
+      <td>${at?esc(fmtD(at)):'<span class="sub">—</span>'}${showQuote&&r.quote&&r.quote.ref?`<div class="sub">Ref ${esc(r.quote.ref)}</div>`:""}${showQuote&&r.quote&&r.quote.value!=null?`<div class="sub">${money(r.quote.value)}</div>`:""}</td>
+      <td>${days==null?"":`<span class="${tone?"alert "+tone:""}">${days} day${days===1?"":"s"}</span>`}</td>
+      <td class="hide-s">${codesHtml(r.remedials)}</td>
+      <td class="act">${actions(r, "office")}</td></tr>`; }).join("")
+    + `</tbody></table></div>`;
+}
+function renderAwaiting(){
+  const rows = D.rows.filter(matchQ);
+  const quoted = rows.filter(r=>r.status==="quoted").sort((a,b)=>String(quotedAt(a)).localeCompare(String(quotedAt(b))));
+  const toQuote = rows.filter(r=>r.status==="to_quote").sort((a,b)=>String(a.statusAt||"").localeCompare(String(b.statusAt||"")));
+  g("body").innerHTML =
+    `<div class="sec"><h2>⏳ Quoted — awaiting the client's order</h2><span class="cnt">${quoted.length}</span><span class="who">Oldest quote first · amber after 2 weeks, red after 4</span></div>`
+    + (quoted.length ? awaitTable(quoted, true) : '<div class="tw"><div class="empty">Nothing waiting on an order. ✓</div></div>')
+    + `<div class="sec"><h2>💬 Still to quote</h2><span class="cnt">${toQuote.length}</span><span class="who">Remedials found — quote not sent yet</span></div>`
+    + (toQuote.length ? awaitTable(toQuote, false) : '<div class="tw"><div class="empty">Nothing to quote. ✓</div></div>');
+}
+
 
 // ── Concerto year view: every site on Concerto's schedule for the year, in date order ──
 // Concerto rolls a site's date on 5 years once it's tested, so a site belongs to the
