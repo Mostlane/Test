@@ -4021,6 +4021,16 @@ pfs/fuel → Forecourt, ev/charg → EV, else PFS-named store → Forecourt); Fo
 (the store's `ev` due date is its forecourt due). Status Present / Overdue (in pack but next due passed) / Missing
 / Not required. The page writes straight to a folder on the PC (File System Access API — **Chrome/Edge desktop
 only**), 4 download lanes, re-runnable: skips same-size files, optional prune of older files in type folders.
+**Current / linked / in-pack (25 Nov 2026):** the pack now uses the SAME "current" rule as the 🗂 Documents
+modal (all PINNED files of a type, else the newest UPLOAD) — what the office sees as current is what's handed over.
+Modal per doc: **Make current** (POST /compliance/file-update `{id,makeCurrent:1}` — that file alone), **🔗 Link**
+(the `pinned` toggle — 2+ current together, e.g. unsatisfactory EICR + the EIC/Minor Works for the remedials; the
+tracker reads "Present (2 linked)"), **📦 In pack** (new `compliance_files.in_pack`, `{inPack}`; current docs are
+always in) — extras go in their type folder, "Other" docs in an **Other documents** folder. Upload modal gained
+"🔗 This completes the current certificate" (sends `link=1`: pins the current one(s) + the new file, NO bump) and
+"📦 Include in pack"; five-year-remedials' "Upload updated cert" sends link=1. **A bumped (new current) upload — and
+fileCertificatePdf with bump — now UNPINS the type's old linked set** (`unpinOthers`), else an old pinned pair stayed
+current for ever and hid every later cert. Test `node --no-warnings worker/tools/test-compliance-links.mjs` (14).
 
 ## Sump Pump Monthly Maintenance (routes/pump.js + lib/pumppdf.js + pump-form.js + pump-review.html — Sep 2026)
 A per-store maintenance form ported from Jamie's Jotform ("Sump Pump Monthly

@@ -1416,7 +1416,7 @@
       inp.onchange = async () => {
         const f = inp.files && inp.files[0]; if (!f) return;
         const sv = g("qsv-"+id); btn.disabled = true; if (sv) sv.textContent = "Uploading…";
-        const form = new FormData(); form.append("file", f); form.append("code", r.storeCode); form.append("type", "fiveYear"); form.append("filename", f.name); form.append("label", "Updated after remedials — "+f.name);
+        const form = new FormData(); form.append("file", f); form.append("code", r.storeCode); form.append("type", "fiveYear"); form.append("filename", f.name); form.append("label", "Updated after remedials — "+f.name); form.append("link", "1");
         try {
           const res = await authFetch("/compliance/file", { method:"POST", body: form }); const out = await res.json().catch(()=>({}));
           if (!res.ok || !out.ok) { btn.disabled = false; if (sv) sv.textContent = ""; (window.MLUI?MLUI.toast:alert)("Upload failed: "+(out.error||res.status)); return; }

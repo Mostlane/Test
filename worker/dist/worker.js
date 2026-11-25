@@ -9926,11 +9926,8 @@ function storeFolderName(code, name) {
 function pickLatest(files) {
   if (!files || !files.length) return [];
   const pinned = files.filter((f) => f.pinned);
-  if (pinned.length) return pinned;
-  const sorted = [...files].sort((a, b) => {
-    const d = fileDate(b).localeCompare(fileDate(a));
-    return d || String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || ""));
-  });
+  if (pinned.length) return [...pinned].sort((a, b) => String(a.uploaded_at || "").localeCompare(String(b.uploaded_at || "")));
+  const sorted = [...files].sort((a, b) => String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || "")));
   return [sorted[0]];
 }
 function isoDue(v) {
@@ -9956,10 +9953,16 @@ function buildPackPlan(stores, files, today = (/* @__PURE__ */ new Date()).toISO
     const group = PACK_GROUPS.find((g) => g.toLowerCase() === String(st.category || "").trim().toLowerCase()) || "Uncategorised";
     const mine = byStore.get(st.code) || [];
     const cand = {};
+    const extraFiles = [];
     for (const f of mine) {
+      if (f.type === "other") {
+        if (f.in_pack) extraFiles.push({ key: "other", f });
+        continue;
+      }
       let k = f.type;
       if (k === "ev" || k === "forecourt") k = f.type === "forecourt" ? "forecourt" : splitEvFile(f, pfs);
       (cand[k] = cand[k] || []).push(f);
+      f._packType = k;
     }
     const dueFor = {
       fiveYear: due.fiveYear,
@@ -9986,24 +9989,17 @@ function buildPackPlan(stores, files, today = (/* @__PURE__ */ new Date()).toISO
       else if (!chosen.length) status = "Missing";
       else if (d && d < today) status = "Overdue";
       else status = "Present";
-      types[t.key] = {
-        required,
-        status,
-        due: d,
-        files: chosen.map((f) => ({
-          id: f.id,
-          filename: f.filename || "",
-          label: f.label || "",
-          size: f.size || 0,
-          date: f.doc_date || "",
-          uploaded: f.uploaded_at || "",
-          undated: !f.doc_date,
-          r2_key: f.r2_key
-        }))
-      };
+      types[t.key] = { required, status, due: d, linked: chosen.length > 1, files: chosen.map(shapeFile) };
+      const chosenIds = new Set(chosen.map((f) => f.id));
+      for (const f of have) if (f.in_pack && !chosenIds.has(f.id)) extraFiles.push({ key: t.key, f });
       if (chosen.some((f) => !f.doc_date)) flags.push(`${t.label}: certificate has no date (upload date used)`);
     }
     if (group === "Uncategorised") flags.push("No store type set on the chart");
+    const extras = extraFiles.map(({ key, f }) => {
+      const t = PACK_TYPES.find((x) => x.key === key);
+      if (t && !types[t.key].required) types[t.key].hasExtras = true;
+      return { folder: t ? t.folder : "Other documents", typeKey: key, file: shapeFile(f) };
+    });
     out.push({
       group,
       code: st.code,
@@ -10012,13 +10008,14 @@ function buildPackPlan(stores, files, today = (/* @__PURE__ */ new Date()).toISO
       pfs,
       folder: storeFolderName(st.code, st.name),
       types,
+      extras,
       flags
     });
   }
   out.sort((a, b) => a.group.localeCompare(b.group) || a.code.localeCompare(b.code));
   return out;
 }
-var PACK_TYPES, PACK_GROUPS, isPfsName, fileDate, hasDue;
+var PACK_TYPES, PACK_GROUPS, isPfsName, shapeFile, hasDue;
 var init_compliancepack = __esm({
   "src/lib/compliancepack.js"() {
     PACK_TYPES = [
@@ -10032,7 +10029,16 @@ var init_compliancepack = __esm({
     ];
     PACK_GROUPS = ["Cobra", "ELS", "ELS Private", "Retail"];
     isPfsName = (n) => /\bpfs\b|petrol|forecourt/i.test(String(n || ""));
-    fileDate = (f) => f.doc_date || f.uploaded_at || "";
+    shapeFile = (f) => ({
+      id: f.id,
+      filename: f.filename || "",
+      label: f.label || "",
+      size: f.size || 0,
+      date: f.doc_date || "",
+      uploaded: f.uploaded_at || "",
+      undated: !f.doc_date,
+      r2_key: f.r2_key
+    });
     hasDue = (due, k) => !!(due && due[k] && String(due[k]).trim());
   }
 });
@@ -15083,6 +15089,10 @@ async function ensure2(env) {
   } catch {
   }
   try {
+    await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN in_pack INTEGER DEFAULT 0").run();
+  } catch {
+  }
+  try {
     await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run();
   } catch {
   }
@@ -15221,6 +15231,12 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
 function jr2(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
+async function unpinOthers(env, tid, scheme, code, type, keepId) {
+  try {
+    await env.DB.prepare("UPDATE compliance_files SET pinned=0 WHERE tenant_id=? AND scheme=? AND code=? AND type=? AND id<>? AND pinned=1").bind(tid, scheme, code, type, keepId || 0).run();
+  } catch {
+  }
+}
 async function fileCertificatePdf(env, tid, { scheme = "coop", code, type, bytes, filename, docDate, bump = true, source = null, label: label2 = null }) {
   const sc = String(scheme || "coop");
   const cd = pad4(code);
@@ -15257,6 +15273,7 @@ async function fileCertificatePdf(env, tid, { scheme = "coop", code, type, bytes
     } catch {
     }
   }
+  if (bump && ty !== "other" && rowId) await unpinOthers(env, tid, sc, cd, ty, rowId);
   return { id: rowId, key };
 }
 async function coopSiteNumber(env, tid, code) {
@@ -15317,7 +15334,7 @@ async function complianceLevelFor(env, tid, me, scheme, viaToken) {
 }
 async function listStoreFiles(env, origin, tid, scheme, code) {
   const { results } = await env.DB.prepare(
-    "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+    "SELECT id, type, year, r2_key, filename, label, pinned, in_pack, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
   ).bind(tid, scheme, code).all();
   const byType = {};
   for (const r of results || []) {
@@ -15327,6 +15344,7 @@ async function listStoreFiles(env, origin, tid, scheme, code) {
       filename: r.filename,
       label: r.label || null,
       pinned: r.pinned ? 1 : 0,
+      inPack: r.in_pack ? 1 : 0,
       size: r.size,
       date: r.doc_date || r.uploaded_at,
       uploadedAt: r.uploaded_at || null,
@@ -15454,10 +15472,10 @@ async function handle8(request, env, ctx, url, sess) {
       return { code: r.code, category: r.category || "", name: r.sname || r.cname || "", postcode: r.spost || r.cpost || "", due };
     });
     const { results: frows } = await env.DB.prepare(
-      "SELECT id, code, type, filename, label, pinned, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND type<>'other'"
+      "SELECT id, code, type, filename, label, pinned, in_pack, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop'"
     ).bind(tid).all();
     const plan = buildPackPlan(stores, frows || []);
-    for (const st of plan) for (const t of Object.values(st.types)) for (const f of t.files) {
+    for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
       delete f.r2_key;
     }
@@ -15544,16 +15562,45 @@ async function handle8(request, env, ctx, url, sess) {
     const key = `compliance/${scheme}/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
     const docDate = String(form.get("date") || "") || null;
+    const link = !!form.get("link") && type !== "other";
+    let linkIds = [];
+    if (link) {
+      try {
+        const { results: cur } = await env.DB.prepare(
+          "SELECT id, pinned FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY uploaded_at DESC"
+        ).bind(tid, scheme, code, type).all();
+        const pinned = (cur || []).filter((r) => r.pinned);
+        linkIds = (pinned.length ? pinned : (cur || []).slice(0, 1)).map((r) => r.id);
+      } catch {
+      }
+    }
     const res = await env.DB.prepare(
       "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
     ).bind(tid, scheme, code, type, year, key, fname, label2, file.size || null, docDate, source, at).run();
+    const newId5 = res.meta ? res.meta.last_row_id : null;
+    if (form.get("inPack") && newId5) {
+      try {
+        await env.DB.prepare("UPDATE compliance_files SET in_pack=1 WHERE id=? AND tenant_id=?").bind(newId5, tid).run();
+      } catch {
+      }
+    }
+    if (link && newId5) {
+      for (const id of linkIds.concat([newId5])) {
+        try {
+          await env.DB.prepare("UPDATE compliance_files SET pinned=1 WHERE id=? AND tenant_id=?").bind(id, tid).run();
+        } catch {
+        }
+      }
+    } else if (form.get("bump") && type !== "other" && newId5) {
+      await unpinOthers(env, tid, scheme, code, type, newId5);
+    }
     if (form.get("bump") && docDate) {
       try {
         await bumpDue(env, tid, scheme, code, type, docDate);
       } catch {
       }
     }
-    return jr2({ ok: true, id: res.meta ? res.meta.last_row_id : null, key, code, type }, headers, 201);
+    return jr2({ ok: true, id: newId5, key, code, type, linked: link ? linkIds.length + 1 : 0 }, headers, 201);
   }
   if (sub === "/file-delete" && method === "POST") {
     if (!canWrite) return jr2({ error: "Compliance access required" }, headers, 403);
@@ -15575,6 +15622,13 @@ async function handle8(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const id = parseInt(b.id, 10);
     if (!id) return jr2({ error: "id required" }, headers, 400);
+    if (b.makeCurrent) {
+      const row = await env.DB.prepare("SELECT scheme, code, type FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      if (!row) return jr2({ error: "Not found" }, headers, 404);
+      await unpinOthers(env, tid, row.scheme, row.code, row.type, id);
+      await env.DB.prepare("UPDATE compliance_files SET pinned=1 WHERE tenant_id=? AND id=?").bind(tid, id).run();
+      return jr2({ ok: true }, headers);
+    }
     const sets = [], vals = [];
     if (b.label != null) {
       sets.push("label=?");
@@ -15583,6 +15637,10 @@ async function handle8(request, env, ctx, url, sess) {
     if (b.pinned != null) {
       sets.push("pinned=?");
       vals.push(b.pinned ? 1 : 0);
+    }
+    if (b.inPack != null) {
+      sets.push("in_pack=?");
+      vals.push(b.inPack ? 1 : 0);
     }
     if (b.type != null) {
       sets.push("type=?");
