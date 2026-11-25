@@ -383,6 +383,7 @@ var init_complianceaccess = __esm({
     CLIENT_TOOLS = [
       { key: "viewCerts", label: "Open certificates (\u{1F4C4})", def: true },
       { key: "sitePack", label: "Download a store's pack (\u{1F4E6})", def: true },
+      { key: "extras", label: "Extra documents ticked \u{1F4E6} In pack (manuals etc.)", def: false },
       { key: "wholePack", label: "Whole-estate compliance pack", def: false },
       { key: "export", label: "Export the chart to Excel", def: false },
       { key: "summary", label: "\uFF05 Summary", def: true },
@@ -15506,6 +15507,10 @@ async function handle8(request, env, ctx, url, sess) {
     ).bind(...oneCode ? [tid, oneCode] : [tid]).all();
     if (oneCode && !(srows || []).length) return jr2({ error: "That store isn't on the live chart" }, headers, 404);
     const plan = buildPackPlan(stores, frows || []);
+    if (toolOff("extras")) for (const st of plan) {
+      st.extras = [];
+      for (const t of Object.values(st.types)) delete t.hasExtras;
+    }
     for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
       delete f.r2_key;
@@ -15520,7 +15525,8 @@ async function handle8(request, env, ctx, url, sess) {
     const internal = viaToken || level === "edit";
     if (!internal) {
       for (const t of Object.keys(byType)) {
-        byType[t] = byType[t].filter((f) => f.inPack || f.current && t !== "other");
+        const extrasOk = !toolOff("extras");
+        byType[t] = byType[t].filter((f) => f.current && t !== "other" || extrasOk && f.inPack);
         if (!byType[t].length) delete byType[t];
       }
     }

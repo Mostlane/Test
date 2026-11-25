@@ -554,6 +554,11 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(...(oneCode ? [tid, oneCode] : [tid])).all();
     if (oneCode && !(srows || []).length) return jr({ error: "That store isn't on the live chart" }, headers, 404);
     const plan = buildPackPlan(stores, frows || []);
+    // Client without the "extras" switch: current documents only.
+    if (toolOff("extras")) for (const st of plan) {
+      st.extras = [];
+      for (const t of Object.values(st.types)) delete t.hasExtras;
+    }
     for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
       delete f.r2_key;
@@ -573,7 +578,10 @@ export async function handle(request, env, ctx, url, sess) {
     const internal = viaToken || level === "edit";
     if (!internal) {
       for (const t of Object.keys(byType)) {
-        byType[t] = byType[t].filter((f) => f.inPack || (f.current && t !== "other"));   // "Other" docs only when ticked for the pack
+        // A client sees ONLY current documents (a linked set counts as current);
+        // in-pack extras only when their "extras" switch is on.
+        const extrasOk = !toolOff("extras");
+        byType[t] = byType[t].filter((f) => (f.current && t !== "other") || (extrasOk && f.inPack));
         if (!byType[t].length) delete byType[t];
       }
     }
