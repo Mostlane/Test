@@ -16,12 +16,6 @@
     header.page button.refresh{background:rgba(255,255,255,.14);color:#fff;border:0;border-radius:9px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer;}
     .wrap{max-width:1180px;margin:14px auto 90px;padding:0 12px;}
     .infobox{background:#eef4fb;border:1px solid #cfe0f2;color:#274b73;border-radius:12px;padding:10px 13px;margin-bottom:12px;font-size:13px;}
-    .sumrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
-    .stat{flex:1 1 130px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;cursor:pointer;text-align:left;}
-    .stat .n{font-size:26px;font-weight:800;color:var(--brand);line-height:1;}
-    .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;margin-top:4px;}
-    .stat.amber .n{color:var(--warn);} .stat.blue .n{color:#1d4ed8;} .stat.green .n{color:var(--ok);} .stat.teal .n{color:#0f766e;} .stat.purple .n{color:#6d28d9;}
-    .stat.on{outline:2px solid var(--brand);outline-offset:1px;}
     .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
     .toolbar input{padding:8px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;min-width:200px;flex:1;}
     .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;}
@@ -93,6 +87,25 @@
     .qfoot{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 16px;}
     .qfoot .sub{margin-right:auto;color:#16a34a;font-weight:700;}
     @media(max-width:760px){ .need{max-width:180px;} }
+    /* Process timeline (the certificate pipeline) — each stage is a clickable step */
+    .tlcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px 8px 10px;margin-bottom:12px;}
+    .tlhead{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#6b7a90;margin:0 8px 12px;}
+    .timeline{display:flex;align-items:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 2px 4px;}
+    .tstep{flex:1 0 116px;position:relative;background:none;border:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;text-align:center;padding:2px 4px 0;font:inherit;color:inherit;}
+    .tstep::before{content:"";position:absolute;top:21px;left:-50%;width:100%;height:3px;background:var(--line);z-index:0;border-radius:2px;}
+    .tstep:first-child::before{display:none;}
+    .tdot{position:relative;z-index:1;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;line-height:1;background:#fff;border:3px solid var(--line);color:#64748b;font-variant-numeric:tabular-nums;transition:transform .08s;}
+    .tstep:hover .tdot{transform:translateY(-1px);}
+    .tlbl{margin-top:7px;font-size:11.5px;font-weight:700;color:#5a6b80;line-height:1.2;max-width:106px;}
+    .tstep.amber  .tdot{background:#fef3c7;border-color:#fcd34d;color:#92400e;}
+    .tstep.blue   .tdot{background:#dbeafe;border-color:#93c5fd;color:#1e40af;}
+    .tstep.green  .tdot{background:#dcfce7;border-color:#86efac;color:#166534;}
+    .tstep.teal   .tdot{background:#ccfbf1;border-color:#5eead4;color:#0f766e;}
+    .tstep.purple .tdot{background:#ede9fe;border-color:#c4b5fd;color:#5b21b6;}
+    .tstep.grey   .tdot{background:#eef2f6;border-color:#d7dee6;color:#5a6b80;}
+    .tstep.on .tdot{box-shadow:0 0 0 3px #fff,0 0 0 5px var(--brand);}
+    .tstep.on .tlbl{color:var(--brand);font-weight:800;}
+    .tstep.empty .tdot{opacity:.45;} .tstep.empty .tlbl{opacity:.6;}
   </style>
 </head>
 <body>
@@ -103,9 +116,12 @@
   </header>
 
   <div class="wrap">
-    <div class="infobox">Every site that needs <b>electrical (EICR) remedial works</b>, in one list. The status follows the real job: <b>To price</b> → <b>Priced</b> (quoted, awaiting the order) → <b>Ordered</b> (you have the REM order) → <b>In works</b> (engineer on it) → <b>Awaiting cert</b> (works done — re-issue the EICR) → <b>Done</b>.</div>
+    <div class="infobox">Every site that needs <b>electrical (EICR) remedial works</b>, in one list — tap a stage on the timeline to jump straight to it.</div>
 
-    <div class="sumrow" id="sumrow"></div>
+    <div class="tlcard">
+      <div class="tlhead">Certificate process — tap a stage</div>
+      <div class="timeline" id="timeline"></div>
+    </div>
 
     <div class="toolbar">
       <input id="search" type="search" placeholder="Search site, store number or REM number…" autocomplete="off">
@@ -164,7 +180,7 @@
       satisfactory: { label:"✓ Satisfactory", cls:"tl-sat", statcls:"sat" },
     };
     const STATUS_ORDER = ["to_price","priced","ordered","in_works","awaiting_cert","done","satisfactory"];
-    const TILE_ORDER = ["to_price","priced","ordered","in_works","awaiting_cert"];   // the action pipeline
+    const STEP_ORDER = ["to_price","priced","ordered","in_works","awaiting_cert","done"];   // the certificate pipeline (timeline)
 
     let ROWS = [];
     let FILTER = "live";                 // live = everything not done
@@ -316,19 +332,22 @@
 
     function render(){
       const c = counts();
-      // stat cards
-      g("sumrow").innerHTML = TILE_ORDER.map(k =>
-        '<button class="stat '+STATUS[k].statcls+(FILTER===k?' on':'')+'" data-f="'+k+'"><div class="n">'+c[k]+'</div><div class="l">'+STATUS[k].label+'</div></button>'
+      // Process timeline — one clickable step per pipeline stage, its live count in
+      // the dot; the current filter (if it's a stage) is highlighted.
+      g("timeline").innerHTML = STEP_ORDER.map(k =>
+        '<button class="tstep '+STATUS[k].statcls+(FILTER===k?' on':'')+(c[k]?'':' empty')+'" data-f="'+k+'" title="'+esc(STATUS[k].label)+' — '+c[k]+'">'
+        +   '<span class="tdot">'+c[k]+'</span>'
+        +   '<span class="tlbl">'+esc(STATUS[k].label)+'</span>'
+        + '</button>'
       ).join("");
-      // chips
+      // chips — the cross-cutting views (the per-stage views live on the timeline)
       const chip = (f,label,n) => '<button class="chip'+(FILTER===f?' on':'')+'" data-f="'+f+'">'+label+(n!=null?'<span class="n">'+n+'</span>':'')+'</button>';
       const live = c.to_price+c.priced+c.ordered+c.in_works+c.awaiting_cert;
       g("chips").innerHTML = [
-        chip("live","Live",live), chip("to_price","To price",c.to_price), chip("priced","Priced",c.priced),
-        chip("ordered","Ordered",c.ordered), chip("in_works","In works",c.in_works),
-        chip("awaiting_cert","Awaiting cert",c.awaiting_cert),
-        chip("c3only","C3 only",c.c3only), chip("satisfactory","Satisfactory",c.satisfactory),
-        chip("done","Done",c.done), chip("all","All",ROWS.length)
+        chip("live","Live",live),
+        chip("c3only","C3 only",c.c3only),
+        chip("satisfactory","Satisfactory",c.satisfactory),
+        chip("all","All",ROWS.length)
       ].join("");
 
       const q = g("search").value.trim().toLowerCase();
@@ -561,7 +580,7 @@
     g("qx").onclick = closeQuote;
     g("qov").addEventListener("click", e => { if(e.target===g("qov")) closeQuote(); });
     g("refreshBtn").onclick = load;
-    g("sumrow").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
+    g("timeline").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
     g("chips").addEventListener("click", e => { const b=e.target.closest("[data-f]"); if(b){ FILTER=b.getAttribute("data-f"); render(); } });
     g("tbody").addEventListener("click", e => {
       const qb = e.target.closest("[data-quote]");
