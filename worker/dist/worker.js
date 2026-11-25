@@ -32150,8 +32150,9 @@ function shapeUser2(u, perms, level = "full") {
   } catch {
     profile = {};
   }
+  const standby = profile.standby === true;
   if (level !== "full") {
-    const keep = level === "sla" ? ["staffType", "sortOrder", "areas", "clientOrg", "homePostcode", "homeLat", "homeLng"] : ["staffType", "sortOrder", "areas", "clientOrg"];
+    const keep = level === "sla" ? ["staffType", "sortOrder", "areas", "clientOrg", "homePostcode", "homeLat", "homeLng", "standby"] : ["staffType", "sortOrder", "areas", "clientOrg"];
     const slim = {};
     for (const k of keep) if (profile[k] !== void 0) slim[k] = profile[k];
     profile = slim;
@@ -32175,6 +32176,9 @@ function shapeUser2(u, perms, level = "full") {
     // else "jobs" = the full client jobs portal. "" for staff.
     ClientRole: profile.staffType === "client" ? profile.clientRole === "compliance" ? "compliance" : "jobs" : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
+    // Standby/occasional engineer: an active, assignable user who is hidden from
+    // the scheduler + auto-planning by default (they rarely have work booked).
+    Standby: standby,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the
     // Users-admin picker pre-fills each page's dropdown with the current level.

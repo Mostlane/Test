@@ -317,6 +317,11 @@
             <label>Staff type</label>
             <select id="f_staff"><option value="field">Field</option><option value="office">Office</option><option value="client">Client (external)</option></select>
           </div>
+          <div style="display:flex;align-items:flex-start;">
+            <label style="display:inline-flex;align-items:flex-start;gap:8px;font-weight:600;color:#334155;cursor:pointer;margin-top:22px;">
+              <input type="checkbox" id="p_standby" style="width:auto;margin-top:2px;"> Standby / occasional engineer <small style="font-weight:400;color:#64748b;">(stays active and assignable, but hidden from the scheduler &amp; auto-planning by default — for people who rarely have work booked)</small>
+            </label>
+          </div>
           <div id="clientOrgWrap" style="display:none;">
             <label>Client organisation</label>
             <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
@@ -1136,6 +1141,7 @@
       editingProfile = Object.assign({}, prof);
       PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
       g("p_noVehicle").checked = !!prof.noVehicle;
+      g("p_standby").checked = !!prof.standby;
       renderHomePin();
       // Clear any prior lock, set every switch from the user, then re-lock if
       // this user has Full access so all areas show on + locked.
@@ -1250,6 +1256,7 @@
         delete profile.clientRole;
       }
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
+      if (g("p_standby").checked) profile.standby = true; else delete profile.standby;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
       // Compliance access → profile.complianceAccess (per-scheme level).
