@@ -38,6 +38,9 @@ async function ensure(env) {
   // Self-migrating: add label + pinned + scheme to any existing table.
   try { await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN label TEXT").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN pinned INTEGER DEFAULT 0").run(); } catch {}
+  // in_pack = 1: also hand this file over in the client compliance pack (O&M
+  // manuals, PV install packs…) on top of the current certificate(s).
+  try { await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN in_pack INTEGER DEFAULT 0").run(); } catch {}
   // scheme = which compliance chart this belongs to: 'coop' (Southern Co-op) or
   // 'fareham' (Fareham Borough Council). Existing rows default to 'coop'.
   try { await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run(); } catch {}
@@ -218,6 +221,16 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 const safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
 
+// A new "current" certificate replaces any linked set the office pinned for
+// that store+type: without this an old pinned pair stays current for ever and
+// hides every later upload (chart 📄 AND the client pack).
+async function unpinOthers(env, tid, scheme, code, type, keepId) {
+  try {
+    await env.DB.prepare("UPDATE compliance_files SET pinned=0 WHERE tenant_id=? AND scheme=? AND code=? AND type=? AND id<>? AND pinned=1")
+      .bind(tid, scheme, code, type, keepId || 0).run();
+  } catch {}
+}
+
 // File a certificate PDF onto the compliance chart — the exact R2 + DB + bumpDue
 // path the manual /compliance/file upload uses, exposed so the portal-native
 // certificate module (routes/certs.js) can finalise a cert into the same place.
@@ -251,6 +264,7 @@ export async function fileCertificatePdf(env, tid, { scheme = "coop", code, type
     rowId = res.meta ? res.meta.last_row_id : null;
   }
   if (bump && docDate) { try { await bumpDue(env, tid, sc, cd, ty, docDate); } catch {} }
+  if (bump && ty !== "other" && rowId) await unpinOthers(env, tid, sc, cd, ty, rowId);
   return { id: rowId, key };
 }
 // A store's compliance code is a numeric store number (4-digit, zero-padded).
@@ -362,12 +376,12 @@ async function complianceLevelFor(env, tid, me, scheme, viaToken) {
 // resolved). Shared by GET /files and GET /site-files.
 async function listStoreFiles(env, origin, tid, scheme, code) {
   const { results } = await env.DB.prepare(
-    "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+    "SELECT id, type, year, r2_key, filename, label, pinned, in_pack, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
   ).bind(tid, scheme, code).all();
   const byType = {};
   for (const r of results || []) {
     (byType[r.type] = byType[r.type] || []).push({
-      id: r.id, year: r.year, filename: r.filename, label: r.label || null, pinned: r.pinned ? 1 : 0,
+      id: r.id, year: r.year, filename: r.filename, label: r.label || null, pinned: r.pinned ? 1 : 0, inPack: r.in_pack ? 1 : 0,
       size: r.size, date: r.doc_date || r.uploaded_at, uploadedAt: r.uploaded_at || null,
       url: await signedFileUrl(env, origin, "/compliance/file", r.r2_key),
     });
@@ -521,10 +535,10 @@ export async function handle(request, env, ctx, url, sess) {
       return { code: r.code, category: r.category || "", name: r.sname || r.cname || "", postcode: r.spost || r.cpost || "", due };
     });
     const { results: frows } = await env.DB.prepare(
-      "SELECT id, code, type, filename, label, pinned, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND type<>'other'"
+      "SELECT id, code, type, filename, label, pinned, in_pack, size, doc_date, uploaded_at, r2_key FROM compliance_files WHERE tenant_id=? AND scheme='coop'"
     ).bind(tid).all();
     const plan = buildPackPlan(stores, frows || []);
-    for (const st of plan) for (const t of Object.values(st.types)) for (const f of t.files) {
+    for (const st of plan) for (const f of [].concat(...Object.values(st.types).map((t) => t.files), st.extras.map((e) => e.file))) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
       delete f.r2_key;
     }
@@ -619,14 +633,36 @@ export async function handle(request, env, ctx, url, sess) {
     const key = `compliance/${scheme}/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
     const docDate = String(form.get("date") || "") || null;
+    // link=1: this document COMPLETES the one already current for the type (e.g.
+    // an EIC / Minor Works for the remedials on an unsatisfactory EICR) — keep
+    // the existing current one(s) AND this one current together.
+    const link = !!form.get("link") && type !== "other";
+    let linkIds = [];
+    if (link) {
+      try {
+        const { results: cur } = await env.DB.prepare(
+          "SELECT id, pinned FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY uploaded_at DESC"
+        ).bind(tid, scheme, code, type).all();
+        const pinned = (cur || []).filter((r) => r.pinned);
+        linkIds = (pinned.length ? pinned : (cur || []).slice(0, 1)).map((r) => r.id);
+      } catch {}
+    }
     const res = await env.DB.prepare(
       "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
     ).bind(tid, scheme, code, type, year, key, fname, label, file.size || null, docDate, source, at).run();
+    const newId = res.meta ? res.meta.last_row_id : null;
+    if (form.get("inPack") && newId) { try { await env.DB.prepare("UPDATE compliance_files SET in_pack=1 WHERE id=? AND tenant_id=?").bind(newId, tid).run(); } catch {} }
+    if (link && newId) {
+      for (const id of linkIds.concat([newId])) { try { await env.DB.prepare("UPDATE compliance_files SET pinned=1 WHERE id=? AND tenant_id=?").bind(id, tid).run(); } catch {} }
+    } else if (form.get("bump") && type !== "other" && newId) {
+      // a NEW current certificate retires any linked set pinned for the type
+      await unpinOthers(env, tid, scheme, code, type, newId);
+    }
     // A "current" drag-drop upload (bump=1) advances the store's due date from the
     // new cert's date; the historical backfill never sends bump, so it can't stomp
     // the live due dates.
     if (form.get("bump") && docDate) { try { await bumpDue(env, tid, scheme, code, type, docDate); } catch {} }
-    return jr({ ok: true, id: res.meta ? res.meta.last_row_id : null, key, code, type }, headers, 201);
+    return jr({ ok: true, id: newId, key, code, type, linked: link ? linkIds.length + 1 : 0 }, headers, 201);
   }
 
   // ── Delete a certificate (admin) ────────────────────────────────────────────
@@ -649,9 +685,19 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const id = parseInt(b.id, 10);
     if (!id) return jr({ error: "id required" }, headers, 400);
+    // makeCurrent: this file ALONE is current for its type (any linked set is
+    // cleared). Linking two together is the plain `pinned` toggle.
+    if (b.makeCurrent) {
+      const row = await env.DB.prepare("SELECT scheme, code, type FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      if (!row) return jr({ error: "Not found" }, headers, 404);
+      await unpinOthers(env, tid, row.scheme, row.code, row.type, id);
+      await env.DB.prepare("UPDATE compliance_files SET pinned=1 WHERE tenant_id=? AND id=?").bind(tid, id).run();
+      return jr({ ok: true }, headers);
+    }
     const sets = [], vals = [];
     if (b.label != null) { sets.push("label=?"); vals.push(String(b.label).slice(0, 160).trim() || null); }
     if (b.pinned != null) { sets.push("pinned=?"); vals.push(b.pinned ? 1 : 0); }
+    if (b.inPack != null) { sets.push("in_pack=?"); vals.push(b.inPack ? 1 : 0); }
     if (b.type != null) { sets.push("type=?"); vals.push(canonType(b.type)); }
     if (!sets.length) return jr({ error: "nothing to update" }, headers, 400);
     vals.push(tid, id);

@@ -755,6 +755,8 @@ function openUploadModal(code, file){
     <div class="row">
       <div><label>File</label><input type="file" id="uf"></div>
       <div><label>Certificate date (optional)</label><input type="date" id="ud"></div>
+      <label class="pin" style="display:flex;gap:6px;align-items:flex-start;margin:8px 0 0;font-size:13px"><input type="checkbox" id="ulink" style="margin-top:3px"> <span>🔗 This <b>completes</b> the current certificate (e.g. the install / Minor Works certificate for remedial works) — keep both as current, and don't move the due date</span></label>
+      <label class="pin" style="display:flex;gap:6px;align-items:center;margin:6px 0 0;font-size:13px"><input type="checkbox" id="upack"> <span>📦 Include in the client compliance pack</span></label>
     </div>
     <div id="udet" class="drop-note" style="min-height:1.1em;color:#0071CE;font-weight:600;margin:2px 0 0"></div>
     <div id="ufolderRow" style="display:none">
@@ -762,7 +764,7 @@ function openUploadModal(code, file){
       <input type="file" id="ufolder" webkitdirectory directory multiple>
       <p class="drop-note" style="margin:4px 0 0">Every PDF inside the folder <b>and its sub-folders</b> is added as its own named document (named from its file/sub-folder path). Desktop only.</p>
     </div>
-    <p class="drop-note">The most recently uploaded document becomes the current one (the one the 📄 icon opens); older ones are kept as previous versions (never deleted). To pin a specific document as the one shown, open 🗂 Documents and tick <b>keep</b> on it. A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
+    <p class="drop-note">The most recently uploaded document becomes the current one (the one the 📄 icon opens); older ones are kept as previous versions (never deleted). To choose which one counts, open 🗂 Documents and press <b>Make current</b> — or <b>🔗 Link</b> two together (e.g. an EICR plus its remedial certificate). A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
     <div class="actions">
       <button class="btn" id="udo">Upload</button>
       <button class="btn" style="background:#ccc;color:#000;" id="uc">Cancel</button>
@@ -826,6 +828,7 @@ function openUploadModal(code, file){
         const form=new FormData();
         form.append('file',f); form.append('code',code); form.append('type','other');
         form.append('label',lbl.slice(0,160)); form.append('filename',f.name);
+        if(modal.querySelector('#upack') && modal.querySelector('#upack').checked) form.append('inPack','1');
         try{ const r=await authFetch('/compliance/file',{method:'POST',body:form}); const out=await r.json().catch(()=>({})); (r.ok&&out.ok)?done++:failed++; }
         catch(e){ failed++; }
         btn.textContent=`Uploading… ${done+failed}/${pdfs.length}`;
@@ -850,7 +853,10 @@ function openUploadModal(code, file){
     if(name) form.append('label',name);
     // A named "Other" document is an extra file (e.g. O&M), not a due-dated
     // compliance type — so don't let it advance a due date.
-    if(sel!=='other') form.append('bump','1');
+    const linkIt = sel!=='other' && modal.querySelector('#ulink') && modal.querySelector('#ulink').checked;
+    if(linkIt) form.append('link','1');
+    else if(sel!=='other') form.append('bump','1');
+    if(modal.querySelector('#upack') && modal.querySelector('#upack').checked) form.append('inPack','1');
     form.append('filename',f.name);
     try{
       const r=await authFetch('/compliance/file',{method:'POST',body:form});
@@ -875,7 +881,7 @@ async function openVersionsModal(code){
   modal.innerHTML=`<div class="modal-content">
     <h2>Documents</h2>
     <p style="margin:.2em 0 .4em"><b>${esc(code)}</b> — ${esc(rec.siteName||'')}</p>
-    ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
+    ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. <b>Make current</b> = this is the one that counts for its type. <b>🔗 Link</b> two or more to make them current together (e.g. an unsatisfactory EICR + the certificate for the remedial works). Current documents always go in the client pack — tick <b>📦 In pack</b> to send anything else too (PV install manuals, O&amp;M files).</p>`:''}
     <div id="vlist">Loading…</div>
     <div class="actions">${canEdit?`<button class="btn" id="vadd">＋ Add document</button>`:''}<button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
   </div>`;
@@ -885,6 +891,7 @@ async function openVersionsModal(code){
   if(vaddBtn) vaddBtn.onclick=()=>{ modal.remove(); openUploadModal(code); };
   const host=modal.querySelector('#vlist');
 
+  let curCount={};
   // A doc's display name can carry a sub-folder path ("subA / report") from a
   // folder upload — split it so the folder becomes a small sub-header.
   const subParse=(name)=>{ const s=String(name||''); const i=s.lastIndexOf(' / '); return i>=0 ? {sub:s.slice(0,i).trim(), leaf:s.slice(i+3).trim()} : {sub:'', leaf:s}; };
@@ -893,10 +900,19 @@ async function openVersionsModal(code){
     const raw=f.label||f.filename||'file';
     const {leaf}=subParse(raw);
     const isOther=(type==='other');
-    const badge=isOther?'':(f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>');
+    const linked = !isOther && f.current && f.pinned && (curCount[type]||0) > 1;
+    const badge=isOther?'':(f.current?`<span class="ver-current">● current${linked?' 🔗':''}</span>`:'<span class="ver-old">previous</span>');
     const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
-    const keep=(canEdit&&!isOther)?`<label class="pin" title="Show this document as the current one (the 📄 icon opens it). Tick two or more of a type to link them as current together."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
-    const edit=canEdit?`${keep}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:'';
+    let tools='';
+    if(canEdit && !isOther){
+      if(!(f.current && (curCount[type]||0)===1)) tools+=`<button class="mini mkcur" type="button" title="This document alone is the current one for this type">Make current</button>`;
+      tools+=`<label class="pin" title="Link as current: tick two or more of a type and they count TOGETHER (e.g. unsatisfactory EICR + remedial certificate). All linked docs go in the pack."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> 🔗 Link</label>`;
+    }
+    const inPack = !isOther && f.current;
+    const pack = inPack
+      ? `<span class="pin" style="color:#166534" title="Current documents always go in the client pack">📦 in pack</span>`
+      : (canEdit ? `<label class="pin" title="Also include this document in the client compliance pack"><input type="checkbox" class="cbpack" ${f.inPack?'checked':''}> 📦 In pack</label>` : (f.inPack?'<span class="pin">📦 in pack</span>':''));
+    const edit=canEdit?`${tools}${pack}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:pack;
     return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${esc(f.id)}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${esc(f.url)}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
   }
   function typeHtml(type, items){
@@ -917,6 +933,7 @@ async function openVersionsModal(code){
     try{ const r=await authFetch('/compliance/files?code='+encodeURIComponent(code)); const j=await r.json(); files=j.files||{}; }
     catch(e){ host.innerHTML='<p>Could not load.</p>'; return; }
     const hasDocs=Object.keys(files).filter(t=>files[t]&&files[t].length);
+    curCount={}; Object.keys(files).forEach(t=>{ curCount[t]=(files[t]||[]).filter(f=>f.current).length; });
     const tracks=TRACKABLE.filter(t=>rec[t]);
     // only the applicable headings for this site: types it tracks or has docs for,
     // plus Other (always, as the catch-all + drop target).
@@ -938,6 +955,9 @@ async function openVersionsModal(code){
       const label=(sub?sub+' / ':'')+name.trim();   // keep it in its sub-folder
       await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,label})});
       refresh();
+    } else if(ev.target.classList.contains('mkcur')){
+      await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,makeCurrent:1})});
+      await refresh(); loadFromPortal();
     } else if(ev.target.classList.contains('del')){
       if(!confirm('Delete this document permanently? This cannot be undone.')) return;
       await authFetch('/compliance/file-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
@@ -945,8 +965,12 @@ async function openVersionsModal(code){
     }
   });
   host.addEventListener('change', async (ev)=>{
+    const id=+(ev.target.closest('.doc-row')||{dataset:{}}).dataset.id;
+    if(ev.target.classList.contains('cbpack')){
+      await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,inPack:ev.target.checked?1:0})});
+      refresh(); return;
+    }
     if(!ev.target.classList.contains('cbpin')) return;
-    const id=+ev.target.closest('.doc-row').dataset.id;
     await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pinned:ev.target.checked?1:0})});
     refresh();
   });
