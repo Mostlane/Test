@@ -254,8 +254,13 @@
       else rem = '<span class="sub">—</span>';
       // Actions
       const acts = [];
+      const c3 = isC3Only(r);
+      const preAwait = !r.worksJobId && !["awaiting_cert","done","satisfactory"].includes(s);
+      // C3-only sites have only recommendations — nothing to price, quote or order.
+      // One tap moves them straight to "Awaiting cert" (just the certificate to re-issue).
+      if (c3 && preAwait) acts.push('<button class="act primary" data-skip="'+esc(r.key)+'" title="C3 recommendations only — nothing to price or order. Move straight to Awaiting cert (just the certificate to update).">⏭ Skip pricing</button>');
       if (r.worksJobId) acts.push('<a class="act primary" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Open works job →</a>');
-      else if (s==="ordered") acts.push('<button class="act primary" data-mk="'+esc(r.key)+'">🔧 Create works job</button>');
+      else if (s==="ordered") acts.push('<button class="act'+(c3?'':' primary')+'" data-mk="'+esc(r.key)+'">🔧 Create works job</button>');
       // Send the works to an engineer BEFORE the client's order (Jamie): any priced/
       // to-price row with a linked EICR test job can raise the works job now.
       else if ((s==="priced"||s==="to_price") && r.jobId) acts.push('<button class="act" data-mk="'+esc(r.key)+'" title="Send the works to an engineer now — you can leave out anything already done">🔧 Create works job</button>');
@@ -441,6 +446,28 @@
     // an ordered row keeps the existing order-linkage path (createWorks).
     function startWorks(r, btn){ if (!(r.order && r.order.id) && worksLines(r).length) openWorksPicker(r); else createWorks(r, btn); }
 
+    // Skip pricing for a C3-only site — nothing chargeable, so move it straight to
+    // "Awaiting cert" (sets the manual stage; reversible from the ✏️ Status editor).
+    async function skipPricing(key, btn){
+      const r = ROWS.find(x=>x.key===key); if(!r) return;
+      const site = (r.storeCode?r.storeCode+" ":"")+(r.siteName||"");
+      const msg = "Skip pricing for "+site+"? It moves to “Awaiting cert” — no quote, order or works job needed (C3 recommendations only).";
+      const ok = window.MLUI ? await MLUI.confirm(msg, { title:"Skip pricing", okLabel:"Skip → Awaiting cert" }) : confirm(msg);
+      if(!ok) return;
+      if(btn) btn.disabled = true;
+      try{
+        const res = await authFetch("/certs/five-year/manual", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, stage:"awaiting_cert" }) }).then(x=>x.json());
+        if(res && res.ok){
+          r.manualStage = res.manualStage || "awaiting_cert";
+          if(window.MLUI && MLUI.toast) MLUI.toast("Pricing skipped — now awaiting the certificate");
+          render();
+          return;
+        }
+        (window.MLUI?MLUI.toast:alert)((res && res.error) || "Couldn't update.");
+        if(btn) btn.disabled = false;
+      }catch{ (window.MLUI?MLUI.toast:alert)("Couldn't update — check your signal."); if(btn) btn.disabled = false; }
+    }
+
     // ── Works-job picker ── choose which remedials go onto the job sent to the engineer.
     let WKEY = null;
     function worksItemRows(r){
@@ -599,6 +626,8 @@
       if (mk){ const r = ROWS.find(x=>x.key===mk.getAttribute("data-mk")); if(r) startWorks(r, mk); return; }
       const sq = e.target.closest("[data-saveq]");
       if (sq){ saveQuoteAmt(sq.getAttribute("data-saveq"), sq); return; }
+      const sk = e.target.closest("[data-skip]");
+      if (sk){ skipPricing(sk.getAttribute("data-skip"), sk); return; }
     });
 
     // Works-job picker wiring.
