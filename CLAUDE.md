@@ -4048,7 +4048,14 @@ five-year-remedials.html stays reachable via "Old 5-year page").
   case's; else "✓ Done & invoiced" (a closed case — the board now sends `lastClosed` per store), "📄 Certificate on
   file — not in the tracker" (a fiveYear cert with a doc/upload date in the year; board sends `certDocDate`), or
   "⚠ Concerto moved it on — no test found here" (rolled, no case, no cert). Concerto row carries `last` too.
-- Test `node --no-warnings worker/tools/test-eicr.mjs` (44). portal-config `?v=51`, SW `mostlane-v155`.
+- **Remedials done ON the test job (25 Nov 2026):** the office often sends the remedial electrician (Lionel) back on
+  the TEST job instead of the works job — re-opened or just re-assigned, and he taps Complete again. `testReusedForWorks`
+  = a "Complete" ≥5 days after the test first finished → the case moves to cert_update (logged "check"); rows carry
+  `worksOnTestJob {date,by}`. The test date is the FIRST completion (`testDoneAt`), not scheduledAt (a re-schedule for
+  the remedials used to hide the client order, which must be after the test). The order number is also taken from the
+  works job's `orderNumber` or an R#####/REM#### in the test job's reference. First seen at 0127 Forton Road; 9 sites at
+  the time (0622 0754 0667 0681 0125 0682 0687 0193 0127).
+- Test `node --no-warnings worker/tools/test-eicr.mjs` (51). portal-config `?v=51`, SW `mostlane-v155`.
 - **TODO/next (stage 2):** push alerts for red items; retire five-year-remedials.html once trusted; sla.js
   `maybeOpenFiveYearRemedial` still writes the old register (harmless).
 
