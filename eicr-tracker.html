@@ -70,6 +70,8 @@
     .pl-row .t{flex:1;font-size:14px;line-height:1.35;color:#1f2937;}
     .pl-row input{flex:1;}
     .pl-row .btn{flex:0 0 auto;}
+    .pl-h{flex:0 0 auto;cursor:grab;touch-action:none;user-select:none;color:#94a3b8;font-size:18px;padding:4px 6px;}
+    .pl-row.drag{background:#eef4ff;box-shadow:0 2px 8px rgba(0,0,0,.15);border-radius:6px;}
     .pl-copied{background:#16a34a !important;color:#fff !important;border-color:#16a34a !important;}
     @media(max-width:700px){ td.hide-s,th.hide-s{display:none;} .kv{grid-template-columns:110px 1fr;} }
   </style>
@@ -261,8 +263,8 @@ async function plCopy(text, btn){
 }
 function plRender(){
   const rows = PL.map((t,i) => PL_EDIT
-    ? `<div class="pl-row"><input data-pl-i="${i}" value="${esc(t)}"><button class="btn l" data-pl-up="${i}" title="Move up" ${i?"":"disabled"}>↑</button><button class="btn l" data-pl-del="${i}" title="Remove">✕</button></div>`
-    : `<div class="pl-row"><div class="t">${esc(t)}</div><button class="btn" data-pl-copy="${i}">📋 Copy</button></div>`).join("")
+    ? `<div class="pl-row"><input data-pl-i="${i}" value="${esc(t)}"><button class="btn l" data-pl-up="${i}" title="Move up" ${i?"":"disabled"}>↑</button><button class="btn l" data-pl-dn="${i}" title="Move down" ${i<PL.length-1?"":"disabled"}>↓</button><button class="btn l" data-pl-del="${i}" title="Remove">✕</button></div>`
+    : `<div class="pl-row" data-pl-row="${i}"><span class="pl-h" title="Drag to reorder">⠿</span><div class="t">${esc(t)}</div><button class="btn" data-pl-copy="${i}">📋 Copy</button></div>`).join("")
     || '<div class="empty">No lines yet — add one below.</div>';
   openModal(`<h3>📝 Paste text</h3><div class="sub">Tap Copy, then paste into the certificate.</div>
     <div id="plList">${rows}</div>
@@ -273,6 +275,25 @@ function plRender(){
   mc.querySelectorAll("[data-pl-i]").forEach(inp => inp.onchange = () => { PL[+inp.dataset.plI] = inp.value.trim(); PL = PL.filter(Boolean); plSave(); });
   mc.querySelectorAll("[data-pl-del]").forEach(b => b.onclick = () => { PL.splice(+b.dataset.plDel, 1); plSave(); plRender(); });
   mc.querySelectorAll("[data-pl-up]").forEach(b => b.onclick = () => { const i = +b.dataset.plUp; if (i<1) return; [PL[i-1],PL[i]] = [PL[i],PL[i-1]]; plSave(); plRender(); });
+  mc.querySelectorAll("[data-pl-dn]").forEach(b => b.onclick = () => { const i = +b.dataset.plDn; if (i>=PL.length-1) return; [PL[i+1],PL[i]] = [PL[i],PL[i+1]]; plSave(); plRender(); });
+  mc.querySelectorAll(".pl-h").forEach(h => h.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const row = h.closest(".pl-row"), list = row.parentNode;
+    row.classList.add("drag");
+    const move = ev => {
+      const rows = [...list.querySelectorAll("[data-pl-row]")].filter(r => r !== row);
+      const after = rows.find(r => { const b = r.getBoundingClientRect(); return ev.clientY < b.top + b.height/2; });
+      if (after) list.insertBefore(row, after); else list.appendChild(row);
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); document.removeEventListener("pointercancel", up);
+      row.classList.remove("drag");
+      const order = [...list.querySelectorAll("[data-pl-row]")].map(r => PL[+r.dataset.plRow]);
+      if (order.some((t,k) => t !== PL[k])) { PL = order; plSave(); }
+      plRender();
+    };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up); document.addEventListener("pointercancel", up);
+  }));
   const add = () => { const v = g("plNew").value.trim(); if (!v) return; PL.push(v); plSave(); plRender(); setTimeout(()=>g("plNew") && g("plNew").focus(), 0); };
   g("plAdd").onclick = add;
   g("plNew").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
