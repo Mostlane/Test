@@ -410,6 +410,22 @@ function openModal(html){ g("mc").innerHTML = html; g("mb").classList.add("on");
 function closeModal(){ g("mb").classList.remove("on"); }
 g("mb").addEventListener("click", e => { if (e.target===g("mb") || e.target.closest("[data-close]")) closeModal(); });
 
+// After a 5-year certificate is filed: if the site's EICR date carries a 🚩 flag on
+// the compliance chart, say so and offer to remove it (back to the normal date colour).
+const FLAG_LABEL = { unsat:"🚩 Unsatisfactory — remedials to quote", quoted:"Quote sent — awaiting the client's order", ordered:"Order received — works to do" };
+async function offerFlagRemoval(r){
+  try {
+    const j = await authFetch("/compliance/unsat-flags?scheme=coop").then(x=>x.json());
+    const codes = (j && j.codes) || {};
+    const k = Object.keys(codes).find(c => Number(c) === Number(r.code));
+    if (!k) return;
+    const v = codes[k]; const st = (v && typeof v === "object" && v.s) || "unsat";
+    const ok = await confirmBox("⚠️ "+r.code+" "+r.name+" is flagged on the compliance chart:\n\n"+(FLAG_LABEL[st]||st)+"\n\nDo you want to remove the flag so its EICR date goes back to normal?", { title:"This site is flagged", okLabel:"Remove flag" });
+    if (!ok) return;
+    await post("/compliance/unsat-flag?scheme=coop", { code:k, on:false });
+    toast("Flag removed for "+r.code);
+  } catch(e){ toast("Couldn't check or remove the flag: "+(e.message||e)); }
+}
 async function post(path, body){
   const r = await authFetch(path, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
   const j = await r.json().catch(()=>({}));
@@ -591,7 +607,7 @@ function uploadCert(r){
       if (isUpdate) { form.append("label", "Updated after remedials — "+f.name); form.append("link", "1"); }
       else form.append("bump", "1");
       g("ucGo").disabled = true; g("ucMsg").textContent = "Filing…";
-      try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); closeModal(); toast("Certificate filed for "+r.code+(isUpdate || !date ? "" : " — next due "+fmtD(addYearsIso(date,5)))); load(); }
+      try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); closeModal(); toast("Certificate filed for "+r.code+(isUpdate || !date ? "" : " — next due "+fmtD(addYearsIso(date,5)))); await offerFlagRemoval(r); load(); }
       catch(e){ g("ucGo").disabled = false; g("ucMsg").textContent = "Upload failed: "+(e.message||e); }
     };
   };
