@@ -197,4 +197,23 @@ ok("working days skip weekends", eicr.workingDaysSince("2026-11-20T10:00:00Z", "
   ok("no test job: undated cert uploaded after case opened counts", f({ uploadedAt: "2026-11-25T13:10:15Z", docDate: "" }, "", cs) === true);
   ok("test job: upload before test does not count", f({ uploadedAt: "2026-10-01T09:00:00Z", docDate: "2026-11-01" }, "2026-11-01", cs) === false);
 }
+{
+  // remedial works job raised by hand ("REM0196 Bournemouth, Belle Vue Road")
+  const F = eicr.findManualWorksJob;
+  const test = { id: "t", elecTest: true, siteCode: "171", createdAt: "2026-09-14T14:18:47Z" };
+  const rem = { id: "w", siteCode: "171", helpdeskRef: "REM0196 Bournemouth, Belle Vue Road", status: "Closed Jobs", createdAt: "2026-10-02T14:21:16Z", description: "C2 — No main bonding" };
+  const other = { id: "x", siteCode: "171", helpdeskRef: "30445-Bournemouth, Belle Vue Road", status: "Closed Jobs", createdAt: "2026-09-24T09:40:01Z", description: "water heater" };
+  const c = { store_code: "0171", order_number: "REM0196" };
+  ok("REM job found", (F(c, test, [test, other, rem], new Set()) || {}).id === "w");
+  ok("REM ref found even when the case order is a Concerto number", (F({ store_code: "0171", order_number: "00033692/3" }, test, [test, rem], new Set()) || {}).id === "w");
+  ok("order number in the ref found", (F({ store_code: "0171", order_number: "R27797" }, test, [{ ...other, id: "y", helpdeskRef: "R27797 Bournemouth", createdAt: "2026-10-05" }], new Set()) || {}).id === "y");
+  ok("other store ignored", F(c, test, [{ ...rem, siteCode: "172" }], new Set()) === null);
+  ok("made before the test ignored", F(c, test, [{ ...rem, createdAt: "2026-09-01" }], new Set()) === null);
+  ok("EM remedial ignored", F(c, test, [{ ...rem, description: "12x light failures; 2, 6" }], new Set()) === null);
+  ok("already used ignored", F(c, test, [rem], new Set(["w"])) === null);
+  ok("ordinary reactive job ignored", F(c, test, [other], new Set()) === null);
+  const d = eicr.deriveStatus({ test_job_id: "t", works_job_id: "w", outcome: "remedials", order_number: "REM0196" },
+    { jobs: new Map([["t", { ...test, status: "Complete" }], ["w", rem]]), doneCats: new Set() });
+  ok("finished REM job → certificate to update", d.status === "cert_update", d.status);
+}
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

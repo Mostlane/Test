@@ -49707,6 +49707,26 @@ function newCase(code, name, due, by, source) {
     created_at: nowIso()
   };
 }
+var EM_JOB_RE = /light failure|emergency light|\bEM\d|batter(y|ies)/i;
+function findManualWorksJob(c, t, allJobs, usedWorks) {
+  const code = Number(c.store_code);
+  const since = t ? String(t.createdAt || t.scheduledAt || "").slice(0, 10) : "";
+  const ord = String(c.order_number || "").toUpperCase();
+  const tok = (s) => String(s || "").toUpperCase().split(/[^A-Z0-9/]+/);
+  const hits = allJobs.filter((j) => {
+    if (!j || j.elecTest || j.emTest || j.pat || j.pumpMaintenance || jobCancelled(j)) return false;
+    if (t && j.id === t.id) return false;
+    if (usedWorks && usedWorks.has(j.id)) return false;
+    if (Number(j.siteCode) !== code || !Number.isFinite(code)) return false;
+    if (/^emrem:|^empat-/i.test(String(j.id))) return false;
+    if (since && String(j.createdAt || "").slice(0, 10) < since) return false;
+    if (EM_JOB_RE.test(String(j.description || ""))) return false;
+    const ref = String(j.helpdeskRef || "");
+    return ord && tok(ref).includes(ord) || /^\s*REM\d{3,}\b/i.test(ref);
+  });
+  hits.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return hits[0] || null;
+}
 async function reconcile(env, tid, opts) {
   await ensureTables9(env);
   const [stores, casesRaw, allJobs, doneCats, orders] = await Promise.all([
@@ -49723,6 +49743,7 @@ async function reconcile(env, tid, opts) {
   for (const c of cases) if (!c.closed_at) openByCode.set(c.store_code, c);
   const usedTestJobs = new Set(cases.map((c) => c.test_job_id).filter(Boolean));
   const usedOrders = new Set(cases.map((c) => c.order_id).filter(Boolean));
+  const usedWorks = new Set(cases.map((c) => c.works_job_id).filter(Boolean));
   const changed = /* @__PURE__ */ new Set();
   const tests = allJobs.filter((j) => j.elecTest && !jobCancelled(j) && pad42(j.siteCode));
   tests.sort((a, b) => String(a.createdAt || a.scheduledAt || "").localeCompare(String(b.createdAt || b.scheduledAt || "")));
@@ -49731,6 +49752,14 @@ async function reconcile(env, tid, opts) {
     const code = pad42(j.siteCode);
     let c = openByCode.get(code);
     if (c && c.test_job_id && c.test_job_id !== j.id) {
+      const cur = jobs.get(c.test_job_id);
+      if (cur && !jobFinished(cur, doneCats) && jobFinished(j, doneCats)) {
+        logPush(c, "system", `Test job swapped to the one that was done: ${j.helpdeskRef || j.id}`);
+        c.test_job_id = j.id;
+        usedTestJobs.add(j.id);
+        changed.add(c);
+        continue;
+      }
       if (c.status !== "done") continue;
       c.closed_at = c.closed_at || nowIso();
       changed.add(c);
@@ -49754,6 +49783,15 @@ async function reconcile(env, tid, opts) {
       c.works_job_id = t.remedialsWorksJobId;
       logPush(c, "system", "Works job linked");
       changed.add(c);
+    }
+    if (!c.works_job_id) {
+      const w = findManualWorksJob(c, t, allJobs, usedWorks);
+      if (w) {
+        c.works_job_id = w.id;
+        usedWorks.add(w.id);
+        logPush(c, "system", `Found existing remedial job: ${w.helpdeskRef || w.id}`);
+        changed.add(c);
+      }
     }
     const t2 = c.test_job_id && jobs.get(c.test_job_id);
     const out3 = c.outcome || (t2 && jobFinished(t2, doneCats) ? testOutcome(t2) : "");

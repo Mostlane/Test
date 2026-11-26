@@ -278,6 +278,27 @@ function newCase(code, name, due, by, source) {
 }
 
 // ─── the reconcile pass (every board load) ─────────────────────────────────
+// A remedial works job the office raised by hand. Pure (exported for the tests).
+const EM_JOB_RE = /light failure|emergency light|\bEM\d|batter(y|ies)/i;
+export function findManualWorksJob(c, t, allJobs, usedWorks) {
+  const code = Number(c.store_code);
+  const since = t ? String(t.createdAt || t.scheduledAt || "").slice(0, 10) : "";
+  const ord = String(c.order_number || "").toUpperCase();
+  const tok = s => String(s || "").toUpperCase().split(/[^A-Z0-9/]+/);
+  const hits = allJobs.filter(j => {
+    if (!j || j.elecTest || j.emTest || j.pat || j.pumpMaintenance || jobCancelled(j)) return false;
+    if (t && j.id === t.id) return false;
+    if (usedWorks && usedWorks.has(j.id)) return false;
+    if (Number(j.siteCode) !== code || !Number.isFinite(code)) return false;
+    if (/^emrem:|^empat-/i.test(String(j.id))) return false;
+    if (since && String(j.createdAt || "").slice(0, 10) < since) return false;
+    if (EM_JOB_RE.test(String(j.description || ""))) return false;
+    const ref = String(j.helpdeskRef || "");
+    return (ord && tok(ref).includes(ord)) || /^\s*REM\d{3,}\b/i.test(ref);
+  });
+  hits.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return hits[0] || null;
+}
 async function reconcile(env, tid, opts) {
   await ensureTables(env);
   const [stores, casesRaw, allJobs, doneCats, orders] = await Promise.all([
@@ -290,6 +311,7 @@ async function reconcile(env, tid, opts) {
   for (const c of cases) if (!c.closed_at) openByCode.set(c.store_code, c);
   const usedTestJobs = new Set(cases.map(c => c.test_job_id).filter(Boolean));
   const usedOrders = new Set(cases.map(c => c.order_id).filter(Boolean));
+  const usedWorks = new Set(cases.map(c => c.works_job_id).filter(Boolean));
   const changed = new Set();
 
   // 1) every electrical test job in the portal belongs to a case.
@@ -300,6 +322,12 @@ async function reconcile(env, tid, opts) {
     const code = pad4(j.siteCode);
     let c = openByCode.get(code);
     if (c && c.test_job_id && c.test_job_id !== j.id) {
+      // a duplicate test job: the linked one never ran, this one did → swap.
+      const cur = jobs.get(c.test_job_id);
+      if (cur && !jobFinished(cur, doneCats) && jobFinished(j, doneCats)) {
+        logPush(c, "system", `Test job swapped to the one that was done: ${j.helpdeskRef || j.id}`);
+        c.test_job_id = j.id; usedTestJobs.add(j.id); changed.add(c); continue;
+      }
       // the open case already has a test — a newer test starts a new cycle only if the old one is done
       if (c.status !== "done") continue;
       c.closed_at = c.closed_at || nowIso(); changed.add(c);
@@ -321,6 +349,13 @@ async function reconcile(env, tid, opts) {
     const t = c.test_job_id && jobs.get(c.test_job_id);
     if (!c.works_job_id && t && t.remedialsWorksJobId && jobs.get(t.remedialsWorksJobId) && !jobCancelled(jobs.get(t.remedialsWorksJobId))) {
       c.works_job_id = t.remedialsWorksJobId; logPush(c, "system", "Works job linked"); changed.add(c);
+    }
+    // 2b) a remedial works job raised by hand (not from the test's remedials) —
+    // e.g. "REM0196 Bournemouth, Belle Vue Road": same store, made after the test,
+    // its reference carries the case's order number or a REM number.
+    if (!c.works_job_id) {
+      const w = findManualWorksJob(c, t, allJobs, usedWorks);
+      if (w) { c.works_job_id = w.id; usedWorks.add(w.id); logPush(c, "system", `Found existing remedial job: ${w.helpdeskRef || w.id}`); changed.add(c); }
     }
     // 3) an electrical client order for the store after the test → the order.
     const t2 = c.test_job_id && jobs.get(c.test_job_id);

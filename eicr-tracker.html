@@ -221,7 +221,8 @@ function actions(r, tab){
     case "due": a("book","📅 Book test"); break;
     case "to_quote": a("quote","📋 Quote text","l"); a("quote-sent","✓ Quote sent"); break;
     case "quoted": a("order","📦 Order received"); break;
-    case "ordered": a("works","🔧 Create works job"); break;
+    case "ordered": a("works","🔧 Create works job"); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+    case "works_booked": a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
     case "cert_signoff": case "cert_update":
       a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
   }
@@ -562,12 +563,17 @@ function uploadCert(r){
   const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,image/*";
   inp.onchange = async () => {
     const f = inp.files && inp.files[0]; if (!f) return;
-    const isUpdate = r.status === "cert_update";
-    openModal(`<h3>⬆ ${isUpdate ? "Updated certificate" : "Certificate"} — ${esc(r.code)} ${esc(r.name)}</h3>
+    // On a remedial case before the update step, ask which certificate this is.
+    const ask = ["ordered","works_booked","quoted","to_quote"].includes(r.status);
+    let isUpdate = r.status === "cert_update" || (ask && !!r.certFiledSinceTest);
+    openModal(`<h3>⬆ Certificate — ${esc(r.code)} ${esc(r.name)}</h3>
+      ${ask ? `<label>Which certificate is this?</label><select id="ucKind"><option value="test"${isUpdate?"":" selected"}>The test certificate (starts the new 5 years)</option><option value="update"${isUpdate?" selected":""}>The updated certificate after the remedials</option></select>` : ""}
       <div class="sub" id="ucRead">Reading the certificate…</div>
       <label>Certificate date</label><input type="date" id="ucDate">
       <div class="sub" id="ucNote">${isUpdate ? "Filed alongside the original certificate — the due date is not moved on for an update after remedials." : "The chart's next 5-year due date is worked out from this date."}</div>
       <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn g" id="ucGo">File certificate</button></div><div class="sub" id="ucMsg"></div>`);
+    const UPD_NOTE = "Filed alongside the original certificate — the due date is not moved on for an update after remedials.", TEST_NOTE = "The chart's next 5-year due date is worked out from this date.";
+    if (g("ucKind")) g("ucKind").onchange = () => { isUpdate = g("ucKind").value === "update"; g("ucNote").textContent = isUpdate ? UPD_NOTE : TEST_NOTE; };
     const info = await readCertInfo(f);
     const dEl = g("ucDate"); if (!dEl) return;
     if (info.date) dEl.value = info.date;
@@ -593,9 +599,10 @@ function uploadCert(r){
 function addYearsIso(iso, n){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||""); return m ? `${+m[1]+n}-${m[2]}-${m[3]}` : ""; }
 async function signOff(r){
   const warn = r.certFiledSinceTest ? "" : "\n\nNo 5-year certificate has been filed on the chart since the test — upload it first if you haven't.";
-  const ok = await confirmBox((r.status==="cert_update"?"Updated certificate for ":"Certificate for ")+r.code+" "+r.name+" checked and signed off?"+warn, { title:"Sign off", okLabel:"✓ Sign off" });
+  const upd = ["cert_update","ordered","works_booked","quoted","to_quote"].includes(r.status);
+  const ok = await confirmBox((upd?"Updated certificate for ":"Certificate for ")+r.code+" "+r.name+" checked and signed off?"+warn, { title:"Sign off", okLabel:"✓ Sign off" });
   if (!ok) return;
-  try { await post("/eicr/signoff", { caseId:r.caseId }); load(); } catch(e){ toast(e.message); }
+  try { await post("/eicr/signoff", { caseId:r.caseId, kind: upd ? "update" : undefined }); load(); } catch(e){ toast(e.message); }
 }
 async function invoice(r, which){
   openModal(`<h3>🧾 ${which==="works"?"Remedial works":"Test"} invoiced — ${esc(r.code)} ${esc(r.name)}</h3>
