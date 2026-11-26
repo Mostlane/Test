@@ -217,14 +217,15 @@ function actions(r, tab){
     if (r.invoices.works && !r.invoices.works.done) a("inv-works","✓ Works invoiced","g");
     return b.join(" ");
   }
+  const filed = () => { if (r.certFiledSinceTest) b.push('<span class="sub" style="color:#15803d;font-weight:700;white-space:nowrap" title="A 5-year certificate has been filed on the chart for this test">✓ Filed</span>'); };
   switch (r.status) {
     case "due": a("book","📅 Book test"); break;
     case "to_quote": a("quote","📋 Quote text","l"); a("quote-sent","✓ Quote sent"); break;
     case "quoted": a("order","📦 Order received"); break;
-    case "ordered": a("works","🔧 Create works job"); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
-    case "works_booked": a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+    case "ordered": a("works","🔧 Create works job"); filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+    case "works_booked": filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
     case "cert_signoff": case "cert_update":
-      a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+      filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
   }
   return b.join(" ");
 }
