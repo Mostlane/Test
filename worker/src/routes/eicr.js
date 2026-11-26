@@ -415,7 +415,7 @@ function shapeRow(store, c, ctx, extra) {
     test: jobView(t), works: jobView(w),
     worksOnTestJob: reusedHit ? { date: String(reusedHit.at).slice(0, 10), by: reusedHit.by } : null,
     remedials: t ? remSummary(t) : null,
-    quote: c && (c.quote_at || c.quote_ref) ? { ref: c.quote_ref || "", value: extra.money ? c.quote_value : undefined, at: c.quote_at } : null,
+    quote: c && (c.quote_at || c.quote_ref || c.quote_value != null) ? { ref: c.quote_ref || "", value: extra.money ? c.quote_value : undefined, at: c.quote_at } : null,
     order: c && c.order_number ? { number: c.order_number, value: extra.money ? c.order_value : undefined, at: c.order_at } : null,
     certSigned: c && c.cert_signed_at ? { at: c.cert_signed_at, by: c.cert_signed_by } : null,
     certUpdated: c && c.cert_updated_at ? { at: c.cert_updated_at, by: c.cert_updated_by } : null,
