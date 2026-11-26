@@ -29,6 +29,7 @@
     .sec{margin:16px 0 6px;display:flex;align-items:baseline;gap:8px;}
     .sec h2{font-size:15px;margin:0;color:var(--brand);}
     .sec .who{font-size:12px;color:var(--muted);}
+    .sec .tot{font-size:12px;font-weight:700;color:#0f3b6e;background:#e8f0fb;border:1px solid #c9d9ef;border-radius:999px;padding:1px 9px;}
     .sec .cnt{font-size:12px;font-weight:800;background:#e2e8f0;border-radius:999px;padding:1px 8px;}
     .tw{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);}
     table{width:100%;border-collapse:collapse;font-size:13.5px;}
@@ -128,6 +129,19 @@ const SECTIONS = {
     { key:"iw", title:"🧾 Remedial works to invoice", who:"", f:r=>r.invoices && r.invoices.works && !r.invoices.works.done },
   ],
 };
+// Section totals: the quote £ and order £ across the rows in a section (money users only —
+// the board leaves the values out for everyone else, so nothing shows for them).
+function totalsHtml(list){
+  let q = 0, qn = 0, o = 0, on = 0;
+  for (const r of list) {
+    const qv = r.quote && r.quote.value; if (qv != null && qv !== "" && !isNaN(qv)) { q += Number(qv); qn++; }
+    const ov = r.order && r.order.value; if (ov != null && ov !== "" && !isNaN(ov)) { o += Number(ov); on++; }
+  }
+  let h = "";
+  if (qn) h += `<span class="tot" title="${qn} quote value${qn===1?"":"s"}">Quotes ${money(q)}</span>`;
+  if (on) h += `<span class="tot" title="${on} order value${on===1?"":"s"}">Orders ${money(o)}</span>`;
+  return h;
+}
 function daysTo(iso){ return Math.round((Date.parse(iso+"T12:00:00Z") - Date.now())/86400000); }
 
 async function load(){
@@ -170,12 +184,12 @@ function render(){
   let html = "";
   if (TAB==="all") {
     const list = rows.filter(r => !ALLF || r.status===ALLF);
-    html = `<div class="sec"><h2>Every Co-op site, in due order</h2><span class="cnt">${list.length}</span></div>` + table(list, "all");
+    html = `<div class="sec"><h2>Every Co-op site, in due order</h2><span class="cnt">${list.length}</span>${totalsHtml(list)}</div>` + table(list, "all");
   } else {
     if (TAB==="signoff" && !D.canSignOff) html += '<div class="note">Only Full Access users can sign off a certificate. You can still open and upload certificates here.</div>';
     for (const s of SECTIONS[TAB]) {
       const list = rows.filter(s.f).sort((a,b)=> (b.alert==="red")-(a.alert==="red") || String(a.due||"").localeCompare(String(b.due||"")));
-      html += `<div class="sec"><h2>${s.title}</h2><span class="cnt">${list.length}</span><span class="who">${esc(s.who)}</span></div>` + (list.length ? table(list, TAB) : '<div class="tw"><div class="empty">Nothing here. ✓</div></div>');
+      html += `<div class="sec"><h2>${s.title}</h2><span class="cnt">${list.length}</span>${totalsHtml(list)}<span class="who">${esc(s.who)}</span></div>` + (list.length ? table(list, TAB) : '<div class="tw"><div class="empty">Nothing here. ✓</div></div>');
     }
   }
   g("body").innerHTML = html;
@@ -329,9 +343,9 @@ function renderAwaiting(){
   const quoted = rows.filter(r=>r.status==="quoted").sort((a,b)=>String(quotedAt(a)).localeCompare(String(quotedAt(b))));
   const toQuote = rows.filter(r=>r.status==="to_quote").sort((a,b)=>String(a.statusAt||"").localeCompare(String(b.statusAt||"")));
   g("body").innerHTML =
-    `<div class="sec"><h2>⏳ Quoted — awaiting the client's order</h2><span class="cnt">${quoted.length}</span><span class="who">Oldest quote first · amber after 2 weeks, red after 4</span></div>`
+    `<div class="sec"><h2>⏳ Quoted — awaiting the client's order</h2><span class="cnt">${quoted.length}</span>${totalsHtml(quoted)}<span class="who">Oldest quote first · amber after 2 weeks, red after 4</span></div>`
     + (quoted.length ? awaitTable(quoted, true) : '<div class="tw"><div class="empty">Nothing waiting on an order. ✓</div></div>')
-    + `<div class="sec"><h2>💬 Still to quote</h2><span class="cnt">${toQuote.length}</span><span class="who">Remedials found — quote not sent yet</span></div>`
+    + `<div class="sec"><h2>💬 Still to quote</h2><span class="cnt">${toQuote.length}</span>${totalsHtml(toQuote)}<span class="who">Remedials found — quote not sent yet</span></div>`
     + (toQuote.length ? awaitTable(toQuote, false) : '<div class="tw"><div class="empty">Nothing to quote. ✓</div></div>');
 }
 
