@@ -432,6 +432,8 @@ function shapeRow(store, c, ctx, extra) {
     const wd = workingDaysSince(c.status_at);
     if (wd > TIMERS[status]) { alert = status === "quoted" ? "amber" : "red"; alertText = `${wd} working days in this status`; }
   }
+  const instRec = extra.inst ? extra.inst[store ? store.code : (c && c.store_code)] : null;
+  if (instRec && status === "due") { alert = ""; alertText = ""; }
   const need = c ? invoicesNeeded(c) : [];
   const conc = extra.concerto.get(store ? store.code : (c && c.store_code));
   const cert = extra.certs.get(store ? store.code : (c && c.store_code));
@@ -441,8 +443,8 @@ function shapeRow(store, c, ctx, extra) {
     code: store ? store.code : c.store_code,
     name: (store && store.name) || (c && c.site_name) || "",
     category: store ? store.category : "",
-    due, closedStore: !!(store && store.closed), onChart: !!store,
-    caseId: c ? c.id : null, status, statusLabel: S[status] ? S[status].label : status, who: S[status] ? S[status].who : "",
+    due, installRec: instRec ? { at: instRec.at || "", by: instRec.by || "" } : null, closedStore: !!(store && store.closed), onChart: !!store,
+    caseId: c ? c.id : null, status, statusLabel: instRec && status === "due" ? "Install records required" : (S[status] ? S[status].label : status), who: S[status] ? S[status].who : "",
     statusAt: c ? c.status_at : null, statusBy: c ? c.status_by : "", manual: !!(c && c.status_manual),
     daysInStatus: c && c.status_at ? workingDaysSince(c.status_at) : null,
     alert, alertText,
@@ -467,10 +469,19 @@ function shapeRow(store, c, ctx, extra) {
   };
 }
 
+// 📂 "Install Records Required" — a new site with no 5-year test yet: its installation
+// certificates are needed instead of a test date. Map {code:{at,by}} in app_config,
+// shared with the compliance chart (compliance.js /installrec-flag).
+export async function installRecMap(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "compliance:installrec:coop:" + tid).first();
+    return JSON.parse((row && row.value) || "{}") || {};
+  } catch { return {}; }
+}
 async function buildBoard(env, tid, money) {
   const r = await reconcile(env, tid);
-  const [conc, certs] = await Promise.all([concertoRows(env, tid), certFiles(env, tid)]);
-  const extra = { concerto: conc.byCode, certs, money };
+  const [conc, certs, inst] = await Promise.all([concertoRows(env, tid), certFiles(env, tid), installRecMap(env, tid)]);
+  const extra = { concerto: conc.byCode, certs, money, inst };
   const ctx = { jobs: r.jobs, doneCats: r.doneCats };
   const openByCode = new Map(); const lastClosed = new Map();
   for (const c of r.cases) {

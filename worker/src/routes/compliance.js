@@ -495,7 +495,7 @@ export async function handle(request, env, ctx, url, sess) {
   // Reads for a scheme's chart require at least "view" on that scheme. The public
   // /file GET (handled above, signature-gated) and the cross-scheme /site-files
   // path (site-folder, used by engineers) are deliberately NOT gated here.
-  const SCHEME_READS = new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags", "/works-flags"]);
+  const SCHEME_READS = new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags", "/works-flags", "/installrec-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -1028,6 +1028,32 @@ export async function handle(request, env, ctx, url, sess) {
   // spanner beside the store code, tapped on/off. Map {code:{at,by}} in
   // app_config, same pattern as the 5-year flag; hidden from clients unless
   // their flags tool is on.
+  // 📂 "Install Records Required" per store (Jamie, 27 Nov 2026): a new site needs its
+  // installation certificates, not a 5-year test date. Shown instead of the 5-Year date
+  // on the chart and the EICR tracker. Visible to everyone (it's a fact about the site).
+  if (sub === "/installrec-flags" && method === "GET") {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "compliance:installrec:" + scheme + ":" + tid).first();
+    let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}
+    return jr({ ok: true, codes }, headers);
+  }
+  if (sub === "/installrec-flag" && method === "POST") {
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr({ error: "code required" }, headers, 400);
+    const key = "compliance:installrec:" + scheme + ":" + tid;
+    const path = '$."' + code + '"';
+    const val = JSON.stringify({ at: new Date().toISOString(), by: me });
+    if (b.on) {
+      await env.DB.prepare(
+        "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, json(?))) " +
+        "ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, json(?))"
+      ).bind(tid, key, code, val, path, val).run();
+    } else {
+      await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
+    }
+    return jr({ ok: true, code, on: !!b.on }, headers);
+  }
   if (sub === "/works-flags" && method === "GET") {
     if (toolOff("flags")) return jr({ ok: true, codes: {} }, headers);
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "compliance:works:" + scheme + ":" + tid).first();
