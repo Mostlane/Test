@@ -221,6 +221,8 @@
   Cache-Control: no-cache
 /cert-register.html
   Cache-Control: no-cache
+/client-activity.html
+  Cache-Control: no-cache
 /cert-prefill-audit.html
   Cache-Control: no-cache
 /eicr-tracker.html

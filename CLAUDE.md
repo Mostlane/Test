@@ -1568,6 +1568,27 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `staffrecords.js` `/hr/overview` + `/hr/matrix`. **Any new "field engineer" predicate must
   exclude clients too** (`st !== "office" && st !== "client"`, the users-admin.html pattern).
   portal-config `?v=52`, SW `mostlane-v156`.
+  **Client ACTIVITY tracking — views logged, downloads alerted (27 Nov 2026, Jamie:
+  "track what clients are doing, not just logins; log document views + alert on
+  downloads"):** table **`client_activity`** (compliance.js `ensure`, self-migrating:
+  username/client_org/action/scheme/code/doc_type/detail/ip/ua/at). compliance.js
+  `handle` now knows if the session is a client (`isClient`/`clientOrg`, reused from the
+  clientTools profile read) and fires a fire-and-forget `logAct(action,{code,type})`
+  (ctx.waitUntil, **no-op for staff/the import bot**) on the document routes: **`/files`
+  → doc_list** (opened a store's documents), **`/file-url` → doc_view** (opened a
+  certificate), **`/export` → pack_download** (the 📦 site/estate pack). A per-file ⬇ save
+  in docviewer streams the PUBLIC signed `/compliance/file` (no session attached), so it
+  is NOT captured server-side — the view (`/file-url`) + pack download are the reliable
+  signals; a per-file download beacon is a possible phase 2. **Download ALERT:** `/export`
+  by a client also pushes FullAccess|Compliance **office** users (`sendToPermission(...,
+  {officeOnly:true})` → push + 🔔 bell feed row, unique tag, url `/client-activity.html`);
+  a client never holds those permission keys so is never alerted about itself. **Office
+  view: `GET /compliance/client-activity?days=&user=&action=`** (FullAccess|Compliance via
+  permissionsFor; placed before the SCHEME_READS gate) → rows + a per-client summary;
+  page **client-activity.html** (👁 Client activity card on compliance.html, office-only;
+  _headers no-cache) = client pills + action chips + days filter + a table (when · client
+  · action · site · type · IP). HTML/network-first (no `?v=`/SW bump). **TODO/next:**
+  per-file download beacon; optional email alert (config `client:activity:notify:<tid>`).
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
   (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`

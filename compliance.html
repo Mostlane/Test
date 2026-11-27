@@ -33,6 +33,7 @@
     <a class="card" data-scheme="fareham" href="fareham.html"><img class="cimg" src="fareham-crest.jpg" alt="Fareham Borough Council"> Fareham Borough Council<span class="ch">›</span></a>
     <a class="card" data-scheme="projects" href="compliance-projects.html"><span class="ic">📁</span> Projects<span class="ch">›</span></a>
     <a class="card" data-scheme="chapplins" href="chapplins-compliance.html"><span class="ic">🏠</span> Chapplins<span class="ch">›</span></a>
+    <a class="card" id="clientActCard" href="client-activity.html" style="display:none;"><span class="ic">👁</span> Client activity<span class="ch">›</span></a>
     <p id="noneMsg" class="muted" style="display:none;text-align:center;color:#64748b;margin-top:10px;">You don't have access to any compliance charts yet. Ask an administrator.</p>
   </div>
 
@@ -52,6 +53,8 @@
       if(level(a.dataset.scheme)==="none") a.style.display="none"; else shown++;
     });
     if(!shown){ var n=document.getElementById("noneMsg"); if(n) n.style.display=""; }
+    // Office-only: see what external client logins have viewed/downloaded.
+    var pp=perms(); if((pp.FullAccess==="Yes"||pp.Compliance==="Yes") && !isField()){ var ca=document.getElementById("clientActCard"); if(ca) ca.style.display=""; }
   })();
   </script>
 </body>
