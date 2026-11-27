@@ -1786,6 +1786,19 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   a 2-lane pool, resumable (skip logic re-computes each run). Extensible: a check
   registry (`CHECK_TYPES=["fiveYear"]` in the worker) — PAT/EM/PV/EV etc. plug in as
   their own verifiers later. Button: "🔍 Run compliance checks" in eicr-portal.html.
+  **Per-row decision buttons — Ignore / Flag (27 Nov 2026, Jamie):** every row in the
+  worklist now carries two one-tap actions instead of the old "Mark done" tick —
+  **✓ Ignore / fine** (marks the review handled AND clears any chart flag) and
+  **🚩 Flag it** (raises the chart's 🚩 unsatisfactory flag for that site via POST
+  **/compliance/unsat-flag?scheme=coop** `{code,on:true,status:"unsat"}` AND marks the
+  review handled) — plus **↩ Undo** once decided. The page now ALSO loads the chart's
+  flag map (GET /compliance/unsat-flags?scheme=coop) on open, so a site already flagged
+  on the chart shows a **🚩 FLAGGED** pill, drops out of "⚠ Needs attention" (= still to
+  decide), and is counted under a new **🚩 Flagged** filter chip; an ignored site shows
+  an **IGNORED** pill. Ignore/Flag are mutually exclusive per finding. coop-only (the
+  checker is the Southern Co-op 5-year chart); front-end only — reuses the existing
+  review/status + unsat-flag endpoints, no worker change, network-first (no `?v=`/SW
+  bump). Smoke-tested headless (scratchpad crev-smoke.cjs).
   **Document-type classification + remediation (v10):** the engine now returns a
   `docType` per PDF — `eicr` (condition report: title / stated SATISFACTORY-
   UNSATISFACTORY assessment / schedule of test results), `minorworks` (Minor
