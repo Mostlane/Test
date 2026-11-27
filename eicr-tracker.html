@@ -243,6 +243,7 @@ function actions(r, tab){
   const filed = () => { if (r.certFiledSinceTest) b.push('<span class="sub" style="color:#15803d;font-weight:700;white-space:nowrap" title="A 5-year certificate has been filed on the chart for this test">✓ Filed</span>'); };
   switch (r.status) {
     case "due": if (r.installRec) { a("inst-off","↩ Clear","l"); break; } a("book","📅 Book test"); a("inst-on","📂 Install records","l"); break;
+    case "booked": a("upload","⬆ Upload cert","l"); a("remedials","💬 Remedials","l"); filed(); break;
     case "to_quote": a("quote","📋 Quote text","l"); a("quote-sent","✓ Quote sent"); break;
     case "quoted": a("order","📦 Order received"); break;
     case "ordered": a("works","🔧 Create works job"); filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
@@ -630,13 +631,46 @@ function uploadCert(r){
       if (isUpdate) { form.append("label", "Updated after remedials — "+f.name); form.append("link", "1"); }
       else form.append("bump", "1");
       g("ucGo").disabled = true; g("ucMsg").textContent = "Filing…";
-      try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); closeModal(); toast("Certificate filed for "+r.code+(isUpdate || !date ? "" : " — next due "+fmtD(addYearsIso(date,5)))); await offerFlagRemoval(r); load(); }
+      try { const res = await authFetch("/compliance/file?scheme=coop", { method:"POST", body: form }); const out = await res.json().catch(()=>({})); if (!res.ok || !out.ok) throw new Error(out.error||res.status); closeModal(); toast("Certificate filed for "+r.code+(isUpdate || !date ? "" : " — next due "+fmtD(addYearsIso(date,5)))); if (r.status==="booked") { try { await post("/eicr/status", { caseId:r.caseId, code:r.code, status:"cert_signoff" }); } catch(_){} } await offerFlagRemoval(r); load(); }
       catch(e){ g("ucGo").disabled = false; g("ucMsg").textContent = "Upload failed: "+(e.message||e); }
     };
   };
   inp.click();
 }
 function addYearsIso(iso, n){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||""); return m ? `${+m[1]+n}-${m[2]}-${m[3]}` : ""; }
+// A booked test that found remedials — record where the works are up to.
+async function remedialsFound(r){
+  const m = D.money;
+  openModal(`<h3>💬 Remedials found — ${esc(r.code)} ${esc(r.name)}</h3>
+    <div class="sub">The test found C1 / C2 / FI (or an uncoded item). Record where the remedial works are up to — you can refine it later on the row or in the detail view.</div>
+    <label>Where is it up to?</label>
+    <select id="rmStage"><option value="to_quote">Remedials found — still to quote</option><option value="quoted">Quote sent to the client</option><option value="ordered">Order received — works to book</option></select>
+    <div id="rmQWrap" style="display:none"><div class="row2"><div><label>Quote reference (optional)</label><input id="rmQRef"></div>${m?`<div><label>Quote £ ex VAT (optional)</label><input id="rmQVal" type="number" step="0.01"></div>`:""}</div></div>
+    <div id="rmOWrap" style="display:none"><div class="row2"><div><label>Order number</label><input id="rmONum"></div>${m?`<div><label>Order £ ex VAT (optional)</label><input id="rmOVal" type="number" step="0.01"></div>`:""}</div></div>
+    <label>Note (optional)</label><textarea id="rmNote">${esc(r.note||"")}</textarea>
+    <div class="mact"><button class="btn l" data-close>Cancel</button><button class="btn" id="rmGo">Save</button></div><div class="sub" id="rmMsg"></div>`);
+  const sync = () => { const s=g("rmStage").value; g("rmQWrap").style.display = s==="quoted"?"":"none"; g("rmOWrap").style.display = s==="ordered"?"":"none"; };
+  g("rmStage").onchange = sync; sync();
+  g("rmGo").onclick = async () => {
+    const stage = g("rmStage").value, noteChanged = g("rmNote").value !== (r.note||"");
+    g("rmGo").disabled = true;
+    try {
+      if (stage==="quoted") {
+        if (noteChanged) await post("/eicr/update", { caseId:r.caseId, code:r.code, outcome:"remedials", note:g("rmNote").value });
+        await post("/eicr/quote-sent", { caseId:r.caseId, code:r.code, quoteRef:(g("rmQRef").value||"").trim()||undefined, quoteValue:(g("rmQVal")&&g("rmQVal").value)||undefined });
+      } else if (stage==="ordered") {
+        const on = (g("rmONum").value||"").trim();
+        if (!on) { g("rmMsg").textContent = "Type the order number."; g("rmGo").disabled = false; return; }
+        await post("/eicr/update", { caseId:r.caseId, code:r.code, outcome:"remedials", orderNumber:on, orderValue:(g("rmOVal")&&g("rmOVal").value)||undefined, ...(noteChanged?{note:g("rmNote").value}:{}) });
+        await post("/eicr/status", { caseId:r.caseId, code:r.code, status:"ordered" });
+      } else {
+        await post("/eicr/update", { caseId:r.caseId, code:r.code, outcome:"remedials", ...(noteChanged?{note:g("rmNote").value}:{}) });
+        await post("/eicr/status", { caseId:r.caseId, code:r.code, status:"to_quote" });
+      }
+      closeModal(); toast("Saved — "+r.code); load();
+    } catch(e){ g("rmMsg").textContent = e.message; g("rmGo").disabled = false; }
+  };
+}
 async function signOff(r){
   const warn = r.certFiledSinceTest ? "" : "\n\nNo 5-year certificate has been filed on the chart since the test — upload it first if you haven't.";
   const upd = ["cert_update","ordered","works_booked","quoted","to_quote"].includes(r.status);
@@ -726,7 +760,7 @@ g("body").addEventListener("click", e => {
   if (b) {
     e.stopPropagation();
     const r = rowBy(b.dataset.code); if (!r) return;
-    ({ book:bookTest, quote:quoteText, "quote-sent":quoteSent, order:orderReceived, "inst-on":x=>setInstallRec(x,true), "inst-off":x=>setInstallRec(x,false), works:createWorks, openjob:x=>window.open("/job-view.html?jobId="+encodeURIComponent(x.works.id),"_blank"), cert:openCert, upload:uploadCert, signoff:signOff,
+    ({ book:bookTest, quote:quoteText, "quote-sent":quoteSent, order:orderReceived, "inst-on":x=>setInstallRec(x,true), "inst-off":x=>setInstallRec(x,false), works:createWorks, openjob:x=>window.open("/job-view.html?jobId="+encodeURIComponent(x.works.id),"_blank"), cert:openCert, upload:uploadCert, remedials:remedialsFound, signoff:signOff,
        "inv-test":x=>invoice(x,"test"), "inv-works":x=>invoice(x,"works") })[b.dataset.act](r);
     return;
   }
