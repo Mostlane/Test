@@ -155,7 +155,17 @@ export async function handle(request, env, ctx, url, sess) {
     // from every picker/list portal-wide. Users Admin passes ?all=1 to still see
     // (and re-enable) disabled accounts. Blank/legacy status counts as active.
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
-    const rows = includeAll ? (results || []) : (results || []).filter(u => isActiveStatus(u.status));
+    // External CLIENT logins (profile.staffType === "client") are NOT staff, so they
+    // are dropped from the default list — this is what keeps a client off every staff
+    // picker portal-wide (scheduler lanes + engineer dropdowns, inbox/holiday/van/
+    // timesheet pickers, the job editor's engineer list, …). Users Admin passes ?all=1
+    // and the owner's View-As picker passes ?clients=1, so both still see clients.
+    const includeClients = includeAll || url.searchParams.get("clients") === "1";
+    const rows = (results || []).filter(u => {
+      if (!includeAll && !isActiveStatus(u.status)) return false;
+      if (!includeClients && isClientUser(u)) return false;
+      return true;
+    });
     const out = [];
     const lvl = await profileLevelFor("");
     for (const u of rows) out.push(shapeUser(u, permMap[u.username] || {}, sess && u.username === sess.user.username ? "full" : lvl));
@@ -493,6 +503,10 @@ const PERMISSION_KEYS = [
 function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
+}
+// An external client login (not staff) — dropped from the default /users list.
+function isClientUser(u) {
+  try { return String((JSON.parse(u.profile || "{}").staffType) || "").toLowerCase() === "client"; } catch { return false; }
 }
 
 function shapeUser(u, perms, level = "full") {
