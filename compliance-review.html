@@ -54,6 +54,16 @@
   .savedtxt{font-size:11px;color:var(--muted);margin-top:2px;min-height:13px;}
   .hide{display:none;}
   .empty{color:var(--muted);font-size:13.5px;text-align:center;padding:20px;}
+  .decide{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;}
+  .dbtn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+  .dbtn:hover{border-color:#94a3b8;}
+  .dbtn[disabled]{opacity:.5;cursor:default;}
+  .dbtn.ignore.on{background:var(--passbg);border-color:#86efac;color:var(--pass);}
+  .dbtn.flag.on{background:var(--failbg);border-color:#fca5a5;color:var(--fail);}
+  .undo{color:var(--brand);cursor:pointer;font-weight:600;font-size:12.5px;}
+  .b-flag{background:var(--failbg);color:var(--fail);}
+  .b-ign{background:var(--passbg);color:var(--pass);}
+  .row.flagged{border-left:4px solid #ef4444;}
   </style>
 </head>
 <body>
@@ -81,6 +91,7 @@
         <div class="toolbar">
           <button class="chip on" data-f="all">All</button>
           <button class="chip" data-f="att">⚠ Needs attention</button>
+          <button class="chip" data-f="flag">🚩 Flagged</button>
           <button class="chip" data-f="open">Open</button>
           <button class="chip" data-f="done">Done</button>
           <div style="flex:1;min-width:140px;"><input type="search" id="search" placeholder="Search site or code…"></div>
@@ -248,14 +259,44 @@
     }
 
     // ── Worklist ────────────────────────────────────────────────────────────
-    var ROWS = [], filter = "all", search = "";
+    var ROWS = [], FLAGS = {}, filter = "all", search = "", BUSY = {};
     async function loadList() {
-      var r = await authFetch("/compliance/review/list"); var j = await r.json();
-      ROWS = j.rows || [];
+      var res = await Promise.all([
+        authFetch("/compliance/review/list").then(function (r) { return r.json(); }).catch(function () { return {}; }),
+        authFetch("/compliance/unsat-flags?scheme=coop").then(function (r) { return r.json(); }).catch(function () { return {}; })
+      ]);
+      ROWS = (res[0] && res[0].rows) || [];
+      FLAGS = (res[1] && res[1].codes) || {};
       render();
     }
+    // The chart's 🚩 flag for a site (null = not flagged). A legacy stored value of 1 reads as "unsat".
+    function flagOf(code) { var v = FLAGS[code]; if (v == null) return null; if (v === 1 || v === true) return "unsat"; return (v && v.s) || "unsat"; }
+    function rowObj(code, type) { return ROWS.filter(function (x) { return x.code === code && x.type === type; })[0]; }
+    function okJson(r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); }
+    function statusReq(code, type, status) { return authFetch("/compliance/review/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code, type: type, status: status }) }).then(okJson); }
+    function flagReq(code, on) { return authFetch("/compliance/unsat-flag?scheme=coop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code, on: on, status: "unsat" }) }).then(okJson); }
+    // Capture any edited notes from the DOM into ROWS before a re-render, so a decision
+    // click never loses a note typed in the last second (before its autosave fired).
+    function syncNotes() { document.querySelectorAll("#list .row").forEach(function (el) { var ta = el.querySelector("textarea"); if (!ta) return; var r = rowObj(el.getAttribute("data-code"), el.getAttribute("data-type")); if (r) r.notes = ta.value; }); }
+    // Decide a finding. "ignore" = it's fine (clears any flag); "flag" = raise the chart's
+    // 🚩 unsatisfactory flag; both mark the review handled. "undo" reopens + clears the flag.
+    function decide(code, type, act) {
+      var bk = code + "|" + type; if (BUSY[bk]) return; BUSY[bk] = true;
+      var tasks, newStatus, flagTo;
+      if (act === "flag") { tasks = [flagReq(code, true), statusReq(code, type, "done")]; newStatus = "done"; flagTo = "on"; }
+      else if (act === "undo") { tasks = [statusReq(code, type, "open")]; if (flagOf(code)) tasks.push(flagReq(code, false)); newStatus = "open"; flagTo = "off"; }
+      else { tasks = [statusReq(code, type, "done")]; if (flagOf(code)) tasks.push(flagReq(code, false)); newStatus = "done"; flagTo = "off"; }
+      Promise.all(tasks).then(function () {
+        var r = rowObj(code, type); if (r) r.status = newStatus;
+        if (flagTo === "on") FLAGS[code] = { s: "unsat" }; else delete FLAGS[code];
+        delete BUSY[bk]; syncNotes(); render();
+      }).catch(function () { delete BUSY[bk]; render(); window.alert("Couldn't save that — please try again."); });
+    }
     function matches(row) {
-      if (filter === "att" && !row.attention) return false;
+      var flagged = !!flagOf(row.code);
+      // "Needs attention" = still to decide (not yet flagged or ignored).
+      if (filter === "att" && (!row.attention || flagged || row.status === "done")) return false;
+      if (filter === "flag" && !flagged) return false;
       if (filter === "open" && row.status !== "open") return false;
       if (filter === "done" && row.status !== "done") return false;
       if (search) { var s = search.toLowerCase(); if ((row.name || "").toLowerCase().indexOf(s) === -1 && (row.code || "").indexOf(s) === -1) return false; }
@@ -270,26 +311,36 @@
     }
     function render() {
       var host = $("list");
-      // sort: attention+open first, then open, then done; then by name
-      var rank = function (x) { return (x.status === "done" ? 2 : 0) + (x.attention && x.status !== "done" ? -1 : 0); };
+      // sort: still-to-decide attention first, then open, then flagged, then ignored; by name
+      var rank = function (x) { var fl = !!flagOf(x.code); if (x.status === "done") return fl ? 2 : 3; if (x.attention && !fl) return 0; return 1; };
       var view = ROWS.filter(matches).sort(function (a, b) { return rank(a) - rank(b) || (a.name || "").localeCompare(b.name || ""); });
-      var nAtt = ROWS.filter(function (x) { return x.attention && x.status !== "done"; }).length;
-      var nOpen = ROWS.filter(function (x) { return x.status === "open"; }).length;
-      var nDone = ROWS.filter(function (x) { return x.status === "done"; }).length;
-      $("counts").innerHTML = ROWS.length + " site(s) checked &nbsp;·&nbsp; <b style='color:var(--fail)'>" + nAtt + "</b> need attention &nbsp;·&nbsp; " + nOpen + " open &nbsp;·&nbsp; " + nDone + " done";
+      var nAtt = ROWS.filter(function (x) { return x.attention && x.status !== "done" && !flagOf(x.code); }).length;
+      var nFlag = ROWS.filter(function (x) { return !!flagOf(x.code); }).length;
+      var nIgn = ROWS.filter(function (x) { return x.status === "done" && !flagOf(x.code); }).length;
+      $("counts").innerHTML = ROWS.length + " site(s) checked &nbsp;·&nbsp; <b style='color:var(--fail)'>" + nAtt + "</b> to review &nbsp;·&nbsp; <b style='color:var(--fail)'>" + nFlag + "</b> 🚩 flagged &nbsp;·&nbsp; " + nIgn + " ignored";
       if (!view.length) { host.innerHTML = "<div class='empty'>Nothing here" + (ROWS.length ? " for this filter." : " yet — run the checks above.") + "</div>"; return; }
       host.innerHTML = view.map(function (row, i) {
         var flagsHtml = (row.flags || []).map(function (f) { var rec = f.indexOf("💡") === 0; return "<li class='" + (rec ? "rec" : "") + "'>" + esc(rec ? f.replace(/^💡\s*/, "") : f) + "</li>"; }).join("");
-        return "<div class='row " + (row.attention && row.status !== "done" ? "att " : "") + (row.status === "done" ? "done" : "") + "' data-code='" + esc(row.code) + "' data-type='" + esc(row.type) + "'>" +
+        var fl = flagOf(row.code);
+        var state = fl ? "flagged" : (row.status === "done" ? "ignored" : "open");
+        var cls = state === "flagged" ? "flagged" : (state === "ignored" ? "done" : (row.attention ? "att" : ""));
+        var pill = state === "flagged" ? "<span class='badge b-flag'>🚩 " + esc(fl === "unsat" ? "FLAGGED" : fl.toUpperCase()) + "</span>"
+                 : state === "ignored" ? "<span class='badge b-ign'>IGNORED</span>" : "";
+        var decideBar = "<div class='decide'>" +
+            "<button type='button' class='dbtn ignore " + (state === "ignored" ? "on" : "") + "' data-act='ignore'>✓ Ignore / fine</button>" +
+            "<button type='button' class='dbtn flag " + (state === "flagged" ? "on" : "") + "' data-act='flag'>🚩 Flag it</button>" +
+            (state !== "open" ? "<span class='undo' data-act='undo'>↩ Undo</span>" : "") +
+          "</div>";
+        return "<div class='row " + cls + "' data-code='" + esc(row.code) + "' data-type='" + esc(row.type) + "'>" +
           "<div class='rtop'>" +
-            "<input type='checkbox' class='cbx' " + (row.status === "done" ? "checked" : "") + " title='Mark done'>" +
             "<div class='rmain'>" +
               "<div class='rname'>" + esc(row.name || row.code) + " <small>" + esc(row.code) + "</small>" +
-                "<span class='badge b-type'>" + esc(TYPE_LABEL[row.type] || row.type) + "</span>" + outcomeBadge(row.outcome) + "</div>" +
+                "<span class='badge b-type'>" + esc(TYPE_LABEL[row.type] || row.type) + "</span>" + outcomeBadge(row.outcome) + pill + "</div>" +
               "<div class='rhead'>" + esc(row.summary || "") + "</div>" +
               (flagsHtml ? "<ul class='flags'>" + flagsHtml + "</ul>" : "") +
               "<div class='rlinks'>" + (row.url ? "<a href='" + esc(row.url) + "' target='_blank' rel='noopener'>📄 Open certificate</a>" : "") +
                 (row.checkedAt ? "<span style='color:var(--muted)'>checked " + esc(new Date(row.checkedAt).toLocaleDateString("en-GB")) + "</span>" : "") + "</div>" +
+              decideBar +
               "<div class='notes'><textarea placeholder='Notes / what you did…'>" + esc(row.notes || "") + "</textarea><div class='savedtxt'></div></div>" +
             "</div>" +
           "</div></div>";
@@ -297,11 +348,11 @@
       // wire events
       host.querySelectorAll(".row").forEach(function (el) {
         var code = el.getAttribute("data-code"), type = el.getAttribute("data-type");
-        el.querySelector(".cbx").addEventListener("change", function () {
-          var status = this.checked ? "done" : "open";
-          var rowObj = ROWS.filter(function (r) { return r.code === code && r.type === type; })[0]; if (rowObj) rowObj.status = status;
-          authFetch("/compliance/review/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code, type: type, status: status }) });
-          el.classList.toggle("done", status === "done");
+        el.querySelectorAll(".decide [data-act]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            el.querySelectorAll(".decide .dbtn").forEach(function (x) { x.disabled = true; });
+            decide(code, type, b.getAttribute("data-act"));
+          });
         });
         var ta = el.querySelector("textarea"), saved = el.querySelector(".savedtxt"), tmr = null;
         ta.addEventListener("input", function () {
