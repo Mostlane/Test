@@ -100,6 +100,24 @@ async function ensure(env) {
   // Engine version that produced the stored result — lets the client auto-re-check
   // any cert scored by an older verifier without a manual "re-check every site".
   try { await env.DB.prepare("ALTER TABLE compliance_review ADD COLUMN ver INTEGER DEFAULT 0").run(); } catch {}
+  // Client activity log — what an EXTERNAL client login (staffType "client") does
+  // with their compliance documents: viewed a store's documents / opened a cert /
+  // downloaded a pack. Staff actions are NOT logged here (they have audit_log).
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS client_activity (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id  INTEGER NOT NULL DEFAULT 1,
+    username   TEXT NOT NULL,           -- the client login
+    client_org TEXT,                    -- coop | fbc | …
+    action     TEXT NOT NULL,           -- doc_list | doc_view | pack_download | file_download
+    scheme     TEXT,
+    code       TEXT,                    -- store code (if any)
+    doc_type   TEXT,                    -- cert type (if any)
+    detail     TEXT,
+    ip         TEXT,
+    ua         TEXT,
+    at         TEXT NOT NULL
+  )`).run();
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_clientact ON client_activity(tenant_id, at)").run(); } catch {}
   READY = true;
 }
 
@@ -461,16 +479,70 @@ export async function handle(request, env, ctx, url, sess) {
   const level = await complianceLevelFor(env, tid, me, scheme, viaToken);
   const canRead  = viaToken || level !== "none";   // view / download / edit
   // A CLIENT login's per-tool switches (Users Admin). null for staff / the bot.
-  let clientTools = null;
+  let clientTools = null, isClient = false, clientOrg = "";
   if (sess && !viaToken) {
     try {
       const urow = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
       clientTools = resolveClientTools(urow ? urow.profile : null);
+      let pf = {}; try { pf = JSON.parse((urow && urow.profile) || "{}") || {}; } catch {}
+      isClient = String(pf.staffType || "").toLowerCase() === "client";
+      clientOrg = String(pf.clientOrg || "");
     } catch {}
   }
   const toolOff = (k) => !!clientTools && !clientTools[k];
   const canWrite = viaToken || level === "edit";    // edit only (all write routes key off this)
   await ensure(env);
+
+  // Log what a CLIENT login does with their documents (views + downloads) and
+  // alert the office on a download. No-op for staff / the import bot. Fire-and-
+  // forget so it never slows the response.
+  const logAct = (action, opts) => {
+    if (!isClient || !sess) return;
+    const o = opts || {};
+    const ip = request.headers.get("CF-Connecting-IP") || "";
+    const ua = (request.headers.get("User-Agent") || "").slice(0, 300);
+    const p = env.DB.prepare(
+      "INSERT INTO client_activity (tenant_id, username, client_org, action, scheme, code, doc_type, detail, ip, ua, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, me, clientOrg, action, scheme, o.code || null, o.type || null, o.detail || null, ip, ua, new Date().toISOString()).run().catch(() => {});
+    if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+  };
+  const alertDownload = (opts) => {
+    if (!isClient || !sess) return;
+    const o = opts || {};
+    const what = o.code ? ("store " + o.code) : "the whole estate";
+    if (ctx && ctx.waitUntil) ctx.waitUntil((async () => {
+      try {
+        const { sendToPermission } = await import("./push.js");
+        await sendToPermission(env, tid, ["FullAccess", "Compliance"], {
+          title: "📥 Client downloaded documents",
+          body: `${me} downloaded compliance documents — ${what}.`,
+          url: "/client-activity.html",
+          tag: "client-download:" + Date.now(),
+        }, null, { officeOnly: true });
+      } catch {}
+    })());
+  };
+
+  // ── Client activity log (office): what external client logins view/download ──
+  if (sub === "/client-activity" && method === "GET") {
+    const pp = await permissionsFor(env, tid, me).catch(() => ({}));
+    if (!(pp && (pp.FullAccess === "Yes" || pp.Compliance === "Yes")))
+      return jr({ error: "Needs compliance access" }, headers, 403);
+    const days = Math.min(365, Math.max(1, parseInt(q.get("days") || "30", 10) || 30));
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const whoFilter = (q.get("user") || "").trim();
+    const actFilter = (q.get("action") || "").trim();
+    let sql = "SELECT username, client_org, action, scheme, code, doc_type, detail, ip, at FROM client_activity WHERE tenant_id=? AND at>=?";
+    const binds = [tid, since];
+    if (whoFilter) { sql += " AND username=?"; binds.push(whoFilter); }
+    if (actFilter) { sql += " AND action=?"; binds.push(actFilter); }
+    sql += " ORDER BY at DESC LIMIT 1000";
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    const { results: whoRows } = await env.DB.prepare(
+      "SELECT username, client_org, COUNT(*) AS n, MAX(at) AS last FROM client_activity WHERE tenant_id=? GROUP BY username ORDER BY last DESC"
+    ).bind(tid).all();
+    return jr({ ok: true, rows: results || [], clients: whoRows || [], days }, headers);
+  }
 
   // ── Restricted per-store COMMENTS (Southern Co-op chart) ─────────────────────
   // A free-text comment per store, visible AND editable ONLY by Full Access users
@@ -563,6 +635,8 @@ export async function handle(request, env, ctx, url, sess) {
       f.url = await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 2 * 86400);
       delete f.r2_key;
     }
+    logAct("pack_download", { code: oneCode || null, detail: oneCode ? null : "whole estate" });
+    alertDownload({ code: oneCode || null });
     return jr({ ok: true, generatedAt: new Date().toISOString(), types: PACK_TYPES, groups: PACK_GROUPS, stores: plan }, headers);
   }
 
@@ -585,6 +659,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (!byType[t].length) delete byType[t];
       }
     }
+    logAct("doc_list", { code });
     return jr({ ok: true, code, files: byType, internal }, headers);
   }
 
@@ -650,6 +725,7 @@ export async function handle(request, env, ctx, url, sess) {
       "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY pinned DESC, uploaded_at DESC, COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
     ).bind(tid, scheme, code, type).first();
     if (!row) return jr({ error: "No file" }, headers, 404);
+    logAct("doc_view", { code, type });
     return jr({ ok: true, url: await signedFileUrl(env, url.origin, "/compliance/file", row.r2_key) }, headers);
   }
 
