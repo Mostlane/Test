@@ -20,6 +20,8 @@
  *                to url). Site docs pass the /sla/site/doc?key= route.
  * - name       : filename (used to detect the type and as the title).
  * - downloadUrl: optional; defaults to url.
+ * - onDownload : optional callback fired when the ⬇ download button is tapped
+ *                (used to log a client's single-file certificate download).
  *
  * If PDF.js can't fetch the file (e.g. the source has no CORS headers), it
  * falls back to a big "Open document" button that uses the device's native
@@ -97,6 +99,7 @@
     el.back = back;
     ["mldvTitle","mldvOut","mldvIn","mldvFit","mldvZoom","mldvFull","mldvDl","mldvClose","mldvBody"].forEach(function (id) { el[id] = document.getElementById(id); });
     el.mldvClose.addEventListener("click", close);
+    el.mldvDl.addEventListener("click", function () { if (current && typeof current.onDownload === "function") { try { current.onDownload(); } catch (e) {} } });
     el.mldvOut.addEventListener("click", function () { zoomAround(zoom / 1.25); });
     el.mldvIn.addEventListener("click", function () { zoomAround(zoom * 1.25); });
     el.mldvFit.addEventListener("click", function () { setZoom(1); el.mldvBody.scrollLeft = 0; });
@@ -175,6 +178,7 @@
     // hide BOTH the ⬇ download and the ⤢ open-full-screen link (which loads the
     // raw file in a new tab, another save route). The fallback link is gated too.
     current.allowDownload = opts.allowDownload !== false;
+    current.onDownload = (typeof opts.onDownload === "function") ? opts.onDownload : null;
     el.mldvDl.style.display  = current.allowDownload ? '' : 'none';
     el.mldvFull.style.display = current.allowDownload ? '' : 'none';
     el.mldvBody.innerHTML = '<div class="mldv-spin">Loading…</div>';

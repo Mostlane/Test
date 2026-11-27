@@ -1568,6 +1568,19 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `staffrecords.js` `/hr/overview` + `/hr/matrix`. **Any new "field engineer" predicate must
   exclude clients too** (`st !== "office" && st !== "client"`, the users-admin.html pattern).
   portal-config `?v=52`, SW `mostlane-v156`.
+  **Client logins grouped by ORGANISATION in Users Admin (27 Nov 2026, Jamie: "a way to see
+  users for each client and add more, to keep it neat my end"):** the "🏢 Client logins" zone
+  on **users-admin.html** now groups the client accounts UNDER their organisation with PROPER
+  names (The Southern Co-op · Fareham Borough Council) instead of one flat list — each group
+  shows its users + a **"+ Add a user"** button that opens the add-user wizard pre-set to
+  Client + that org (so the office only fills in the person's details). Driven by a single
+  client-side **`CLIENT_ORGS`** list `[{id,name}]` (seeded coop/fbc) — the ONE place to add a
+  new client org's heading + add-button (its compliance chart/scheme is still a code job); an
+  account on an unknown/blank org falls under "Other". Known orgs always show (even empty) so
+  a first user can be added; the search box collapses empty groups. **Frontend-only** (no
+  worker change, no new org model) — it reorganises the client users `/users?all=1` already
+  returns, by `profile.clientOrg`. `wizOpen(preset)` takes `{clientOrg}`; the grouped render
+  + the `data-addclient` click branch + `clientOrgOf()` live in users-admin.html.
   **Client ACTIVITY tracking — views logged, downloads alerted (27 Nov 2026, Jamie:
   "track what clients are doing, not just logins; log document views + alert on
   downloads"):** table **`client_activity`** (compliance.js `ensure`, self-migrating:
@@ -1577,9 +1590,13 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   (ctx.waitUntil, **no-op for staff/the import bot**) on the document routes: **`/files`
   → doc_list** (opened a store's documents), **`/file-url` → doc_view** (opened a
   certificate), **`/export` → pack_download** (the 📦 site/estate pack). A per-file ⬇ save
-  in docviewer streams the PUBLIC signed `/compliance/file` (no session attached), so it
-  is NOT captured server-side — the view (`/file-url`) + pack download are the reliable
-  signals; a per-file download beacon is a possible phase 2. **Download ALERT:** `/export`
+  in docviewer streams the PUBLIC signed `/compliance/file` (no session attached), so the
+  SAVE itself can't be seen server-side — the chart therefore fires a **download beacon** on
+  the ⬇ tap (27 Nov 2026): docviewer `MLDocViewer.open({…,onDownload})` → the four compliance
+  pages POST **`/compliance/log-download?code=&type=`** → `logAct("file_download")` +
+  `alertDownload` (so a single-cert save is logged AND alerted, like a pack). The beacon
+  fires only when the ⬇ shows (download+ clients) and the endpoint no-ops for staff. The view
+  (`/file-url`) + pack download stay the reliable view/pack signals. **Download ALERT:** `/export`
   by a client also pushes FullAccess|Compliance **office** users (`sendToPermission(...,
   {officeOnly:true})` → push + 🔔 bell feed row, unique tag, url `/client-activity.html`);
   a client never holds those permission keys so is never alerted about itself. **Office
@@ -1587,8 +1604,8 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   permissionsFor; placed before the SCHEME_READS gate) → rows + a per-client summary;
   page **client-activity.html** (👁 Client activity card on compliance.html, office-only;
   _headers no-cache) = client pills + action chips + days filter + a table (when · client
-  · action · site · type · IP). HTML/network-first (no `?v=`/SW bump). **TODO/next:**
-  per-file download beacon; optional email alert (config `client:activity:notify:<tid>`).
+  · action · site · type · IP). HTML/network-first (no `?v=`/SW bump). **Single-cert download beacon DONE (27 Nov 2026 — see
+  above).** **TODO/next:** optional email alert (config `client:activity:notify:<tid>`).
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
   (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`

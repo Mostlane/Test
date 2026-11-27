@@ -4,7 +4,7 @@
   <script src="/portal-config.js?v=52"></script>
   <script src="auth.js"></script>
   <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
-  <script src="docviewer.js?v=7"></script>
+  <script src="docviewer.js?v=8"></script>
   <!-- Per-store 📦 pack download (zip of the current certs + a tracker sheet). -->
   <script src="ml-xlsx.js"></script>
   <script src="compliance-site-pack.js?v=1"></script>
@@ -784,7 +784,7 @@ const CertViewer = (function(){
     if (!items.length || typeof MLDocViewer === 'undefined') return;
     idx = (i + items.length) % items.length;            // wrap around
     const it = items[idx];
-    MLDocViewer.open({ url: it.url, name: it.name, downloadUrl: it.url, allowDownload: canDownloadCompliance() });
+    MLDocViewer.open({ url: it.url, name: it.name, downloadUrl: it.url, allowDownload: canDownloadCompliance(), onDownload: function(){ try{ authFetch('/compliance/log-download?code='+encodeURIComponent(it.code||'')+'&type='+encodeURIComponent(it.type||''),{method:'POST'}); }catch(e){} } });
     hookClose();
     update();
   }
@@ -827,7 +827,7 @@ async function siteDocList(code){
     const arr = [...files[t]].sort((a,b)=> (b.current?1:0)-(a.current?1:0));  // current first
     arr.forEach(f=>{
       const base = f.label || f.filename || 'file';
-      list.push({ id:f.id, url:f.url, type:t, current:!!f.current,
+      list.push({ id:f.id, code:code, url:f.url, type:t, current:!!f.current,
         name: (t==='other') ? base : ((TYPE_LABEL[t]||t) + ' — ' + base) });
     });
   });

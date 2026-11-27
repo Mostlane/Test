@@ -15495,6 +15495,12 @@ async function handle8(request, env, ctx, url, sess) {
       }
     })());
   };
+  if (sub === "/log-download" && method === "POST") {
+    const code = q.get("code") || null;
+    logAct("file_download", { code, type: q.get("type") || null });
+    alertDownload({ code });
+    return jr2({ ok: true }, headers);
+  }
   if (sub === "/client-activity" && method === "GET") {
     const pp = await permissionsFor(env, tid, me).catch(() => ({}));
     if (!(pp && (pp.FullAccess === "Yes" || pp.Compliance === "Yes")))
