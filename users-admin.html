@@ -910,6 +910,15 @@
     const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
     // A person's headline access level (highest wins).
     const ORG_LABELS = { fbc: "FBC", coop: "Southern Co-op" };
+    // The external client organisations (customers with a portal login). Drives the
+    // grouped "Client logins" view + the per-org "+ Add a user" buttons. Add a new
+    // client here (I wire its compliance chart) and it gets its own group. Order =
+    // how they list; `name` is the proper name shown as the group heading.
+    const CLIENT_ORGS = [
+      { id: "coop", name: "The Southern Co-op" },
+      { id: "fbc",  name: "Fareham Borough Council" },
+    ];
+    const clientOrgOf = u => String((u && (u.ClientOrg || (u.Profile && u.Profile.clientOrg))) || "").toLowerCase();
     function levelOf(u) {
       if (u.StaffType === "client") return { label: "Client", cls: "lvl-client" };
       if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
@@ -961,13 +970,44 @@
       const clients = allUsers.filter(u => u.StaffType === "client");
       g("listOffice").innerHTML = office.map(userRow).join("");
       g("listField").innerHTML  = field.map(userRow).join("");
-      g("listClients").innerHTML = clients.map(userRow).join("");
-      g("zoneClients").style.display = clients.length ? "" : "none";
+      // Group the client logins UNDER their organisation so the office sees who
+      // belongs to which customer at a glance and can add more to each. Known orgs
+      // always show (with a "+ Add a user" button, even when empty); a client on an
+      // unknown/blank org falls under "Other".
+      {
+        const byOrg = {};
+        clients.forEach(u => { const o = clientOrgOf(u) || "_other"; (byOrg[o] = byOrg[o] || []).push(u); });
+        const orgIds = [...CLIENT_ORGS.map(o => o.id),
+          ...Object.keys(byOrg).filter(o => o !== "_other" && !CLIENT_ORGS.some(c => c.id === o)), "_other"];
+        g("listClients").innerHTML = orgIds.map(oid => {
+          const list = byOrg[oid] || [];
+          if (oid === "_other" && !list.length) return "";          // only show Other when it's used
+          const meta = CLIENT_ORGS.find(c => c.id === oid);
+          const label = meta ? meta.name : (oid === "_other" ? "Other / unassigned" : (ORG_LABELS[oid] || oid.toUpperCase()));
+          return `<div class="corg" data-org="${esc(oid)}" style="margin:0 0 14px;">
+              <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 7px;border-bottom:1px solid #e2e8f0;margin-bottom:6px;">
+                <span style="font-weight:800;color:#003366;font-size:14px;">${esc(label)}</span>
+                <span class="muted" style="font-size:12.5px;">${list.length ? list.length + (list.length === 1 ? " user" : " users") : "no users yet"}</span>
+                <span style="flex:1;"></span>
+                ${oid !== "_other" ? `<button class="btn small" data-addclient="${esc(oid)}">+ Add a user</button>` : ``}
+              </div>
+              ${list.length ? list.map(userRow).join("") : `<div class="muted" style="padding:4px 2px 2px;font-size:13px;">No logins yet — tap “+ Add a user”.</div>`}
+            </div>`;
+        }).join("");
+      }
+      g("zoneClients").style.display = "";   // always show — lets a new client be added
       const match = u => !q || [u.Username, u.FirstName, u.LastName, u.Email]
         .some(v => String(v || "").toLowerCase().includes(q));
       document.querySelectorAll(".urow").forEach(r => {
         const u = allUsers.find(x => x.Username === r.dataset.user);
         r.style.display = (u && match(u)) ? "" : "none";
+      });
+      // While searching, hide client-org groups with no visible match so the list
+      // stays tidy; show every group otherwise.
+      document.querySelectorAll("#listClients .corg").forEach(c => {
+        if (!q) { c.style.display = ""; return; }
+        const anyVisible = [...c.querySelectorAll(".urow")].some(r => r.style.display !== "none");
+        c.style.display = anyVisible ? "" : "none";
       });
       refreshCounts();
     }
@@ -1239,6 +1279,7 @@
       else if (t.dataset.welcome) await resendWelcome(t.dataset.welcome);
       else if (t.dataset.reset) await resetPw(t.dataset.reset);
       else if (t.dataset.del) await delUser(t.dataset.del);
+      else if (t.dataset.addclient) wizOpen({ clientOrg: t.dataset.addclient });
     });
 
     g("saveBtn").onclick = async () => {
@@ -1407,10 +1448,16 @@
       g("wizBack").onclick = () => { if (wizCollect()) { if (W.step > 0) { W.step--; wizRender(); } } };
       g("wizNext").onclick = wizNextClick;
     }
-    function wizOpen() {
+    function wizOpen(preset) {
       const first = (wizRoles()[0] || { id: "field" }).id;
       W = { step: 0, role: first, employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
-      applyRole(first);
+      // "+ Add a user" from a client-organisation group pre-selects the Client role
+      // + that organisation, so the office only fills in the person's details.
+      if (preset && preset.clientOrg) {
+        const cr = wizRoles().find(r => { try { return wizRole(r.id).staffType === "client"; } catch (e) { return false; } });
+        if (cr) { W.role = cr.id; W.clientOrg = preset.clientOrg; W.clientRole = W.clientRole || "compliance"; }
+      }
+      applyRole(W.role);
       ensureWizDom(); wizRender();
       g("wizOverlay").style.display = "flex";
     }

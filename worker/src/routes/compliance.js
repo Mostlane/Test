@@ -523,6 +523,16 @@ export async function handle(request, env, ctx, url, sess) {
     })());
   };
 
+  // A client tapping ⬇ to save ONE certificate isn't visible to the server (the
+  // file streams over a public signed link), so the chart pings this on the tap.
+  // No-op for staff; logs the view+download AND alerts the office for a client login.
+  if (sub === "/log-download" && method === "POST") {
+    const code = q.get("code") || null;
+    logAct("file_download", { code, type: q.get("type") || null });
+    alertDownload({ code });
+    return jr({ ok: true }, headers);
+  }
+
   // ── Client activity log (office): what external client logins view/download ──
   if (sub === "/client-activity" && method === "GET") {
     const pp = await permissionsFor(env, tid, me).catch(() => ({}));
