@@ -511,7 +511,7 @@ function typeSettings(type){
 function typeStatus(e, type){
   // A manual 5-year flag (🚩 red / 📨 amber / 📦 green) beats the date — here, so
   // the Status light, filters, summary and export all agree with the cell.
-  if (type === 'fiveYear' && e && e.storeCode != null) { const fl = flagOf(e.storeCode); if (fl) return FLAG_INFO[fl.s].cls; if (installRec[pad4(e.storeCode)]) return ''; }
+  if (type === 'fiveYear' && e && e.storeCode != null) { if (installRec[pad4(e.storeCode)]) return ''; const fl = flagOf(e.storeCode); if (fl) return FLAG_INFO[fl.s].cls; }
   const d = parseDate(e[type]);
   if (!d) return '';
   const cfg = typeSettings(type);
@@ -1511,9 +1511,10 @@ function renderTable(d){
       // PV / EV-Forecourt / Pump cells carry a column class so they hide/show with
       // the matching <th> (hidden by default; the "Columns" tickboxes reveal them).
       const colCls = type === 'pv' ? ' col-pv' : type === 'ev' ? ' col-ev' : type === 'pump' ? ' col-pump' : '';
-      if (type === 'fiveYear' && !closed && installRec[pad4(e.storeCode)] && !flagOf(e.storeCode)) {
+      // Install Records Required wins over a flag, and also fills the empty PAT / EM boxes.
+      if (!closed && installRec[pad4(e.storeCode)] && (type === 'fiveYear' || ((type === 'pat' || type === 'em') && !parseDate(e[type])))) {
         const ir = installRec[pad4(e.storeCode)];
-        return `<td class="dc"><span class="inst-rec" title="${escAttr('New site — installation certificates needed' + (ir.by ? ' (set by ' + ir.by + ')' : '') + '. Cleared from the EICR tracker.')}">📂 Install Records Required</span></td>`;
+        return `<td class="dc${colCls}"><span class="inst-rec" title="${escAttr('New site — installation certificates needed' + (ir.by ? ' (set by ' + ir.by + ')' : '') + '. Cleared from the EICR tracker.')}">📂 Install Records Required</span></td>`;
       }
       return `<td class="dc${colCls}${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
