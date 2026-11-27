@@ -492,7 +492,9 @@ async function buildBoard(env, tid, money) {
     if (!c) return null;
     const t = c.test_job_id ? r.jobs.get(c.test_job_id) : null;
     return { caseId: c.id, closedAt: c.closed_at, testDate: t ? String(t.scheduledAt || t.createdAt || "").slice(0, 10) : "", outcome: c.outcome || "",
-      testInvoiced: c.test_inv_at || null, worksInvoiced: c.works_inv_at || null, orderNumber: c.order_number || "" };
+      testInvoiced: c.test_inv_at || null, worksInvoiced: c.works_inv_at || null, orderNumber: c.order_number || "",
+      certSigned: c.cert_signed_at ? { at: c.cert_signed_at, by: c.cert_signed_by } : null,
+      certUpdated: c.cert_updated_at ? { at: c.cert_updated_at, by: c.cert_updated_by } : null };
   };
   const rows = [];
   for (const st of r.stores.values()) {

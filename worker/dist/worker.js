@@ -50012,7 +50012,9 @@ async function buildBoard(env, tid, money3) {
       outcome: c.outcome || "",
       testInvoiced: c.test_inv_at || null,
       worksInvoiced: c.works_inv_at || null,
-      orderNumber: c.order_number || ""
+      orderNumber: c.order_number || "",
+      certSigned: c.cert_signed_at ? { at: c.cert_signed_at, by: c.cert_signed_by } : null,
+      certUpdated: c.cert_updated_at ? { at: c.cert_updated_at, by: c.cert_updated_by } : null
     };
   };
   const rows = [];

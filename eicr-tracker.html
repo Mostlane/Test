@@ -49,6 +49,7 @@
     .btn:disabled{opacity:.5;cursor:default;}
     td.act{white-space:nowrap;text-align:right;}
     .empty{padding:14px;color:var(--muted);font-size:13px;}
+    .signed{display:table;margin-top:4px;font-size:11.5px;font-weight:800;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:6px;padding:1px 7px;white-space:nowrap;}
     .inst{display:inline-block;font-size:12px;font-weight:700;background:#ede9fe;color:#5b21b6;border-radius:6px;padding:2px 7px;white-space:nowrap;}
     .flag{display:inline-block;font-size:11px;font-weight:700;background:#fff1c9;color:#7a4a00;border-radius:6px;padding:1px 6px;margin-top:2px;}
     .mback{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:9000;overflow-y:auto;padding:30px 12px;}
@@ -206,8 +207,15 @@ function jobLine(j, label){
   const when = j.scheduledAt ? fmtD(j.scheduledAt) : "not booked in";
   return `<div class="sub">${label}: <a href="/job-view.html?jobId=${encodeURIComponent(j.id)}" target="_blank" title="Open the job to edit times, engineers etc.">${esc((j.engineers||[]).join(", ")||"unassigned")} · ${esc(when)} · ${esc(j.status)} ↗</a></div>`;
 }
+// ✍️ A clear "signed off" marker: the test certificate (and, after remedials, the
+// updated certificate). Falls back to the last closed case for a finished site.
+function signedBadge(r, useClosed){
+  const src = (r.certSigned || r.certUpdated) ? r : (useClosed && r.lastClosed) || {};
+  const b = (x, what) => x ? `<div class="signed">✍️ ${what} signed off ${esc(fmtD(String(x.at).slice(0,10)))}${x.by?" · "+esc(x.by):""}</div>` : "";
+  return b(src.certSigned, "Certificate") + b(src.certUpdated, "Updated cert");
+}
 function statusCell(r){
-  return `<span class="pill ${PILL[r.status]||""}">${esc(r.statusLabel)}</span>`
+  return `<span class="pill ${PILL[r.status]||""}">${esc(r.statusLabel)}</span>` + signedBadge(r)
     + (r.daysInStatus!=null && r.status!=="due" ? `<div class="sub">${r.daysInStatus} working day${r.daysInStatus===1?"":"s"}${r.manual?" · set by hand":""}</div>` : "")
     + (r.alert ? `<div class="alert ${r.alert}">${esc(r.alertText)}</div>` : "");
 }
@@ -411,7 +419,7 @@ function renderYear(){
       <td class="code">${esc(r.code)}</td>
       <td>${esc(r.name)}${r.flag?`<div class="flag">⚑ ${esc(r.flag)}</div>`:""}</td>
       <td class="due hide-s">${dueCell(r)}</td>
-      <td><span class="pill ${x.ys.cls}">${esc(x.ys.label)}</span>${r.caseId&&r.daysInStatus!=null&&r.status!=="due"?`<div class="sub">${r.daysInStatus} working day${r.daysInStatus===1?"":"s"}</div>`:""}${r.caseId&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:(!r.caseId&&x.ys.key==="due"&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:"")}${!r.caseId&&lc&&x.ys.key==="closed"?`<div class="sub">closed ${esc(fmtD(lc.closedAt))}</div>`:""}</td>
+      <td><span class="pill ${x.ys.cls}">${esc(x.ys.label)}</span>${signedBadge(r, !r.caseId && x.ys.key==="closed")}${r.caseId&&r.daysInStatus!=null&&r.status!=="due"?`<div class="sub">${r.daysInStatus} working day${r.daysInStatus===1?"":"s"}</div>`:""}${r.caseId&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:(!r.caseId&&x.ys.key==="due"&&r.alert?`<div class="alert ${r.alert}">${esc(r.alertText)}</div>`:"")}${!r.caseId&&lc&&x.ys.key==="closed"?`<div class="sub">closed ${esc(fmtD(lc.closedAt))}</div>`:""}</td>
       <td class="hide-s">${codesHtml(r.remedials)}${jobLine(r.test,"Test")}${r.worksOnTestJob?`<div class="sub">🔧 Remedials done on the test job — ${esc(r.worksOnTestJob.by||"")} ${esc(fmtD(r.worksOnTestJob.date))}</div>`:jobLine(r.works,"Works")}${r.order?`<div class="sub">Order ${esc(r.order.number)}${r.order.value!=null?" · "+money(r.order.value):""}</div>`:""}${r.invoices&&r.invoices.test?`<div class="sub">Test ${r.invoices.test.done?"✓ invoiced":"not invoiced"}${r.invoices.works?" · works "+(r.invoices.works.done?"✓ invoiced":"not invoiced"):""}</div>`:""}${r.note?`<div class="sub">📝 ${esc(r.note.slice(0,80))}</div>`:""}</td>
       <td class="act">${(r.caseId || x.ys.key==="due" || x.ys.key==="rolled") ? actions(r, "office") : ""}</td></tr>`;
   });
