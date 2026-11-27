@@ -202,7 +202,7 @@ function codesHtml(rm){
 function jobLine(j, label){
   if (!j) return "";
   const when = j.scheduledAt ? fmtD(j.scheduledAt) : "not booked in";
-  return `<div class="sub">${label}: ${esc((j.engineers||[]).join(", ")||"unassigned")} · ${esc(when)} · ${esc(j.status)}</div>`;
+  return `<div class="sub">${label}: <a href="/job-view.html?jobId=${encodeURIComponent(j.id)}" target="_blank" title="Open the job to edit times, engineers etc.">${esc((j.engineers||[]).join(", ")||"unassigned")} · ${esc(when)} · ${esc(j.status)} ↗</a></div>`;
 }
 function statusCell(r){
   return `<span class="pill ${PILL[r.status]||""}">${esc(r.statusLabel)}</span>`
@@ -223,9 +223,9 @@ function actions(r, tab){
     case "to_quote": a("quote","📋 Quote text","l"); a("quote-sent","✓ Quote sent"); break;
     case "quoted": a("order","📦 Order received"); break;
     case "ordered": a("works","🔧 Create works job"); filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
-    case "works_booked": filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+    case "works_booked": if (r.works) a("openjob","✏️ Open job"); filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
     case "cert_signoff": case "cert_update":
-      filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
+      if (r.works) a("openjob","✏️ Open job"); filed(); a("cert","📄 Cert","l"); a("upload","⬆ Upload","l"); if (D.canSignOff) a("signoff","✓ Sign off","g"); break;
   }
   return b.join(" ");
 }
@@ -703,7 +703,7 @@ g("body").addEventListener("click", e => {
   if (b) {
     e.stopPropagation();
     const r = rowBy(b.dataset.code); if (!r) return;
-    ({ book:bookTest, quote:quoteText, "quote-sent":quoteSent, order:orderReceived, works:createWorks, cert:openCert, upload:uploadCert, signoff:signOff,
+    ({ book:bookTest, quote:quoteText, "quote-sent":quoteSent, order:orderReceived, works:createWorks, openjob:x=>window.open("/job-view.html?jobId="+encodeURIComponent(x.works.id),"_blank"), cert:openCert, upload:uploadCert, signoff:signOff,
        "inv-test":x=>invoice(x,"test"), "inv-works":x=>invoice(x,"works") })[b.dataset.act](r);
     return;
   }
