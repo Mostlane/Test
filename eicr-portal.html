@@ -187,6 +187,7 @@
     /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
        is the same height as one without (no wrap → no taller rows). */
     td.dc{ white-space:nowrap; }
+    .inst-rec{ display:inline-block; font-size:12px; font-weight:700; background:#ede9fe; color:#5b21b6; border-radius:6px; padding:2px 7px; }
     /* Manual unsatisfactory flag toggle on the 5-Year date cell. Off = a faint
        outline flag; on = a solid red flag. */
     .unsat-flag{ border:0; background:none; padding:0 2px; cursor:pointer; font-size:1em; line-height:1; vertical-align:baseline; opacity:.35; filter:grayscale(1); }
@@ -510,7 +511,7 @@ function typeSettings(type){
 function typeStatus(e, type){
   // A manual 5-year flag (🚩 red / 📨 amber / 📦 green) beats the date — here, so
   // the Status light, filters, summary and export all agree with the cell.
-  if (type === 'fiveYear' && e && e.storeCode != null) { const fl = flagOf(e.storeCode); if (fl) return FLAG_INFO[fl.s].cls; }
+  if (type === 'fiveYear' && e && e.storeCode != null) { const fl = flagOf(e.storeCode); if (fl) return FLAG_INFO[fl.s].cls; if (installRec[pad4(e.storeCode)]) return ''; }
   const d = parseDate(e[type]);
   if (!d) return '';
   const cfg = typeSettings(type);
@@ -611,6 +612,18 @@ async function loadUnsatFlags(){
 }
 // 🔧 store code → {at,by} when remedial works are required at that store
 // (a spanner beside the store code, tapped on/off by edit users).
+// 📂 store code → {at,by} when the site needs its INSTALLATION records instead of a
+// 5-year test date (set from the EICR tracker). The 5-Year cell shows the words.
+let installRec = {};
+async function loadInstallRec(){
+  try {
+    const r = await authFetch('/compliance/installrec-flags?scheme=' + COMPLIANCE_SCHEME);
+    if (!r.ok) return;
+    const j = await r.json();
+    installRec = (j && j.codes) ? j.codes : {};
+    if (allData.length) applyFilters();
+  } catch(e){}
+}
 let worksFlags = {};
 async function loadWorksFlags(){
   try {
@@ -1498,6 +1511,10 @@ function renderTable(d){
       // PV / EV-Forecourt / Pump cells carry a column class so they hide/show with
       // the matching <th> (hidden by default; the "Columns" tickboxes reveal them).
       const colCls = type === 'pv' ? ' col-pv' : type === 'ev' ? ' col-ev' : type === 'pump' ? ' col-pump' : '';
+      if (type === 'fiveYear' && !closed && installRec[pad4(e.storeCode)] && !flagOf(e.storeCode)) {
+        const ir = installRec[pad4(e.storeCode)];
+        return `<td class="dc"><span class="inst-rec" title="${escAttr('New site — installation certificates needed' + (ir.by ? ' (set by ' + ir.by + ')' : '') + '. Cleared from the EICR tracker.')}">📂 Install Records Required</span></td>`;
+      }
       return `<td class="dc${colCls}${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
     if (closed) tr.classList.add('closed-row');
@@ -1736,6 +1753,7 @@ async function loadFromPortal(){
   // loadComplianceIndex(), so a flag saved fine but vanished on refresh.)
   loadUnsatFlags();
   loadWorksFlags();
+  loadInstallRec();
 }
 
 /* One-time migration: read the old mostlane-pos store list BROWSER-SIDE (it's

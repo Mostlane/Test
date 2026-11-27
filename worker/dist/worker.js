@@ -15455,7 +15455,7 @@ async function handle8(request, env, ctx, url, sess) {
     }
     return _canComment;
   };
-  const SCHEME_READS = /* @__PURE__ */ new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags", "/works-flags"]);
+  const SCHEME_READS = /* @__PURE__ */ new Set(["/export", "/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags", "/works-flags", "/installrec-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr2({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -15963,6 +15963,32 @@ async function handle8(request, env, ctx, url, sess) {
       }
     }
     return jr2({ ok: true, code, due, siteNumber: siteNo }, headers);
+  }
+  if (sub === "/installrec-flags" && method === "GET") {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "compliance:installrec:" + scheme + ":" + tid).first();
+    let codes = {};
+    try {
+      codes = JSON.parse(row && row.value || "{}") || {};
+    } catch {
+    }
+    return jr2({ ok: true, codes }, headers);
+  }
+  if (sub === "/installrec-flag" && method === "POST") {
+    if (!canWrite) return jr2({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr2({ error: "code required" }, headers, 400);
+    const key = "compliance:installrec:" + scheme + ":" + tid;
+    const path = '$."' + code + '"';
+    const val2 = JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), by: me });
+    if (b.on) {
+      await env.DB.prepare(
+        "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, json_object(?, json(?))) ON CONFLICT(key) DO UPDATE SET value=json_set(app_config.value, ?, json(?))"
+      ).bind(tid, key, code, val2, path, val2).run();
+    } else {
+      await env.DB.prepare("UPDATE app_config SET value=json_remove(value, ?) WHERE tenant_id=? AND key=?").bind(path, tid, key).run();
+    }
+    return jr2({ ok: true, code, on: !!b.on }, headers);
   }
   if (sub === "/works-flags" && method === "GET") {
     if (toolOff("flags")) return jr2({ ok: true, codes: {} }, headers);
@@ -49897,6 +49923,11 @@ function shapeRow3(store, c, ctx, extra) {
       alertText = `${wd} working days in this status`;
     }
   }
+  const instRec = extra.inst ? extra.inst[store ? store.code : c && c.store_code] : null;
+  if (instRec && status === "due") {
+    alert = "";
+    alertText = "";
+  }
   const need = c ? invoicesNeeded(c) : [];
   const conc = extra.concerto.get(store ? store.code : c && c.store_code);
   const cert = extra.certs.get(store ? store.code : c && c.store_code);
@@ -49907,11 +49938,12 @@ function shapeRow3(store, c, ctx, extra) {
     name: store && store.name || c && c.site_name || "",
     category: store ? store.category : "",
     due,
+    installRec: instRec ? { at: instRec.at || "", by: instRec.by || "" } : null,
     closedStore: !!(store && store.closed),
     onChart: !!store,
     caseId: c ? c.id : null,
     status,
-    statusLabel: S4[status] ? S4[status].label : status,
+    statusLabel: instRec && status === "due" ? "Install records required" : S4[status] ? S4[status].label : status,
     who: S4[status] ? S4[status].who : "",
     statusAt: c ? c.status_at : null,
     statusBy: c ? c.status_by : "",
@@ -49948,10 +49980,18 @@ function shapeRow3(store, c, ctx, extra) {
     })() : []
   };
 }
+async function installRecMap(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "compliance:installrec:coop:" + tid).first();
+    return JSON.parse(row && row.value || "{}") || {};
+  } catch {
+    return {};
+  }
+}
 async function buildBoard(env, tid, money3) {
   const r = await reconcile(env, tid);
-  const [conc, certs] = await Promise.all([concertoRows(env, tid), certFiles(env, tid)]);
-  const extra = { concerto: conc.byCode, certs, money: money3 };
+  const [conc, certs, inst] = await Promise.all([concertoRows(env, tid), certFiles(env, tid), installRecMap(env, tid)]);
+  const extra = { concerto: conc.byCode, certs, money: money3, inst };
   const ctx = { jobs: r.jobs, doneCats: r.doneCats };
   const openByCode = /* @__PURE__ */ new Map();
   const lastClosed = /* @__PURE__ */ new Map();
