@@ -24068,7 +24068,7 @@ async function handle12(request, env, ctx, url, sess) {
         st = JSON.parse(u.profile || "{}").staffType || "field";
       } catch {
       }
-      return st !== "office";
+      return st !== "office" && st !== "client";
     });
     let leave = {};
     try {
@@ -30854,7 +30854,7 @@ async function sweepFallbacks(env, tid = 1) {
       st = JSON.parse(u.profile || "{}").staffType || "field";
     } catch {
     }
-    return st !== "office";
+    return st !== "office" && st !== "client";
   });
   const jobs = await listJobs(env, tid);
   const hasJobThatDay = (uname) => jobs.some((j) => j.scheduledAt && !j.seriesSkipped && String(j.status || "").toLowerCase() !== "cancelled" && new Date(j.scheduledAt).toISOString().slice(0, 10) === target && assignedList(j).some((a) => normId(a) === normId(uname)));
@@ -32298,7 +32298,12 @@ async function handle14(request, env, ctx, url, sess) {
     const permMap = {};
     for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
-    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus3(u.status));
+    const includeClients = includeAll || url.searchParams.get("clients") === "1";
+    const rows = (results || []).filter((u) => {
+      if (!includeAll && !isActiveStatus3(u.status)) return false;
+      if (!includeClients && isClientUser(u)) return false;
+      return true;
+    });
     const out = [];
     const lvl = await profileLevelFor("");
     for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}, sess && u.username === sess.user.username ? "full" : lvl));
@@ -32633,6 +32638,13 @@ var PERMISSION_KEYS = [
 function isActiveStatus3(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
+}
+function isClientUser(u) {
+  try {
+    return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase() === "client";
+  } catch {
+    return false;
+  }
 }
 function shapeUser2(u, perms, level = "full") {
   let profile = {};
@@ -39437,7 +39449,12 @@ async function handle27(request, env, ctx, url, sess) {
     ).bind(db.tenantId).all();
     const active = (users || []).filter((u) => {
       const s = String(u.status || "").trim().toLowerCase();
-      return s === "" || s === "active";
+      if (!(s === "" || s === "active")) return false;
+      try {
+        return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase() !== "client";
+      } catch {
+        return true;
+      }
     });
     const { results: recs } = await db.prepare(
       "SELECT username, kind, title, expires FROM staff_records WHERE tenant_id=?"
@@ -39570,7 +39587,12 @@ async function handle27(request, env, ctx, url, sess) {
     ).bind(db.tenantId).all();
     const active = (users || []).filter((u) => {
       const s = String(u.status || "").trim().toLowerCase();
-      return s === "" || s === "active";
+      if (!(s === "" || s === "active")) return false;
+      try {
+        return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase() !== "client";
+      } catch {
+        return true;
+      }
     });
     const staffTypeOf4 = (u) => {
       try {

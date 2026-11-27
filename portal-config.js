@@ -1003,7 +1003,9 @@
         document.body.appendChild(wrap);
         no.onclick = function () { wrap.remove(); };
 
-        nativeFetch(API + "/users", { headers: { "Authorization": "Bearer " + token } })
+        // ?clients=1 so the owner can still View-As an external client login
+        // (clients are excluded from the default /users list — they are not staff).
+        nativeFetch(API + "/users?clients=1", { headers: { "Authorization": "Bearer " + token } })
           .then(function (r) { return r.json(); })
           .then(function (d) {
             sel.innerHTML = "";

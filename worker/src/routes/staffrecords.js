@@ -405,7 +405,7 @@ export async function handle(request, env, ctx, url, sess) {
     const { results: users } = await db.prepare(
       "SELECT username, first_name, last_name, status, employment_type, profile FROM users WHERE tenant_id=?"
     ).bind(db.tenantId).all();
-    const active = (users || []).filter(u => { const s = String(u.status || "").trim().toLowerCase(); return s === "" || s === "active"; });
+    const active = (users || []).filter(u => { const s = String(u.status || "").trim().toLowerCase(); if (!(s === "" || s === "active")) return false; try { return String((JSON.parse(u.profile || "{}").staffType) || "").toLowerCase() !== "client"; } catch { return true; } });
     const { results: recs } = await db.prepare(
       "SELECT username, kind, title, expires FROM staff_records WHERE tenant_id=?"
     ).bind(db.tenantId).all();
@@ -530,7 +530,7 @@ export async function handle(request, env, ctx, url, sess) {
     const { results: users } = await db.prepare(
       "SELECT username, first_name, last_name, status, profile FROM users WHERE tenant_id=?"
     ).bind(db.tenantId).all();
-    const active = (users || []).filter(u => { const s = String(u.status || "").trim().toLowerCase(); return s === "" || s === "active"; });
+    const active = (users || []).filter(u => { const s = String(u.status || "").trim().toLowerCase(); if (!(s === "" || s === "active")) return false; try { return String((JSON.parse(u.profile || "{}").staffType) || "").toLowerCase() !== "client"; } catch { return true; } });
     const staffTypeOf = u => { try { return String((JSON.parse(u.profile || "{}").staffType) || "").toLowerCase(); } catch { return ""; } };
     const people = fieldOnly ? active.filter(u => staffTypeOf(u) !== "office") : active;
     const { results: recs } = await db.prepare(

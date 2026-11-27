@@ -1327,7 +1327,7 @@ export async function handle(request, env, ctx, url, sess) {
     const { results: users } = await env.DB.prepare(
       "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')"
     ).bind(tenantId).all();
-    const fieldUsers = (users || []).filter(u => { let st = "field"; try { st = (JSON.parse(u.profile || "{}").staffType) || "field"; } catch {} return st !== "office"; });
+    const fieldUsers = (users || []).filter(u => { let st = "field"; try { st = (JSON.parse(u.profile || "{}").staffType) || "field"; } catch {} return st !== "office" && st !== "client"; });
     let leave = {};
     try { const { approvedLeaveInRange } = await import("./holidays.js"); leave = await approvedLeaveInRange(env, tenantId, today, today); } catch {}
     const isDone = s => DONE_STATES.has(String(s || "").toLowerCase());
@@ -8309,7 +8309,7 @@ export async function sweepFallbacks(env, tid = 1) {
 
   // Field engineers (staffType lives in the profile JSON, default "field").
   const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
-  const fieldUsers = (users || []).filter(u => { let st = "field"; try { st = (JSON.parse(u.profile || "{}").staffType) || "field"; } catch {} return st !== "office"; });
+  const fieldUsers = (users || []).filter(u => { let st = "field"; try { st = (JSON.parse(u.profile || "{}").staffType) || "field"; } catch {} return st !== "office" && st !== "client"; });
   const jobs = await listJobs(env, tid);
   const hasJobThatDay = (uname) => jobs.some(j => j.scheduledAt && !j.seriesSkipped
     && String(j.status || "").toLowerCase() !== "cancelled"

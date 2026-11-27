@@ -1553,6 +1553,21 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   a `compliance` client (only `/client/me` passes). **No new PERMISSION_KEY** — it's
   all profile-based. portal-config bumped `?v=43`, SW `mostlane-v144`. **View As lands a client by role (17 Oct 2026):** the owner picker sends a `jobs` client to client-home.html and a compliance-only FBC client to fareham.html (was client-home for every client); portal-config `?v=45`, SW `mostlane-v146`. Test
   `node --no-warnings worker/tools/test-client-compliance.mjs`.
+  **A client is NOT staff — excluded from the default `/users` list (27 Nov 2026, Jamie:
+  "why is my client Grace showing up in the scheduler etc"):** the many "field = not
+  office" heuristics (`staffType !== "office"`) treated a client (staffType "client") as a
+  FIELD ENGINEER, so a client appeared in the scheduler lanes/engineer dropdown, the
+  `/sla/live` board, the fallback no-job sweep, the EICR/5-year engineer-booking dropdowns,
+  inbox/holiday/van/timesheet pickers, Employees, etc. Fixed at the SOURCE: **`GET /users`
+  now drops `profile.staffType === "client"` by default** (`isClientUser`, users.js) — like
+  it already drops Disabled — so every staff picker that reads `/users` is clean in one go.
+  **Users Admin passes `?all=1`** (sees disabled + clients) and **the owner's View-As picker
+  passes `?clients=1`** (portal-config — active staff + active clients, so View-As-client
+  still works); `?all=1` ⊇ `?clients=1`. The handlers that read `users` DIRECTLY (bypassing
+  /users) got the same exclusion added inline: `sla.js` `/sla/live` + `sweepFallbacks`, and
+  `staffrecords.js` `/hr/overview` + `/hr/matrix`. **Any new "field engineer" predicate must
+  exclude clients too** (`st !== "office" && st !== "client"`, the users-admin.html pattern).
+  portal-config `?v=52`, SW `mostlane-v156`.
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
   (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`
