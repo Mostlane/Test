@@ -1713,7 +1713,32 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   than a new tab; a self-contained `CertViewer` gallery layer in eicr-portal.html adds
   fixed ◀ ▶ arrows + ←/→ keyboard nav to flick through ALL of a store's certificates
   (built from /compliance/files, standard types in chart order, current-first),
-  wrap-around, arrows hidden for a single doc. **NB an old edit-save quirk baked "📄"
+  wrap-around, arrows hidden for a single doc.
+  **Curate the pack cert from the viewer (28 Nov 2026, Jamie — clients self-serve the
+  pack, so the RIGHT cert must be picked for them automatically):** tapping a 5-Year
+  cell's 📄 now opens CertViewer in a REVIEW mode scoped to that type
+  (`openCert` → `CertViewer.openReview(codes,pos,type)`): a bottom control bar over
+  docviewer shows the cert's date + **✅ Current / 📦 In pack**, a **★ Set as current**
+  button (edit users → POST /compliance/file-update {id,makeCurrent:1} → that file ALONE
+  is current = what the 📄 opens AND what the client pack ships; re-fetches so the badge
+  moves), the 5-year **🟥/🟨/🟩/✕ flag** chips (via `setFlag`), and **Site ‹ / ›** nav
+  across the on-screen rows that have that cert (`reviewSiteCodes`, honours the current
+  filter/sort; ↑/↓ keys too). Doc ‹ › (←/→) still cycle a site's docs within the type.
+  View-only/clients get the viewer + site/doc nav but NO Set-current/flag
+  (`canEditCompliance`-gated). `openCertById` (Documents modal) still uses the plain
+  `openList` (all types, no site nav). HTML-only, network-first (no `?v=`/SW bump).
+  Smoke-tested headless (scratchpad certviewer-smoke.cjs). **The pack selector itself is
+  unchanged** (pinned, else newest-uploaded) — Set-as-current just pins; the viewer is
+  how the office curates it. **One-off cleanup (28 Nov 2026, in D1):** 9 coop sites whose
+  pack/📄 showed the wrong or a partial 5-year cert were corrected by pinning the right
+  current set — **9712 Ashurst** (split report: the 📄 was opening the 0.66MB "…-2" half,
+  which read satisfactory, while the real 4.6MB EICR — unsatisfactory — sat behind it;
+  full EICR pinned current + part-2 kept `in_pack`), **9607 Maidstone** (its current was a
+  mis-filed duplicate of the 9507 Aldershot cert; real Maidstone cert pinned + expiry
+  corrected 2030-05-20 → **2030-12-12**), **0652/0718/9624/9625/9626/9627** (EICR + its
+  remedial/EIC linked so both ship), **0754 Shoreham** (dated copy pinned over an undated
+  re-upload). 9712 is genuinely unsatisfactory and was NOT yet flagged — flag it from the
+  viewer. **NB an old edit-save quirk baked "📄"
   into 2 stores' due dates (0023/0052, cleaned in D1); fmtDue strips stray 📄, editing
   removes the cert link from the cell, saveEditInstant sanitises to date chars, and
   /store strips 📄 — so it can't recur.** **In-job:**
