@@ -262,6 +262,9 @@
     #certNav .cvCurrent{ background:#2563eb; padding:9px 15px; font-weight:700; }
     #certNav .cvCurrent:hover{ background:#1d4ed8; }
     #certNav .cvCurrent:disabled{ background:#166534; cursor:default; }
+    #certNav .cvUnset{ background:#b91c1c; padding:9px 15px; font-weight:700; }
+    #certNav .cvUnset:hover{ background:#991b1b; }
+    #certNav .cvLinked{ background:#78350f; color:#fde68a; border-radius:8px; padding:6px 11px; font-weight:600; max-width:94vw; text-align:center; line-height:1.3; }
     #certNav .cvFlag{ display:inline-flex; gap:5px; }
     #certNav .cvFlag button{ background:rgba(255,255,255,.14); padding:7px 10px; font-size:16px; line-height:1; filter:grayscale(.55); opacity:.75; }
     #certNav .cvFlag button.on{ background:rgba(255,255,255,.3); filter:none; opacity:1; box-shadow:0 0 0 2px #fff inset; }
@@ -794,8 +797,10 @@ const CertViewer = (function(){
                   +     '<span class="cvSiteLbl"></span>'
                   +     '<button class="cvSiteNext" type="button" title="Next site (↓)">Site ›</button></div>'
                   +   '<div class="cvDocLbl"></div>'
+                  +   '<div class="cvLinked"></div>'
                   +   '<div class="cvActions">'
                   +     '<button class="cvCurrent" type="button" title="Use this document in the client pack and when the 📄 is clicked">★ Set as current</button>'
+                  +     '<button class="cvUnset" type="button" title="Remove this document from the current set — leave the others">✖ Remove from current</button>'
                   +     '<span class="cvFlag">'
                   +       '<button type="button" data-s="unsat" title="Unsatisfactory">🟥</button>'
                   +       '<button type="button" data-s="quoted" title="Quote sent — awaiting order">🟨</button>'
@@ -810,6 +815,7 @@ const CertViewer = (function(){
     nav.querySelector('.cvSitePrev').onclick = ()=>gotoSite((ctx?ctx.pos:0)-1);
     nav.querySelector('.cvSiteNext').onclick = ()=>gotoSite((ctx?ctx.pos:0)+1);
     nav.querySelector('.cvCurrent').onclick = setCurrent;
+    nav.querySelector('.cvUnset').onclick = removeCurrent;
     nav.querySelectorAll('.cvFlag button').forEach(b=> b.onclick = ()=> doFlag(b.dataset.s));
   }
   function hookClose(){
@@ -864,10 +870,20 @@ const CertViewer = (function(){
     } else if (inReview) dl = 'No ' + (TYPE_LABEL[ctx.type]||ctx.type) + ' document on file';
     nav.querySelector('.cvDocLbl').textContent = dl;
     const typeStd = inReview && STD.includes(ctx.type);
-    const showCur = ed && !!it && typeStd;
+    const curCount = items.filter(x => x && x.current).length;   // >1 = a linked set (both go in the pack)
+    const isCur = !!(it && it.current);
+    const showCur = ed && !!it && typeStd && !isCur;             // make a NON-current doc the current one
+    const showUnset = ed && !!it && typeStd && isCur && curCount > 1;  // drop ONE of a linked set, leave the rest
     const curBtn = nav.querySelector('.cvCurrent');
     curBtn.style.display = showCur ? '' : 'none';
-    if (showCur){ curBtn.disabled = !!it.current; curBtn.textContent = it.current ? '✅ Current (in the client pack)' : '★ Set as current'; }
+    if (showCur){ curBtn.disabled = false; curBtn.textContent = '★ Set as current'; }
+    const unsetBtn = nav.querySelector('.cvUnset');
+    unsetBtn.style.display = showUnset ? '' : 'none';
+    if (showUnset){ unsetBtn.disabled = false; unsetBtn.textContent = '✖ Remove from current'; }
+    const linkedEl = nav.querySelector('.cvLinked');
+    const showLinked = inReview && typeStd && curCount > 1;
+    linkedEl.style.display = showLinked ? '' : 'none';
+    if (showLinked) linkedEl.textContent = '🔗 ' + curCount + ' are set as current — all ' + curCount + ' download in the client pack. Remove the wrong one(s) so only the right one is current.';
     const showFlag = ed && inReview && ctx.type === 'fiveYear';
     const flagWrap = nav.querySelector('.cvFlag');
     flagWrap.style.display = showFlag ? '' : 'none';
@@ -875,7 +891,7 @@ const CertViewer = (function(){
       const fl = flagOf(ctx.codes[ctx.pos]), cur = fl ? fl.s : '';
       flagWrap.querySelectorAll('button').forEach(b=> b.classList.toggle('on', b.dataset.s === cur));
     }
-    nav.querySelector('.cvActions').style.display = (showCur || showFlag) ? '' : 'none';
+    nav.querySelector('.cvActions').style.display = (showCur || showUnset || showFlag) ? '' : 'none';
   }
   async function setCurrent(){
     const it = items[idx]; if (!it || it.current || busy) return;
@@ -892,6 +908,25 @@ const CertViewer = (function(){
       idx = Math.max(0, items.findIndex(d => d.id === keep));
       update();
     }catch(e){ btn.textContent = old; btn.disabled = false; alert("Couldn't set as current — check your connection and try again."); }
+    finally { busy = false; }
+  }
+  async function removeCurrent(){
+    const it = items[idx]; if (!it || !it.current || busy) return;
+    const others = items.filter(x => x && x.current).length - 1;   // never un-pin the last one (would fall back to newest-uploaded)
+    if (others < 1) return;
+    busy = true;
+    const btn = nav.querySelector('.cvUnset'), old = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try{
+      const r = await authFetch('/compliance/file-update', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: it.id, pinned: 0 }) });
+      if (!r.ok) throw 0;
+      const code = ctx ? ctx.codes[ctx.pos] : it.code, keep = it.id;   // keep viewing the same doc; its badge clears
+      let list = await siteDocList(code);
+      if (ctx) list = list.filter(d => d.type === ctx.type);
+      items = list.filter(x => x && x.url);
+      idx = Math.max(0, items.findIndex(d => d.id === keep));
+      update();
+    }catch(e){ btn.textContent = old; btn.disabled = false; alert("Couldn't remove from current — check your connection and try again."); }
     finally { busy = false; }
   }
   async function doFlag(status){

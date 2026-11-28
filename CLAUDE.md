@@ -1721,7 +1721,17 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   docviewer shows the cert's date + **✅ Current / 📦 In pack**, a **★ Set as current**
   button (edit users → POST /compliance/file-update {id,makeCurrent:1} → that file ALONE
   is current = what the 📄 opens AND what the client pack ships; re-fetches so the badge
-  moves), the 5-year **🟥/🟨/🟩/✕ flag** chips (via `setFlag`), and **Site ‹ / ›** nav
+  moves). **Un-select + linked indicator (28 Nov 2026, Jamie — 0069 had TWO pinned certs
+  as current):** when more than one file of the type is current (2+ pinned = a "linked
+  set", both download in the client pack) the viewer shows a 🔗 amber banner saying how
+  many and that one must be removed, and the viewed current doc gets a **✖ Remove from
+  current** button (→ POST /compliance/file-update {id,pinned:0}, un-pins just that one
+  and leaves the rest; re-fetches). Guarded so it never un-pins the LAST current one
+  (that would fall back to newest-uploaded and could silently change the pack): the
+  button only shows while `curCount>1`. So **★ Set as current** shows only on a
+  NON-current doc, **✖ Remove from current** only on a current doc within a linked set,
+  and a sole current doc shows just the ✅ badge (nothing to change). The 5-year
+  **🟥/🟨/🟩/✕ flag** chips (via `setFlag`), and **Site ‹ / ›** nav
   across the on-screen rows that have that cert (`reviewSiteCodes`, honours the current
   filter/sort; ↑/↓ keys too). Doc ‹ › (←/→) still cycle a site's docs within the type.
   View-only/clients get the viewer + site/doc nav but NO Set-current/flag
