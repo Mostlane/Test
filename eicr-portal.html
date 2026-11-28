@@ -248,6 +248,23 @@
       background:rgba(15,23,42,.82); color:#fff; padding:6px 14px; border-radius:20px; font-size:13px;
       max-width:82vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     @media (max-width:768px){ #certNav .cvArrow{ width:42px; height:58px; font-size:28px; } }
+    /* Review control bar (over docviewer): site/doc navigation + set-current + flag. */
+    #certNav .cvBar{ position:fixed; left:0; right:0; bottom:0; z-index:100003;
+      background:rgba(15,23,42,.94); color:#fff; display:flex; flex-direction:column; gap:7px;
+      align-items:center; padding:9px 10px calc(9px + env(safe-area-inset-bottom,0px)); font-size:13px; }
+    #certNav .cvSite{ display:flex; align-items:center; gap:10px; max-width:96vw; }
+    #certNav .cvSiteLbl{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:58vw; }
+    #certNav .cvDocLbl{ color:#cbd5e1; max-width:94vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #certNav .cvActions{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; }
+    #certNav .cvBar button{ border:0; border-radius:8px; cursor:pointer; font:inherit; color:#fff; }
+    #certNav .cvSite button{ background:#334155; padding:8px 13px; font-weight:600; }
+    #certNav .cvSite button:hover{ background:#475569; }
+    #certNav .cvCurrent{ background:#2563eb; padding:9px 15px; font-weight:700; }
+    #certNav .cvCurrent:hover{ background:#1d4ed8; }
+    #certNav .cvCurrent:disabled{ background:#166534; cursor:default; }
+    #certNav .cvFlag{ display:inline-flex; gap:5px; }
+    #certNav .cvFlag button{ background:rgba(255,255,255,.14); padding:7px 10px; font-size:16px; line-height:1; filter:grayscale(.55); opacity:.75; }
+    #certNav .cvFlag button.on{ background:rgba(255,255,255,.3); filter:none; opacity:1; box-shadow:0 0 0 2px #fff inset; }
     .doc-btn{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:13px; }
     .doc-btn:hover{ background:#f1f5f9; }
     tr.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; background:#eaf4ff !important; }
@@ -764,16 +781,36 @@ async function loadComplianceIndex(){
    layers our own arrows + keyboard nav on top so you can flick through every
    certificate on file for the store. */
 const CertViewer = (function(){
-  let items = [], idx = 0, nav = null, hooked = false;
+  let items = [], idx = 0, nav = null, hooked = false, ctx = null, busy = false;
+  const STD = ['fiveYear','pat','em','pv','ev','pump'];
+  function siteNameOf(code){ const r = (allData||[]).find(x=>pad4(x.storeCode)===pad4(code)); return r ? (r.siteName||'') : ''; }
   function ensureUI(){
     if (nav) return;
     nav = document.createElement('div'); nav.id = 'certNav';
-    nav.innerHTML = '<button class="cvArrow cvPrev" title="Previous (←)" aria-label="Previous">‹</button>'
-                  + '<button class="cvArrow cvNext" title="Next (→)" aria-label="Next">›</button>'
-                  + '<div class="cvCount"></div>';
+    nav.innerHTML = '<button class="cvArrow cvPrev" type="button" title="Previous document (←)" aria-label="Previous document">‹</button>'
+                  + '<button class="cvArrow cvNext" type="button" title="Next document (→)" aria-label="Next document">›</button>'
+                  + '<div class="cvBar">'
+                  +   '<div class="cvSite"><button class="cvSitePrev" type="button" title="Previous site (↑)">‹ Site</button>'
+                  +     '<span class="cvSiteLbl"></span>'
+                  +     '<button class="cvSiteNext" type="button" title="Next site (↓)">Site ›</button></div>'
+                  +   '<div class="cvDocLbl"></div>'
+                  +   '<div class="cvActions">'
+                  +     '<button class="cvCurrent" type="button" title="Use this document in the client pack and when the 📄 is clicked">★ Set as current</button>'
+                  +     '<span class="cvFlag">'
+                  +       '<button type="button" data-s="unsat" title="Unsatisfactory">🟥</button>'
+                  +       '<button type="button" data-s="quoted" title="Quote sent — awaiting order">🟨</button>'
+                  +       '<button type="button" data-s="ordered" title="Order received — works to do">🟩</button>'
+                  +       '<button type="button" data-s="" title="Clear flag">✕</button>'
+                  +     '</span>'
+                  +   '</div>'
+                  + '</div>';
     document.body.appendChild(nav);
     nav.querySelector('.cvPrev').onclick = ()=>go(idx-1);
     nav.querySelector('.cvNext').onclick = ()=>go(idx+1);
+    nav.querySelector('.cvSitePrev').onclick = ()=>gotoSite((ctx?ctx.pos:0)-1);
+    nav.querySelector('.cvSiteNext').onclick = ()=>gotoSite((ctx?ctx.pos:0)+1);
+    nav.querySelector('.cvCurrent').onclick = setCurrent;
+    nav.querySelectorAll('.cvFlag button').forEach(b=> b.onclick = ()=> doFlag(b.dataset.s));
   }
   function hookClose(){
     if (hooked) return;
@@ -788,29 +825,103 @@ const CertViewer = (function(){
     hookClose();
     update();
   }
+  async function gotoSite(pos){
+    if (!ctx || !ctx.codes.length || busy) return;
+    const n = ctx.codes.length; ctx.pos = ((pos % n) + n) % n;
+    await loadSite();
+  }
+  async function loadSite(){
+    if (!ctx) return;
+    busy = true;
+    try{
+      let list = await siteDocList(ctx.codes[ctx.pos]);
+      list = list.filter(d => d.type === ctx.type);
+      items = list.filter(x => x && x.url);
+      idx = 0;
+      if (items.length) go(0); else update();
+    } finally { busy = false; }
+  }
   function update(){
     ensureUI();
+    const it = items[idx] || null, inReview = !!ctx, ed = canEditCompliance();
     const multi = items.length > 1;
     nav.querySelector('.cvPrev').style.display = multi ? '' : 'none';
     nav.querySelector('.cvNext').style.display = multi ? '' : 'none';
-    const c = nav.querySelector('.cvCount');
-    c.style.display = multi ? '' : 'none';
-    c.textContent = (idx+1) + ' / ' + items.length + (items[idx] && items[idx].name ? ' · ' + items[idx].name : '');
+    const siteEl = nav.querySelector('.cvSite');
+    if (inReview){
+      siteEl.style.display = '';
+      const code = ctx.codes[ctx.pos], nm = siteNameOf(code);
+      nav.querySelector('.cvSiteLbl').textContent = code + (nm ? ' · ' + nm : '') + '  (' + (ctx.pos+1) + ' / ' + ctx.codes.length + ')';
+      const one = ctx.codes.length <= 1;
+      nav.querySelector('.cvSitePrev').style.display = one ? 'none' : '';
+      nav.querySelector('.cvSiteNext').style.display = one ? 'none' : '';
+    } else siteEl.style.display = 'none';
+    let dl = '';
+    if (it){
+      const d = it.date ? fmtDue(String(it.date).slice(0,10)) : '';
+      const state = it.current ? ' · ✅ Current' : (it.inPack ? ' · 📦 In pack' : '');
+      dl = (d || it.name) + state + (multi ? '   (' + (idx+1) + ' / ' + items.length + ')' : '');
+    } else if (inReview) dl = 'No ' + (TYPE_LABEL[ctx.type]||ctx.type) + ' document on file';
+    nav.querySelector('.cvDocLbl').textContent = dl;
+    const typeStd = inReview && STD.includes(ctx.type);
+    const showCur = ed && !!it && typeStd;
+    const curBtn = nav.querySelector('.cvCurrent');
+    curBtn.style.display = showCur ? '' : 'none';
+    if (showCur){ curBtn.disabled = !!it.current; curBtn.textContent = it.current ? '✅ Current (in the client pack)' : '★ Set as current'; }
+    const showFlag = ed && inReview && ctx.type === 'fiveYear';
+    const flagWrap = nav.querySelector('.cvFlag');
+    flagWrap.style.display = showFlag ? '' : 'none';
+    if (showFlag){
+      const fl = flagOf(ctx.codes[ctx.pos]), cur = fl ? fl.s : '';
+      flagWrap.querySelectorAll('button').forEach(b=> b.classList.toggle('on', b.dataset.s === cur));
+    }
+    nav.querySelector('.cvActions').style.display = (showCur || showFlag) ? '' : 'none';
+  }
+  async function setCurrent(){
+    const it = items[idx]; if (!it || it.current || busy) return;
+    busy = true;
+    const btn = nav.querySelector('.cvCurrent'), old = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try{
+      const r = await authFetch('/compliance/file-update', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: it.id, makeCurrent: 1 }) });
+      if (!r.ok) throw 0;
+      const code = ctx ? ctx.codes[ctx.pos] : it.code, keep = it.id;   // refresh so the ✅ Current badge moves
+      let list = await siteDocList(code);
+      if (ctx) list = list.filter(d => d.type === ctx.type);
+      items = list.filter(x => x && x.url);
+      idx = Math.max(0, items.findIndex(d => d.id === keep));
+      update();
+    }catch(e){ btn.textContent = old; btn.disabled = false; alert("Couldn't set as current — check your connection and try again."); }
+    finally { busy = false; }
+  }
+  async function doFlag(status){
+    if (!ctx || busy) return;
+    await setFlag(ctx.codes[ctx.pos], status || null);   // setFlag saves + re-renders the chart
+    update();
   }
   function openList(list, startIdx){
+    ctx = null;
     items = (list || []).filter(x=>x && x.url);
     if (!items.length) return alert('No certificate on file for this one yet.');
     ensureUI(); nav.style.display = 'block';
     go(Math.max(0, Math.min(startIdx||0, items.length-1)));
   }
-  function hide(){ if (nav) nav.style.display = 'none'; items = []; }
+  function openReview(codes, pos, type){
+    ctx = { codes: (codes||[]).slice(), pos: Math.max(0, pos||0), type: type || 'fiveYear' };
+    if (!ctx.codes.length) return alert('No certificate on file for this one yet.');
+    ensureUI(); nav.style.display = 'block';
+    loadSite();
+  }
+  function hide(){ if (nav) nav.style.display = 'none'; items = []; ctx = null; }
   document.addEventListener('keydown', (e)=>{
     if (!nav || nav.style.display === 'none') return;
     if (e.key === 'ArrowLeft'){ e.preventDefault(); go(idx-1); }
     else if (e.key === 'ArrowRight'){ e.preventDefault(); go(idx+1); }
+    else if (e.key === 'ArrowUp'){ if (ctx){ e.preventDefault(); gotoSite(ctx.pos-1); } }
+    else if (e.key === 'ArrowDown'){ if (ctx){ e.preventDefault(); gotoSite(ctx.pos+1); } }
     else if (e.key === 'Escape'){ hide(); }   // docviewer closes itself on Esc too
   });
-  return { openList, hide };
+  return { openList, openReview, hide };
 })();
 
 /* Build the ordered document list for a store (from /compliance/files): standard
@@ -827,22 +938,31 @@ async function siteDocList(code){
     const arr = [...files[t]].sort((a,b)=> (b.current?1:0)-(a.current?1:0));  // current first
     arr.forEach(f=>{
       const base = f.label || f.filename || 'file';
-      list.push({ id:f.id, code:code, url:f.url, type:t, current:!!f.current,
+      list.push({ id:f.id, code:code, url:f.url, type:t, current:!!f.current, inPack:!!f.inPack, date:f.date||'',
         name: (t==='other') ? base : ((TYPE_LABEL[t]||t) + ' — ' + base) });
     });
   });
   return list;
 }
 
-/* 📄 on a date cell → open that type's current cert, then arrow through the site. */
+/* The on-screen sites (chart order, honouring the current filter/sort) that have a
+   cert of this type — the set the review viewer steps through with Site ‹ › . */
+function reviewSiteCodes(type){
+  return [...document.querySelectorAll('#tableBody tr[data-code]')]
+    .map(tr => tr.dataset.code)
+    .filter(code => complianceIndex[pad4(code)] && complianceIndex[pad4(code)][type]);
+}
+
+/* 📄 on a date cell → open the review viewer on that site, scoped to the cell's
+   type: view the PDF, cycle the site's docs, set one as Current (what the 📄 opens
+   and what goes in the client pack), flag (5-year), and step to the next/previous
+   site — all without leaving the viewer. */
 async function openCert(code, type){
   try{
-    const list = await siteDocList(code);
-    if (!list.length) return alert('No certificate on file for this one yet.');
-    let start = list.findIndex(d=> d.type===type && d.current);
-    if (start < 0) start = list.findIndex(d=> d.type===type);
-    if (start < 0) start = 0;
-    CertViewer.openList(list, start);
+    let codes = reviewSiteCodes(type);
+    let pos = codes.findIndex(c => pad4(c) === pad4(code));
+    if (pos < 0){ codes = [code]; pos = 0; }
+    CertViewer.openReview(codes, pos, type);
   }catch(e){ alert('Could not open the certificate.'); }
 }
 
